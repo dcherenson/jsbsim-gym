@@ -138,3 +138,7 @@ models/
 
 *.gif
 *.mp4
+*.pkl
+*.parquet
+*.npz
+*.png

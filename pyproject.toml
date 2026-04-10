@@ -18,5 +18,16 @@ dependencies = [
     "stable-baselines3>=2.0",
     "imageio",
     "imageio-ffmpeg",
+    "jax[cuda12]>=0.5.3",
+    "pandas>=2.3.3",
+    "pyarrow>=23.0.1",
+    "scikit-learn>=1.7.2",
+    "joblib>=1.5.3",
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
 ]
 

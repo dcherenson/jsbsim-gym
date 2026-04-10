@@ -280,7 +280,7 @@ def wrap_jsbsim(render_mode=None, **kwargs):
 # Register the wrapped environment
 gym.register(
     id="JSBSim-v0",
-    entry_point="jsbsim_gym.jsbsim_gym:wrap_jsbsim",
+    entry_point="jsbsim_gym.env:wrap_jsbsim",
     max_episode_steps=1200
 )
 
