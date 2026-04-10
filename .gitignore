@@ -135,3 +135,6 @@ models/
 
 # Custom File types
 *buffer.zip
+
+*.gif
+*.mp4

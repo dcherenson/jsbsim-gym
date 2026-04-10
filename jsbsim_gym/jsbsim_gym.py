@@ -1,5 +1,5 @@
 import jsbsim
-import gym
+import gymnasium as gym
 
 import numpy as np
 
@@ -86,12 +86,15 @@ class JSBSimEnv(gym.Env):
     given for crashing. It is recommended to use the PositionReward wrapper 
     below to eliminate the problem of sparse rewards.
     """
-    def __init__(self, root='.'):
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
+
+    def __init__(self, root='.', render_mode=None):
         super().__init__()
+        self.render_mode = render_mode
 
         # Set observation and action space format
         self.observation_space = gym.spaces.Box(STATE_LOW, STATE_HIGH, (15,))
-        self.action_space = gym.spaces.Box(np.array([-1,-1,-1,0]), 1, (4,))
+        self.action_space = gym.spaces.Box(np.array([-1,-1,-1,0]), np.array([1,1,1,1]), (4,))
 
         # Initialize JSBSim
         self.simulation = jsbsim.FGFDMExec(root, None)
@@ -138,20 +141,20 @@ class JSBSimEnv(gym.Env):
         # Get the JSBSim state and save to self.state
         self._get_state()
 
-        reward = 0
+        reward = 0.0
         done = False
 
         # Check for collision with ground
         if self.state[2] < 10:
-            reward = -10
+            reward = -10.0
             done = True
 
         # Check if reached goal
         if np.sqrt(np.sum((self.state[:2] - self.goal[:2])**2)) < self.dg and abs(self.state[2] - self.goal[2]) < self.dg:
-            reward = 10
+            reward = 10.0
             done = True
-        
-        return np.hstack([self.state, self.goal]), reward, done, {}
+
+        return np.hstack([self.state, self.goal]).astype(np.float32), float(reward), done, False, {}
     
     def _get_state(self):
         # Gather all state properties from JSBSim
@@ -161,7 +164,7 @@ class JSBSimEnv(gym.Env):
         # Rough conversion to meters. This should be fine near zero lat/long
         self.state[:2] *= RADIUS
     
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         # Rerun initial conditions in JSBSim
         self.simulation.run_ic()
         self.simulation.set_property_value('propulsion/set-running', -1)
@@ -179,7 +182,7 @@ class JSBSimEnv(gym.Env):
         # Get state from JSBSim and save to self.state
         self._get_state()
 
-        return np.hstack([self.state, self.goal])
+        return np.hstack([self.state, self.goal]).astype(np.float32), {}
     
     def render(self, mode='human'):
         scale = 1e-3
@@ -237,7 +240,7 @@ class JSBSimEnv(gym.Env):
 
         self.viewer.render()
 
-        if mode == 'rgb_array':
+        if self.render_mode == 'rgb_array':
             return self.viewer.get_frame()
     
     def close(self):
@@ -257,27 +260,27 @@ class PositionReward(gym.Wrapper):
         self.gain = gain
     
     def step(self, action):
-        obs, reward, done, info = super().step(action)
+        obs, reward, terminated, truncated, info = super().step(action)
         displacement = obs[-3:] - obs[:3]
         distance = np.linalg.norm(displacement)
         reward += self.gain * (self.last_distance - distance)
         self.last_distance = distance
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info
     
-    def reset(self):
-        obs = super().reset()
+    def reset(self, seed=None, options=None):
+        obs, info = super().reset(seed=seed, options=options)
         displacement = obs[-3:] - obs[:3]
         self.last_distance = np.linalg.norm(displacement)
-        return obs
+        return obs, info
 
 # Create entry point to wrapped environment
-def wrap_jsbsim(**kwargs):
-    return PositionReward(JSBSimEnv(**kwargs), 1e-2)
+def wrap_jsbsim(render_mode=None, **kwargs):
+    return PositionReward(JSBSimEnv(render_mode=render_mode, **kwargs), 1e-2)
 
 # Register the wrapped environment
 gym.register(
     id="JSBSim-v0",
-    entry_point=wrap_jsbsim,
+    entry_point="jsbsim_gym.jsbsim_gym:wrap_jsbsim",
     max_episode_steps=1200
 )
 
@@ -285,11 +288,13 @@ gym.register(
 # constant action for 1 simulation second.
 if __name__ == "__main__":
     from time import sleep
-    env = JSBSimEnv()
+    env = JSBSimEnv(render_mode='human')
     env.reset()
     env.render()
     for _ in range(300):
-        env.step(np.array([0.05, -0.2, 0, .5]))
+        obs, reward, terminated, truncated, info = env.step(np.array([0.05, -0.2, 0, .5], dtype=np.float32))
         env.render()
         sleep(1/30)
+        if terminated or truncated:
+            break
     env.close()

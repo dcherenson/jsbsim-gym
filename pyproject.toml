@@ -1,0 +1,22 @@
+[project]
+name = "jsbsim-gym"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy==1.26",
+    "scipy",
+    "matplotlib",
+    "jsbsim",
+    "moderngl",
+    "pygame",
+    "gymnasium",
+    "shimmy",
+    "torch",
+    "tensorboard",
+    "stable-baselines3>=2.0",
+    "imageio",
+    "imageio-ffmpeg",
+]
+
