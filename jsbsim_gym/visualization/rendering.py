@@ -51,6 +51,71 @@ def load_mesh(ctx : mgl.Context, program, filename):
     ebo = ctx.buffer(np.hstack(indices).flatten().astype(np.uint32).tobytes())
     return ctx.simple_vertex_array(program, vbo, 'aPos', 'aNormal', index_buffer=ebo)
 
+
+def load_heightfield_mesh(ctx: mgl.Context, program, x_coords, heights, z_coords, vertex_colors=None):
+    """Create a shaded triangle mesh from a regular heightfield grid.
+
+    Args:
+        x_coords: 1D array of x positions (meters), length = cols.
+        heights: 2D array of heights (meters), shape = (rows, cols).
+        z_coords: 1D array of z positions (meters), length = rows.
+    """
+    x_coords = np.asarray(x_coords, dtype=np.float32)
+    z_coords = np.asarray(z_coords, dtype=np.float32)
+    heights = np.asarray(heights, dtype=np.float32)
+
+    if heights.ndim != 2:
+        raise ValueError(f"Expected 2D heights array, got shape {heights.shape}")
+
+    rows, cols = heights.shape
+    if x_coords.shape[0] != cols:
+        raise ValueError("x_coords length must match heights columns")
+    if z_coords.shape[0] != rows:
+        raise ValueError("z_coords length must match heights rows")
+    if rows < 2 or cols < 2:
+        raise ValueError("Heightfield must have at least 2x2 samples")
+
+    zz, xx = np.meshgrid(z_coords, x_coords, indexing='ij')
+    yy = heights
+
+    # Normal from y = f(x, z): n ~ (-dy/dx, 1, -dy/dz)
+    dy_dz, dy_dx = np.gradient(yy, z_coords, x_coords, edge_order=1)
+    normals = np.stack((-dy_dx, np.ones_like(yy), -dy_dz), axis=-1)
+    normal_norm = np.linalg.norm(normals, axis=2, keepdims=True)
+    normal_norm[normal_norm < 1e-8] = 1.0
+    normals = normals / normal_norm
+
+    positions = np.stack((xx, yy, zz), axis=-1)
+
+    if vertex_colors is not None:
+        vertex_colors = np.asarray(vertex_colors, dtype=np.float32)
+        if vertex_colors.shape != (rows, cols, 3):
+            raise ValueError(
+                f"vertex_colors must have shape {(rows, cols, 3)}, got {vertex_colors.shape}"
+            )
+        vertices = np.concatenate((positions, normals, vertex_colors), axis=-1).reshape(-1, 9).astype(np.float32)
+    else:
+        vertices = np.concatenate((positions, normals), axis=-1).reshape(-1, 6).astype(np.float32)
+
+    indices = np.empty((rows - 1) * (cols - 1) * 6, dtype=np.uint32)
+    k = 0
+    for r in range(rows - 1):
+        row0 = r * cols
+        row1 = (r + 1) * cols
+        for c in range(cols - 1):
+            i0 = row0 + c
+            i1 = i0 + 1
+            i2 = row1 + c
+            i3 = i2 + 1
+            indices[k:k + 6] = (i0, i2, i1, i1, i2, i3)
+            k += 6
+
+    vbo = ctx.buffer(vertices.tobytes())
+    ebo = ctx.buffer(indices.tobytes())
+    if vertex_colors is not None:
+        return ctx.simple_vertex_array(program, vbo, 'aPos', 'aNormal', 'aColor', index_buffer=ebo)
+    return ctx.simple_vertex_array(program, vbo, 'aPos', 'aNormal', index_buffer=ebo)
+
 def perspective(fov, aspect, near, far):
     fov *= np.pi/180
     right = -np.tan(fov/2) * near
@@ -138,7 +203,10 @@ class RenderObject:
     
     def render(self):
         self.vao.program['model'] = tuple(np.hstack(self.transform.matrix.T))
-        self.vao.program['color'] = self.color
+        try:
+            self.vao.program['color'] = self.color
+        except KeyError:
+            pass
         self.vao.render(self.draw_mode)
 
 class Grid(RenderObject):
@@ -176,11 +244,24 @@ class Viewer:
             self.clock = None
         else:
             pg.init()
-            pg.display.gl_set_attribute(pg.GL_CONTEXT_MAJOR_VERSION, 3)
-            pg.display.gl_set_attribute(pg.GL_CONTEXT_MINOR_VERSION, 3)
             pg.display.gl_set_attribute(pg.GL_MULTISAMPLEBUFFERS, 1)
             pg.display.gl_set_attribute(pg.GL_MULTISAMPLESAMPLES, 3)
-            self.display = pg.display.set_mode((width, height), pg.DOUBLEBUF | pg.OPENGL)
+
+            # Prefer OpenGL 3.3 core. Fall back to the platform default if the
+            # explicit version request is rejected.
+            try:
+                pg.display.gl_set_attribute(pg.GL_CONTEXT_MAJOR_VERSION, 3)
+                pg.display.gl_set_attribute(pg.GL_CONTEXT_MINOR_VERSION, 3)
+                pg.display.gl_set_attribute(pg.GL_CONTEXT_PROFILE_MASK, pg.GL_CONTEXT_PROFILE_CORE)
+                pg.display.gl_set_attribute(pg.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, 1)
+                self.display = pg.display.set_mode((width, height), pg.DOUBLEBUF | pg.OPENGL)
+            except pg.error:
+                pg.display.quit()
+                pg.display.init()
+                pg.display.gl_set_attribute(pg.GL_MULTISAMPLEBUFFERS, 1)
+                pg.display.gl_set_attribute(pg.GL_MULTISAMPLESAMPLES, 3)
+                self.display = pg.display.set_mode((width, height), pg.DOUBLEBUF | pg.OPENGL)
+
             self.ctx = mgl.create_context()
             self.clock = pg.time.Clock()
         
@@ -194,6 +275,11 @@ class Viewer:
 
         self.unlit = load_shader(self.ctx, "simple.vert", "unlit.frag")
         self.unlit['projection'] = tuple(np.hstack(self.projection.T))
+
+        self.terrain_prog = load_shader(self.ctx, "terrain.vert", "terrain.frag")
+        self.terrain_prog['projection'] = tuple(np.hstack(self.projection.T))
+        self.terrain_prog['lightDir'] = .6, -.8, 1.0
+
         self.set_view()
 
         self.objects = []
@@ -234,6 +320,7 @@ class Viewer:
             self.transform.rotation = rotation
         self.prog['view'] = tuple(np.hstack(self.transform.inv_matrix.T))
         self.unlit['view'] = tuple(np.hstack(self.transform.inv_matrix.T))
+        self.terrain_prog['view'] = tuple(np.hstack(self.transform.inv_matrix.T))
 
     def get_frame(self):
         data = self.ctx.fbo.read()

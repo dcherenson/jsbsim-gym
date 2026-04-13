@@ -8,6 +8,8 @@ uniform vec3 lightDir;
 out vec4 FragColor;
 
 void main() {
-    float ambient = .2f;
-    FragColor = vec4(color * (ambient + max(dot(normalize(lightDir), -Normal), 0.0f)), 1.0f);
+    float ambient = 0.25f;
+    vec3 n = normalize(Normal);
+    float diffuse = max(dot(normalize(lightDir), -n), 0.0f);
+    FragColor = vec4(color * (ambient + 0.75f * diffuse), 1.0f);
 }

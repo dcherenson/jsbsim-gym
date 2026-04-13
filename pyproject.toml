@@ -3,9 +3,9 @@ name = "jsbsim-gym"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13,<3.14"
 dependencies = [
-    "numpy==1.26",
+    "numpy>=2.1",
     "scipy",
     "matplotlib",
     "jsbsim",
@@ -18,12 +18,19 @@ dependencies = [
     "stable-baselines3>=2.0",
     "imageio",
     "imageio-ffmpeg",
-    "jax[cuda12]>=0.5.3",
     "pandas>=2.3.3",
     "pyarrow>=23.0.1",
     "scikit-learn>=1.7.2",
     "joblib>=1.5.3",
     "pyyaml>=6.0.3",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "jax[cuda12]>=0.5.3",
+]
+mac = [
+    "jax-mps",
 ]
 
 [dependency-groups]
