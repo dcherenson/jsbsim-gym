@@ -2,10 +2,14 @@ from pathlib import Path
 
 import imageio.v3 as iio
 import numpy as np
+from collections import deque
 
 
 FT_PER_DEG_LAT = 364000.0
 M_TO_FT = 3.28084
+
+# Module-level cache to avoid recomputing heavy BFS centerlines for the same DEM and start pixel
+_DEM_CENTERLINE_CACHE = {}
 
 class ProceduralCanyon:
     def __init__(self, base_width=1000.0, amplitude=400.0, freq=0.0005):
@@ -56,6 +60,7 @@ class DEMCanyon:
         min_width_ft=120.0,
         max_width_ft=5000.0,
         fly_direction="south_to_north",
+        dem_start_pixel=None,
     ):
         self.dem_path = Path(dem_path)
         if not self.dem_path.exists():
@@ -179,8 +184,13 @@ class DEMCanyon:
         self.width_samples_ft = widths.astype(np.float32)
         self.left_half_samples_ft = left_halves.astype(np.float32)
         self.right_half_samples_ft = right_halves.astype(np.float32)
+        self.right_half_samples_ft = right_halves.astype(np.float32)
         self.wall_height_samples_ft = wall_heights.astype(np.float32)
         self.grad_samples = np.gradient(self.width_samples_ft, self.row_spacing_ft).astype(np.float32)
+
+        # Trace a robust centerline using BFS flood-fill if start_pixel is provided.
+        # Otherwise, fall back to the simple row-min approach.
+        self._compute_centerline(dem_start_pixel, smoothing_window)
 
         self.total_length_ft = float(self.north_samples_ft[-1]) if rows > 1 else 0.0
         self.anchor_north_ft = 0.0
@@ -221,6 +231,96 @@ class DEMCanyon:
             "elevation_msl_m": elev_msl_m,
             "elevation_msl_ft": elev_msl_m * M_TO_FT,
         }
+
+    def _compute_centerline(self, dem_start_pixel, smoothing_window):
+        """Traces the canyon floor using a constrained BFS flood-fill."""
+        # Use a cache to avoid recomputing if this DEM and start_pixel have been processed
+        cache_key = (self.dem_path, dem_start_pixel)
+        if cache_key in _DEM_CENTERLINE_CACHE:
+            cached_east, cached_heading = _DEM_CENTERLINE_CACHE[cache_key]
+            self.center_east_samples_ft = cached_east.copy()
+            self.centerline_heading_samples_rad = cached_heading.copy()
+            return
+
+        rows, cols = self.rows, self.cols
+        center_east = self.center_east_samples_ft.copy()
+        centerline_heading = np.zeros_like(center_east)
+
+        if dem_start_pixel is not None:
+            try:
+                px, py = dem_start_pixel
+                start_info = self.get_pixel_info(px, py)
+                start_row = int(start_info["row_ordered"])
+                start_col = int(start_info["pixel_x"])
+                
+                finite_dem = np.where(np.isfinite(self.ordered_dem_msl_m), self.ordered_dem_msl_m, np.inf)
+                
+                # Dynamic valley thresholding similar to run_mppi.py
+                row_min = np.nanmin(self.ordered_dem_msl_m, axis=1)
+                row_max = np.nanmax(self.ordered_dem_msl_m, axis=1)
+                row_span = row_max - row_min
+                valley_frac = 0.20
+                row_threshold = row_min + valley_frac * np.maximum(row_span, 1.0)
+                
+                valley_mask = finite_dem <= row_threshold[:, None]
+                
+                visited = np.zeros((rows, cols), dtype=bool)
+                best_col = np.full(rows, -1, dtype=np.int32)
+                best_elev = np.full(rows, np.inf, dtype=np.float64)
+                
+                queue = deque()
+                queue.append((start_row, start_col))
+                visited[start_row, start_col] = True
+                
+                neighbors = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
+                while queue:
+                    r, c = queue.popleft()
+                    elev = float(finite_dem[r, c])
+                    if elev < best_elev[r]:
+                        best_elev[r] = elev
+                        best_col[r] = c
+                    for dr, dc in neighbors:
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < rows and 0 <= nc < cols and not visited[nr, nc] and valley_mask[nr, nc]:
+                            visited[nr, nc] = True
+                            queue.append((nr, nc))
+                
+                # Fill gaps
+                tracked_cols = np.full(rows, start_col, dtype=np.int32)
+                reached_rows = np.where(best_col >= 0)[0]
+                if len(reached_rows) > 0:
+                    tracked_cols[best_col >= 0] = best_col[best_col >= 0]
+                    for r in range(rows):
+                        if best_col[r] < 0:
+                            nearest_idx = np.argmin(np.abs(reached_rows - r))
+                            tracked_cols[r] = tracked_cols[reached_rows[nearest_idx]]
+                
+                center_east = self.east_samples_ft[np.clip(tracked_cols, 0, cols - 1)]
+            except Exception:
+                pass # Fallback to existing center_east_samples_ft (naive row-min)
+
+        # Smooth and compute headings
+        if center_east.size >= 9:
+            smooth_win = min(21, center_east.size // 2 * 2 + 1)
+            smooth_win = max(9, smooth_win)
+            kernel = np.ones(smooth_win, dtype=np.float32) / float(smooth_win)
+            center_east = np.convolve(center_east, kernel, mode="same").astype(np.float32)
+
+            lookahead = min(45, max(12, center_east.size // 18))
+            for i in range(center_east.size):
+                j = min(i + lookahead, center_east.size - 1)
+                if j == i:
+                    centerline_heading[i] = centerline_heading[i-1] if i > 0 else 0.0
+                else:
+                    dn = self.north_samples_ft[j] - self.north_samples_ft[i]
+                    de = center_east[j] - center_east[i]
+                    centerline_heading[i] = np.arctan2(de, dn)
+
+        self.center_east_samples_ft = center_east
+        self.centerline_heading_samples_rad = centerline_heading
+        
+        # Cache the result
+        _DEM_CENTERLINE_CACHE[cache_key] = (center_east.copy(), centerline_heading.copy())
 
     def get_local_from_latlon(self, lat_deg, lon_deg):
         row_ordered, col = self._latlon_to_ordered_row_col(lat_deg, lon_deg)

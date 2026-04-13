@@ -1,4 +1,47 @@
 import numpy as np
+from dataclasses import dataclass, field
+from typing import Tuple
+
+@dataclass
+class SimpleCanyonControllerConfig:
+    target_speed_fps: float = 450.0 * 1.68781
+    target_clearance_ft: float = 250.0
+    lookahead_rows: int = 40
+    terrain_lookahead_ft: Tuple[float, ...] = (600.0, 1200.0, 1800.0, 2400.0)
+    dt: float = 1.0 / 30.0
+    use_dem_centerline: bool = True
+    use_terrain_following: bool = False
+    
+    # Roll / Lateral Guidance Gains
+    roll_lateral_gain: float = -0.0030
+    roll_rate_gain: float = -0.0005
+    roll_heading_gain: float = -0.70
+    roll_p_gain: float = 2.80
+    roll_rate_damping: float = -0.35
+    roll_max_rad: float = 0.75
+    
+    # Pitch / Altitude Guidance Gains
+    pitch_clearance_gain: float = -0.0050
+    pitch_ahead_gain: float = -0.0014
+    pitch_integral_gain: float = -0.000020
+    pitch_rate_gain: float = -0.0030
+    pitch_q_gain: float = -4.2
+    pitch_rate_damping: float = -0.75
+    pitch_min_rad: float = -0.40
+    pitch_max_rad: float = 0.55
+    
+    # Yaw Gains
+    yaw_rate_damping: float = -0.28
+    yaw_beta_gain: float = -0.10
+    yaw_roll_trim: float = 0.08
+    yaw_max_cmd: float = 0.35
+    
+    # Throttle Gains
+    throttle_base: float = 0.26
+    throttle_speed_gain: float = 0.0014
+    throttle_climb_penalty: float = -0.0007
+    throttle_max: float = 0.80
+
 
 
 class SimpleCanyonController:
@@ -8,34 +51,32 @@ class SimpleCanyonController:
     heading error to the canyon centerline, then applies damped attitude/speed
     control to produce [roll, pitch, yaw, throttle] commands.
     """
-
     def __init__(
         self,
         env,
-        target_speed_fps=320.0,
-        target_clearance_ft=700.0,
-        lookahead_rows=40,
-        terrain_lookahead_ft=(600.0, 1200.0, 1800.0, 2400.0),
-        dt=1.0 / 30.0,
-        use_dem_centerline=False,
+        config: SimpleCanyonControllerConfig = None,
     ):
         self.env = env.unwrapped
         self.canyon = self.env.canyon
-        self.target_speed_fps = float(target_speed_fps)
-        self.target_clearance_ft = float(target_clearance_ft)
-        self.lookahead_rows = int(max(1, lookahead_rows))
-        self.terrain_lookahead_ft = tuple(float(x) for x in terrain_lookahead_ft)
-        self.dt = float(max(dt, 1e-3))
-        self.use_dem_centerline = bool(use_dem_centerline)
+        self.config = config if config is not None else SimpleCanyonControllerConfig()
+        
+        self.target_speed_fps = float(self.config.target_speed_fps)
+        self.target_clearance_ft = float(self.config.target_clearance_ft)
+        self.lookahead_rows = int(max(1, self.config.lookahead_rows))
+        self.terrain_lookahead_ft = tuple(float(x) for x in self.config.terrain_lookahead_ft)
+        self.dt = float(max(self.config.dt, 1e-3))
+        self.use_dem_centerline = bool(self.config.use_dem_centerline)
 
         self.wall_margin_ft = float(getattr(self.env, "wall_margin_ft", 0.0))
         self.target_altitude_ft = float(getattr(self.env, "target_altitude_ft", 0.0))
+        self.dem_start_elev_ft = float(getattr(self.env, "dem_start_elev_ft", 0.0))
 
         self._center_east_ft = None
         self._reference_heading_rad = None
         self._altitude_error_integral = 0.0
         self._prev_lateral_error_ft = 0.0
         self._prev_terrain_clearance_ft = self.target_clearance_ft
+        self._step_count = 0
 
         self.last_guidance = {}
 
@@ -81,15 +122,13 @@ class SimpleCanyonController:
             )
         )
 
-        row_spacing_ft = max(float(getattr(self.canyon, "row_spacing_ft", 1.0)), 1.0)
-        row_ordered = local_north_ft / row_spacing_ft
-        center_heading_deg = float(
-            self.canyon.get_centerline_heading_deg(
-                row_ordered=row_ordered,
-                lookahead_rows=self.lookahead_rows,
+        desired_heading_rad = float(
+            np.interp(
+                local_north_ft,
+                self.canyon.north_samples_ft,
+                self.canyon.centerline_heading_samples_rad,
             )
         )
-        desired_heading_rad = np.deg2rad(center_heading_deg)
 
         lateral_error_ft = float(local_east_ft - center_east_ft)
         heading_error_rad = self._wrap_angle_rad(float(state_dict["psi"]) - desired_heading_rad)
@@ -97,7 +136,7 @@ class SimpleCanyonController:
         return {
             "lateral_error_ft": lateral_error_ft,
             "heading_error_rad": heading_error_rad,
-            "centerline_heading_deg": center_heading_deg,
+            "centerline_heading_deg": float(np.rad2deg(desired_heading_rad)),
             "canyon_width_ft": width_ft,
             "local_north_ft": float(local_north_ft),
         }
@@ -137,8 +176,10 @@ class SimpleCanyonController:
             try:
                 lat_deg = float(self.env.simulation.get_property_value("position/lat-gc-deg"))
                 lon_deg = float(self.env.simulation.get_property_value("position/long-gc-deg"))
+                # Adjust state_dict["h"] back to MSL if it's relative to the start floor
+                h_msl = float(state_dict["h"]) + self.dem_start_elev_ft
                 terrain_elev_ft = float(self.canyon.get_elevation_msl_ft_from_latlon(lat_deg, lon_deg))
-                return float(state_dict["h"] - terrain_elev_ft)
+                return float(h_msl - terrain_elev_ft)
             except Exception:
                 pass
         return float(state_dict["h"])
@@ -197,7 +238,8 @@ class SimpleCanyonController:
 
             north_axis = np.asarray(self.canyon.north_samples_ft, dtype=np.float32)
             center_axis = np.asarray(self.canyon.center_east_samples_ft, dtype=np.float32)
-            aircraft_h_msl_ft = float(state_dict["h"])
+            # Use MSL altitude for DEM elevation comparison
+            aircraft_h_msl_ft = float(state_dict["h"]) + self.dem_start_elev_ft
 
             min_clearance_ft = current_clearance_ft
             for delta_north_ft in self.terrain_lookahead_ft:
@@ -240,11 +282,24 @@ class SimpleCanyonController:
         beta = float(state_dict.get("beta", 0.0))
 
         terrain_clearance_ft = self._terrain_clearance_ft(state_dict)
-        clearance_rate_fps = (terrain_clearance_ft - self._prev_terrain_clearance_ft) / self.dt
-        self._prev_terrain_clearance_ft = terrain_clearance_ft
-        clearance_error_ft = float(terrain_clearance_ft - self.target_clearance_ft)
-        min_ahead_clearance_ft = self._predict_min_clearance_ahead_ft(state_dict, guidance)
-        ahead_clearance_error_ft = float(min_ahead_clearance_ft - self.target_clearance_ft)
+        if self.config.use_terrain_following:
+            clearance_rate_fps = (terrain_clearance_ft - self._prev_terrain_clearance_ft) / self.dt
+            self._prev_terrain_clearance_ft = terrain_clearance_ft
+            clearance_error_ft = float(terrain_clearance_ft - self.target_clearance_ft)
+            min_ahead_clearance_ft = self._predict_min_clearance_ahead_ft(state_dict, guidance)
+            ahead_clearance_error_ft = float(min_ahead_clearance_ft - self.target_clearance_ft)
+        else:
+            # Absolute altitude hold (relative to MSL target)
+            current_h_ft = float(state_dict["h"]) + self.dem_start_elev_ft
+            clearance_error_ft = current_h_ft - self.target_altitude_ft
+            clearance_velocity_fps = (terrain_clearance_ft - self._prev_terrain_clearance_ft) / self.dt
+            self._prev_terrain_clearance_ft = terrain_clearance_ft
+            
+            # For absolute hold, we use vertical speed (v_down) but we'll use clearance rate for damping if needed
+            clearance_rate_fps = float(state_dict.get("v_down", 0.0)) * -1.0 
+            ahead_clearance_error_ft = clearance_error_ft # No lookahead in absolute hold
+            min_ahead_clearance_ft = current_h_ft # Not used
+
         self._altitude_error_integral += clearance_error_ft * self.dt
         self._altitude_error_integral = float(np.clip(self._altitude_error_integral, -3000.0, 3000.0))
 
@@ -258,48 +313,51 @@ class SimpleCanyonController:
 
         # Lateral line-following around proxy canyon centerline p_E ~= center_east.
         roll_des_rad = np.clip(
-            -0.0030 * lateral_error_ft
-            -0.0005 * lateral_error_rate_fps
-            -0.70 * heading_error_rad,
-            -0.75,
-            0.75,
+            self.config.roll_lateral_gain * lateral_error_ft
+            + self.config.roll_rate_gain * lateral_error_rate_fps
+            + self.config.roll_heading_gain * heading_error_rad,
+            -self.config.roll_max_rad,
+            self.config.roll_max_rad,
         )
         roll_cmd = np.clip(
-            2.80 * (roll_des_rad - phi) - 0.35 * p_rate,
+            self.config.roll_p_gain * (roll_des_rad - phi) + self.config.roll_rate_damping * p_rate,
             -1.0,
             1.0,
         )
 
         # Altitude hold with terrain lookahead feedforward.
         desired_theta_rad = np.clip(
-            -0.0022 * clearance_error_ft
-            - 0.0014 * ahead_clearance_error_ft
-            - 0.000020 * self._altitude_error_integral
-            - 0.0030 * clearance_rate_fps,
-            -0.10,
-            0.55,
+            self.config.pitch_clearance_gain * clearance_error_ft
+            + self.config.pitch_ahead_gain * ahead_clearance_error_ft
+            + self.config.pitch_integral_gain * self._altitude_error_integral
+            + self.config.pitch_rate_gain * clearance_rate_fps,
+            self.config.pitch_min_rad,
+            self.config.pitch_max_rad,
         )
         theta_error_rad = desired_theta_rad - theta
+        
         pitch_cmd = np.clip(
-            -4.2 * theta_error_rad + 0.75 * q_rate,
+            self.config.pitch_q_gain * theta_error_rad + self.config.pitch_rate_damping * q_rate,
             -1.0,
             1.0,
         )
 
         # Simple yaw damping with a small heading-error trim.
         yaw_cmd = np.clip(
-            -0.28 * r_rate - 0.10 * beta + 0.08 * (roll_des_rad - phi),
-            -0.35,
-            0.35,
+            self.config.yaw_rate_damping * r_rate 
+            + self.config.yaw_beta_gain * beta 
+            + self.config.yaw_roll_trim * (roll_des_rad - phi),
+            -self.config.yaw_max_cmd,
+            self.config.yaw_max_cmd,
         )
 
         # Speed hold around a cruise trim throttle.
         throttle_cmd = np.clip(
-            0.26
-            + 0.0014 * (self.target_speed_fps - speed_fps)
-            - 0.0007 * np.clip(-ahead_clearance_error_ft, 0.0, None),
+            self.config.throttle_base
+            + self.config.throttle_speed_gain * (self.target_speed_fps - speed_fps)
+            + self.config.throttle_climb_penalty * np.clip(-ahead_clearance_error_ft, 0.0, None),
             0.0,
-            0.80,
+            self.config.throttle_max,
         )
 
         margin_ft = usable_half_ft - abs(lateral_error_ft)
@@ -323,4 +381,21 @@ class SimpleCanyonController:
             "throttle_cmd": float(throttle_cmd),
         }
 
+        self._step_count += 1
         return np.array([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd], dtype=np.float32)
+    def get_canyon_width_ft(self, p_N):
+        width, _ = self.canyon.get_geometry(p_N)
+        return float(width)
+
+    def get_lateral_error_ft(self, p_N, p_E):
+        lat_deg = float(self.env.simulation.get_property_value("position/lat-gc-deg"))
+        lon_deg = float(self.env.simulation.get_property_value("position/long-gc-deg"))
+        local_north_ft, local_east_ft = self.canyon.get_local_from_latlon(lat_deg, lon_deg)
+        center_east_ft = float(
+            np.interp(
+                local_north_ft,
+                self.canyon.north_samples_ft,
+                self.canyon.center_east_samples_ft,
+            )
+        )
+        return float(local_east_ft - center_east_ft)

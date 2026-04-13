@@ -37,6 +37,7 @@ class JaxMPPIConfig:
     heading_alignment_gain: float = 0.45
     heading_alignment_scale_rad: float = 0.70
     alive_bonus: float = 0.15
+    target_speed_fps: float = 800.0
     target_altitude_ft: float = 250.0
     min_altitude_ft: float = -500.0
     max_altitude_ft: float = 3000.0
@@ -47,7 +48,7 @@ class JaxMPPIConfig:
     altitude_violation_penalty: float = 8.0
     early_termination_penalty_gain: float = 80.0
     time_limit_bonus: float = 25.0
-    max_step_reward_abs: float = 5.0
+    max_step_reward_abs: float = 15.0
     angular_rate_penalty_gain: float = 0.45
     angular_rate_threshold_deg_s: float = 45.0
     action_diff_weight: float = 2.5
@@ -56,6 +57,73 @@ class JaxMPPIConfig:
     debug_num_trajectories: int = 96
     seed: int = 42
 
+    def tree_flatten(self):
+        # Numeric values that we want to be dynamic (leaves)
+        # We include floats and tuples of floats (which JAX will flatten further)
+        children = (
+            self.lambda_, self.gamma_, self.progress_gain, self.speed_gain,
+            self.low_altitude_gain, self.centerline_gain, self.offcenter_penalty_gain,
+            self.heading_alignment_gain, self.heading_alignment_scale_rad,
+            self.alive_bonus, self.target_speed_fps, self.target_altitude_ft, self.min_altitude_ft,
+            self.max_altitude_ft, self.terrain_collision_height_ft, self.wall_margin_ft,
+            self.terrain_crash_penalty, self.wall_crash_penalty, self.altitude_violation_penalty,
+            self.early_termination_penalty_gain, self.time_limit_bonus, self.max_step_reward_abs,
+            self.angular_rate_penalty_gain, self.angular_rate_threshold_deg_s,
+            self.action_diff_weight, self.action_l2_weight,
+            # Tuples are children too
+            self.action_noise_std, self.action_low, self.action_high,
+        )
+        # Structural values that require JIT recompile (aux_data)
+        aux_data = (
+            self.horizon, self.num_samples, self.optimization_steps,
+            self.replan_interval, self.debug_render_plans,
+            self.debug_num_trajectories, self.seed
+        )
+        return (children, aux_data)
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        # Reconstruct the dataclass. Order must match tree_flatten.
+        (
+            lambda_, gamma_, progress_gain, speed_gain,
+            low_altitude_gain, centerline_gain, offcenter_penalty_gain,
+            heading_alignment_gain, heading_alignment_scale_rad,
+            alive_bonus, target_speed_fps, target_altitude_ft, min_altitude_ft,
+            max_altitude_ft, terrain_collision_height_ft, wall_margin_ft,
+            terrain_crash_penalty, wall_crash_penalty, altitude_violation_penalty,
+            early_termination_penalty_gain, time_limit_bonus, max_step_reward_abs,
+            angular_rate_penalty_gain, angular_rate_threshold_deg_s,
+            action_diff_weight, action_l2_weight,
+            action_noise_std, action_low, action_high,
+        ) = children
+        (
+            horizon, num_samples, optimization_steps,
+            replan_interval, debug_render_plans,
+            debug_num_trajectories, seed
+        ) = aux_data
+        
+        return cls(
+            horizon=horizon, num_samples=num_samples, optimization_steps=optimization_steps,
+            replan_interval=replan_interval, lambda_=lambda_, gamma_=gamma_,
+            action_noise_std=action_noise_std, action_low=action_low, action_high=action_high,
+            progress_gain=progress_gain, speed_gain=speed_gain, low_altitude_gain=low_altitude_gain,
+            centerline_gain=centerline_gain, offcenter_penalty_gain=offcenter_penalty_gain,
+            heading_alignment_gain=heading_alignment_gain, heading_alignment_scale_rad=heading_alignment_scale_rad,
+            alive_bonus=alive_bonus, target_speed_fps=target_speed_fps, target_altitude_ft=target_altitude_ft,
+            min_altitude_ft=min_altitude_ft, max_altitude_ft=max_altitude_ft,
+            terrain_collision_height_ft=terrain_collision_height_ft, wall_margin_ft=wall_margin_ft,
+            terrain_crash_penalty=terrain_crash_penalty, wall_crash_penalty=wall_crash_penalty,
+            altitude_violation_penalty=altitude_violation_penalty,
+            early_termination_penalty_gain=early_termination_penalty_gain,
+            time_limit_bonus=time_limit_bonus, max_step_reward_abs=max_step_reward_abs,
+            angular_rate_penalty_gain=angular_rate_penalty_gain,
+            angular_rate_threshold_deg_s=angular_rate_threshold_deg_s,
+            action_diff_weight=action_diff_weight, action_l2_weight=action_l2_weight,
+            debug_render_plans=debug_render_plans, debug_num_trajectories=debug_num_trajectories,
+            seed=seed
+        )
+
+jax.tree_util.register_pytree_node_class(JaxMPPIConfig)
 
 @dataclass(frozen=True)
 class JaxSmoothMPPIConfig(JaxMPPIConfig):
@@ -64,6 +132,45 @@ class JaxSmoothMPPIConfig(JaxMPPIConfig):
     noise_smoothing_kernel: tuple = (0.10, 0.20, 0.40, 0.20, 0.10)
     smoothness_penalty_weight: float = 0.35
     seed: int = 101
+
+    def tree_flatten(self):
+        # Flatten the base class first
+        base_children, base_aux = super().tree_flatten()
+        
+        # Add smooth-specific children (dynamic)
+        smooth_children = base_children + (
+            self.delta_noise_std, self.delta_action_bounds,
+            self.noise_smoothing_kernel, self.smoothness_penalty_weight
+        )
+        # Add smooth-specific aux data (static)
+        # We already have seed in base_aux, but smooth has its own default seed.
+        # For simplicity, we'll just keep the base_aux.
+        return (smooth_children, base_aux)
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        # The last 4 children are smooth-specific
+        smoothness_penalty_weight = children[-1]
+        noise_smoothing_kernel = children[-2]
+        delta_action_bounds = children[-3]
+        delta_noise_std = children[-4]
+        
+        base_children = children[:-4]
+        # Reconstruct base part using its logic via super() is tricky with dataclasses,
+        # so we just initialize ourself directly.
+        
+        obj = JaxMPPIConfig.tree_unflatten(aux_data, base_children)
+        # Now create the smooth version using the unflattened base fields
+        import dataclasses
+        return cls(
+            **{f.name: getattr(obj, f.name) for f in dataclasses.fields(JaxMPPIConfig)},
+            delta_noise_std=delta_noise_std,
+            delta_action_bounds=delta_action_bounds,
+            noise_smoothing_kernel=noise_smoothing_kernel,
+            smoothness_penalty_weight=smoothness_penalty_weight
+        )
+
+jax.tree_util.register_pytree_node_class(JaxSmoothMPPIConfig)
 
 def load_nominal_weights():
     # Load from the npz file
@@ -333,7 +440,9 @@ def single_rollout_cost(
         progress_term = config.progress_gain * (0.8 * progress_local + 0.2 * progress_global)
 
         speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
-        speed_term = config.speed_gain * jnp.clip((speed_fps - 350.0) / 450.0, -0.5, 1.5)
+        # Penalty for deviation from target speed
+        speed_error_norm = (speed_fps - config.target_speed_fps) / 100.0
+        speed_term = -config.speed_gain * (speed_error_norm * speed_error_norm)
 
         clearance_error = jnp.abs(h - config.target_altitude_ft)
         low_altitude_term = config.low_altitude_gain * (
@@ -342,8 +451,8 @@ def single_rollout_cost(
 
         lateral_error_ft = p_E - effective_center_east_ft
         lateral_norm = jnp.abs(lateral_error_ft) / usable_half_ft
-        centerline_term = config.centerline_gain * (1.0 - jnp.clip(lateral_norm / 1.5, 0.0, 1.0))
-        offcenter_term = -config.offcenter_penalty_gain * jnp.clip(lateral_norm - 1.5, 0.0, 2.0)
+        centerline_term = config.centerline_gain * (1.0 - jnp.clip(lateral_norm, 0.0, 1.0))
+        offcenter_term = -config.offcenter_penalty_gain * jnp.clip(lateral_norm - 0.5, 0.0, 2.0)
 
         heading_error_rad = wrap_angle_rad(psi - effective_heading_rad)
         heading_term = config.heading_alignment_gain * (
@@ -436,7 +545,7 @@ def single_rollout_cost(
     )
     return carry[-1]
 
-@functools.partial(jax.jit, static_argnames=['config'])
+@jax.jit
 def mppi_optimize_step(
     initial_state,
     base_action_plan,
@@ -489,7 +598,7 @@ def mppi_optimize_step(
     return optimized_plan, total_costs, state_seq_best(initial_state, optimized_plan, W, B), candidate_actions
 
 
-@functools.partial(jax.jit, static_argnames=['config'])
+@jax.jit
 def smooth_mppi_optimize_step(
     initial_state,
     base_action_plan,

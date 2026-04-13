@@ -72,6 +72,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         wind_sigma=4.0,
         canyon_span_ft=14000.0,
         canyon_segment_spacing_ft=120.0,
+        entry_speed_kts=450.0,
     ):
         super().__init__(render_mode=render_mode)
 
@@ -101,6 +102,7 @@ class CanyonFlightEnv(DataCollectionEnv):
                 min_width_ft=dem_min_width_ft,
                 max_width_ft=dem_max_width_ft,
                 fly_direction=dem_fly_direction,
+                dem_start_pixel=dem_start_pixel,
             )
         else:
             raise ValueError("canyon_mode must be 'procedural' or 'dem'")
@@ -164,6 +166,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         else:
             self.canyon_span_ft = canyon_span_ft
         self.canyon_segment_spacing_ft = canyon_segment_spacing_ft
+        self.entry_speed_fps = entry_speed_kts * 1.68781
         self.canyon_segment_count = max(int(self.canyon_span_ft / canyon_segment_spacing_ft) + 1, 8)
 
         self.step_count = 0
@@ -259,6 +262,7 @@ class CanyonFlightEnv(DataCollectionEnv):
             if self.dem_start_heading_deg is not None:
                 self.simulation.set_property_value('ic/psi-true-deg', float(self.dem_start_heading_deg))
         self.simulation.set_property_value('ic/h-sl-ft', float(self.entry_altitude_ft))
+        self.simulation.set_property_value('ic/vt-fps', float(self.entry_speed_fps))
         super().reset(seed=seed, options=options)
         self.step_count = 0
         self.camera_pos = None
@@ -350,7 +354,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         return self._build_obs(state_next), float(reward), terminated, truncated, info
 
     def _initialize_viewer(self, scale):
-        self.viewer = Viewer(1280, 720)
+        self.viewer = Viewer(1280, 720, headless=(self.render_mode == "rgb_array"))
 
         f16_mesh = load_mesh(self.viewer.ctx, self.viewer.prog, "f16.obj")
         self.f16 = RenderObject(f16_mesh)

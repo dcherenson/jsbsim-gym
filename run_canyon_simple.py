@@ -6,7 +6,10 @@ import numpy as np
 
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
 from jsbsim_gym.canyon_artifacts import CanyonRunRecorder
-from jsbsim_gym.simple_controller import SimpleCanyonController
+from jsbsim_gym.simple_controller import (
+    SimpleCanyonController,
+    SimpleCanyonControllerConfig,
+)
 
 DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)
@@ -87,12 +90,16 @@ def main():
 
     state = env.unwrapped.get_full_state_dict()
 
-    controller = SimpleCanyonController(
-        env=env,
+    config = SimpleCanyonControllerConfig(
         target_speed_fps=300.0,
         target_clearance_ft=1100.0,
         lookahead_rows=40,
         use_dem_centerline=True,
+        use_terrain_following=True,
+    )
+    controller = SimpleCanyonController(
+        env=env,
+        config=config,
     )
     controller.reset(state)
 

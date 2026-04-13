@@ -238,8 +238,17 @@ class Viewer:
         self.height = height
         self.fps = fps
 
+        self.headless = headless
         if headless:
+            # Prevent Pygame from trying to create a window/icon on macOS/Linux
+            os.environ["SDL_VIDEODRIVER"] = "dummy"
+            pg.init()
             self.ctx = mgl.create_standalone_context()
+            self.fbo = self.ctx.framebuffer(
+                color_attachments=[self.ctx.texture((width, height), 3)],
+                depth_attachment=self.ctx.depth_renderbuffer((width, height))
+            )
+            self.fbo.use()
             self.display = None
             self.clock = None
         else:
@@ -263,6 +272,7 @@ class Viewer:
                 self.display = pg.display.set_mode((width, height), pg.DOUBLEBUF | pg.OPENGL)
 
             self.ctx = mgl.create_context()
+            self.fbo = self.ctx.screen
             self.clock = pg.time.Clock()
         
         self.ctx.enable(mgl.DEPTH_TEST)
@@ -323,17 +333,20 @@ class Viewer:
         self.terrain_prog['view'] = tuple(np.hstack(self.transform.inv_matrix.T))
 
     def get_frame(self):
-        data = self.ctx.fbo.read()
+        data = self.fbo.read()
         return np.array(bytearray(data)).reshape(self.height, self.width,3)[-1::-1,:,:]
     
     def render(self):
-        pg.event.pump()
-        self.ctx.clear(0.5, 0.5, 0.5, 1.0)
+        if not self.headless:
+            pg.event.pump()
+        self.fbo.use()
+        self.fbo.clear(0.5, 0.5, 0.5, 1.0)
 
         for obj in self.objects:
             obj.render()
 
-        pg.display.flip()
+        if not self.headless:
+            pg.display.flip()
     
     def close(self):
         pg.quit()
