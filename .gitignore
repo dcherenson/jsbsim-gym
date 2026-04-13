@@ -143,3 +143,5 @@ models/
 *.npz
 *.png
 *.DS_Store
+uncertain_racecar_gym/
+*.csv

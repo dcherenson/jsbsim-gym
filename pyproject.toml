@@ -35,6 +35,7 @@ mac = [
 
 [dependency-groups]
 dev = [
+    "optuna>=4.8.0",
     "pytest>=9.0.3",
 ]
 

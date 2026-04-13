@@ -4,40 +4,113 @@ import numpy as np
 import functools
 from dataclasses import dataclass
 
+
+MPPI_FEATURE_NAMES = (
+    "alpha",
+    "beta",
+    "p",
+    "q",
+    "r",
+    "delta_e",
+    "delta_a",
+    "delta_r",
+    "delta_t",
+)
+
 @dataclass(frozen=True)
 class JaxMPPIConfig:
     horizon: int = 40
     num_samples: int = 1024
     optimization_steps: int = 2
-    lambda_: float = 1.0
-    action_noise_std: tuple = (0.2, 0.2, 0.2, 0.1) # roll, pitch, yaw, throttle
+    replan_interval: int = 1
+    lambda_: float = 2.0
+    gamma_: float = 0.015
+    action_noise_std: tuple = (0.16, 0.14, 0.12, 0.08)  # roll, pitch, yaw, throttle
     action_low: tuple = (-1.0, -1.0, -1.0, 0.0)
     action_high: tuple = (1.0, 1.0, 1.0, 1.0)
-    crash_penalty: float = 1e5
-    progress_weight: float = 1.0
-    center_weight: float = 0.5
-    action_diff_weight: float = 5.0
-    action_l2_weight: float = 1.0
+    # SAC-style shaping gains used by the MPPI surrogate objective.
+    progress_gain: float = 0.70
+    speed_gain: float = 0.35
+    low_altitude_gain: float = 0.45
+    centerline_gain: float = 0.60
+    offcenter_penalty_gain: float = 0.30
+    heading_alignment_gain: float = 0.45
+    heading_alignment_scale_rad: float = 0.70
+    alive_bonus: float = 0.15
+    target_altitude_ft: float = 250.0
+    min_altitude_ft: float = -500.0
+    max_altitude_ft: float = 3000.0
+    terrain_collision_height_ft: float = 60.0
+    wall_margin_ft: float = 30.0
+    terrain_crash_penalty: float = 25.0
+    wall_crash_penalty: float = 18.0
+    altitude_violation_penalty: float = 8.0
+    early_termination_penalty_gain: float = 80.0
+    time_limit_bonus: float = 25.0
+    max_step_reward_abs: float = 5.0
+    angular_rate_penalty_gain: float = 0.45
+    angular_rate_threshold_deg_s: float = 45.0
+    action_diff_weight: float = 2.5
+    action_l2_weight: float = 0.4
+    debug_render_plans: bool = True
+    debug_num_trajectories: int = 96
+    seed: int = 42
+
+
+@dataclass(frozen=True)
+class JaxSmoothMPPIConfig(JaxMPPIConfig):
+    delta_noise_std: tuple = (0.08, 0.12, 0.08, 0.06)
+    delta_action_bounds: tuple = (0.18, 0.26, 0.14, 0.10)
+    noise_smoothing_kernel: tuple = (0.10, 0.20, 0.40, 0.20, 0.10)
+    smoothness_penalty_weight: float = 0.35
+    seed: int = 101
 
 def load_nominal_weights():
     # Load from the npz file
     import os
     path = os.path.join(os.path.dirname(__file__), "mppi_nominal_weights.npz")
-    data = np.load(path)
-    return jnp.asarray(data['W']), jnp.asarray(data['B'])
+    data = np.load(path, allow_pickle=True)
+    W = np.asarray(data['W'])
+    B = np.asarray(data['B'])
+
+    feature_names = tuple(MPPI_FEATURE_NAMES)
+    if "feature_names" in data:
+        feature_names = tuple(str(x) for x in data["feature_names"])
+
+    if feature_names != MPPI_FEATURE_NAMES:
+        raise ValueError(
+            "mppi_nominal_weights.npz feature set mismatch. "
+            "Expected throttle-inclusive features "
+            f"{MPPI_FEATURE_NAMES}, got {feature_names}. "
+            "Regenerate weights via: uv run python extract_nominal_weights.py"
+        )
+
+    n = len(MPPI_FEATURE_NAMES)
+    expected_rows = 1 + n + (n * (n + 1)) // 2
+    if W.shape[0] != expected_rows:
+        raise ValueError(
+            "mppi_nominal_weights.npz has incompatible polynomial size. "
+            f"Expected W rows={expected_rows}, got {W.shape[0]}. "
+            "Regenerate weights via: uv run python extract_nominal_weights.py"
+        )
+    if B.shape[0] != 6:
+        raise ValueError(f"Expected 6 output channels in B, got shape {B.shape}")
+
+    return jnp.asarray(W), jnp.asarray(B)
 
 def expand_poly(x):
-    # x shape (8,)
+    # x shape (n_features,)
     # The polynomials features order: 1, x, x^2 + cross terms
     # Using the same order as sklearn PolynomialFeatures(degree=2)
-    # Features: alpha, beta, p, q, r, delta_e, delta_a, delta_r
+    # Features: alpha, beta, p, q, r, delta_e, delta_a, delta_r, delta_t
     ones = jnp.ones((1,))
-    
+
+    n_features = int(x.shape[0])
     quad = []
-    for i in range(8):
-        for j in range(i, 8):
+    for i in range(n_features):
+        for j in range(i, n_features):
             quad.append(x[i] * x[j])
-            
+
     quad_stack = jnp.stack(quad)
     return jnp.concatenate([ones, x, quad_stack])
 
@@ -47,6 +120,34 @@ def canyon_width(p_N):
     W_freq = 15000.0
     return W_base + W_amp * jnp.sin(2.0 * jnp.pi * p_N / W_freq)
 
+
+def canyon_width_from_profile(p_N, north_samples_ft, width_samples_ft):
+    return jnp.interp(p_N, north_samples_ft, width_samples_ft)
+
+
+def canyon_center_east_from_profile(p_N, north_samples_ft, center_east_samples_ft):
+    return jnp.interp(p_N, north_samples_ft, center_east_samples_ft)
+
+
+def canyon_centerline_heading_from_profile(p_N, north_samples_ft, heading_samples_rad):
+    return jnp.interp(p_N, north_samples_ft, heading_samples_rad)
+
+
+def wrap_angle_rad(angle_rad):
+    return jnp.arctan2(jnp.sin(angle_rad), jnp.cos(angle_rad))
+
+
+def clip_action(action, low, high):
+    return jnp.clip(action, low, high)
+
+
+def softmax_weights(costs, temperature):
+    minimum = jnp.min(costs)
+    logits = -(costs - minimum) / jnp.maximum(temperature, 1e-6)
+    logits = logits - jnp.max(logits)
+    weights = jnp.exp(logits)
+    return weights / (jnp.sum(weights) + 1e-8)
+
 def f16_kinematics_step(state, action, W, B):
     # State: p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi
     p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi = state
@@ -55,16 +156,14 @@ def f16_kinematics_step(state, action, W, B):
     delta_a = action[0]
     delta_e = action[1]
     delta_r = action[2]
-    # action[3] is throttle, ignored by aerodynamic forces model directly, 
-    # but we will just pass it, wait, nominal model features are only 8:
-    # alpha, beta, p, q, r, delta_e, delta_a, delta_r
+    delta_t = action[3]
     
     alpha = jnp.arctan2(w, jnp.maximum(u, 1.0))
     V_sq = u*u + v*v + w*w
     V = jnp.sqrt(jnp.maximum(V_sq, 1.0))
     beta = jnp.arcsin(jnp.clip(v / V, -1.0, 1.0))
     
-    features = jnp.array([alpha, beta, p, q, r, delta_e, delta_a, delta_r])
+    features = jnp.array([alpha, beta, p, q, r, delta_e, delta_a, delta_r, delta_t])
     phi_vec = expand_poly(features)
     
     preds = jnp.dot(phi_vec, W) + B
@@ -72,16 +171,6 @@ def f16_kinematics_step(state, action, W, B):
     
     G = 32.174
     u_dot = X + r*v - q*w - G*jnp.sin(theta)
-    # Thrust approximation! Thrust pushes u forward. 
-    # The nominal model was trained on data with throttle! 
-    # Wait, the nominal features didn't include throttle! 
-    # That means the Ridge model swallowed thrust into the bias or it wasn't varying.
-    # In DataCollectionEnv persistent excitation, throttle was fixed or random? 
-    # We will add an artificial thrust force loosely, or just rely on the baseline.
-    # Let's add simple artificial thrust to u_dot proportional to throttle just in case.
-    # Max thrust approx 30000 lbf, mass approx 20000 lb, so ~1.5 Gs -> ~ 50 fps2
-    throttle = action[3]
-    u_dot += throttle * 20.0  # basic push
     
     v_dot = Y + p*w - r*u + G*jnp.sin(phi)*jnp.cos(theta)
     w_dot = Z + q*u - p*v + G*jnp.cos(phi)*jnp.cos(theta)
@@ -148,63 +237,505 @@ def rollout_trajectory(initial_state, action_seq, W, B):
     _, state_seq = jax.lax.scan(step_fn, initial_state, action_seq)
     return state_seq
 
-def compute_cost(state_seq, action_seq, config: JaxMPPIConfig):
-    p_N = state_seq[:, 0]
-    p_E = state_seq[:, 1]
-    h = state_seq[:, 2]
-    
-    W_c = jax.vmap(canyon_width)(p_N)
-    
-    oob = (jnp.abs(p_E) > (W_c / 2.0 - 25.0)) | (h < 50.0) | (h > 15000.0)
-    collision_penalty = jnp.sum(oob * config.crash_penalty)
-    
-    progress_cost = -jnp.sum(p_N) * config.progress_weight
-    center_cost = jnp.sum(jnp.square(p_E)) * config.center_weight
-    
-    action_diff = jnp.sum(jnp.square(action_seq[1:] - action_seq[:-1])) * config.action_diff_weight
-    action_l2 = jnp.sum(jnp.square(action_seq)) * config.action_l2_weight
-    
-    return collision_penalty + progress_cost + center_cost + action_diff + action_l2
+
+@jax.jit
+def rollout_trajectory_batch(initial_state, action_batch, W, B):
+    return jax.vmap(lambda action_seq: rollout_trajectory(initial_state, action_seq, W, B))(action_batch)
+
+
+def smooth_noise_batch(noise, kernel_weights):
+    kernel = jnp.asarray(kernel_weights, dtype=jnp.float32)
+    kernel = kernel / jnp.maximum(jnp.sum(kernel), 1e-6)
+    pad = int(kernel.shape[0] // 2)
+
+    padded = jnp.pad(noise, ((0, 0), (pad, pad), (0, 0)), mode="edge")
+    kernel_conv = kernel[:, None, None]
+
+    # Flatten sample and action channels so one 1D conv smooths each trajectory channel.
+    flat = jnp.transpose(padded, (0, 2, 1)).reshape((-1, padded.shape[1], 1))
+    smoothed = jax.lax.conv_general_dilated(
+        flat,
+        kernel_conv,
+        window_strides=(1,),
+        padding="VALID",
+        dimension_numbers=("NWC", "WIO", "NWC"),
+    )
+    smoothed = smoothed.reshape((noise.shape[0], noise.shape[2], noise.shape[1]))
+    return jnp.transpose(smoothed, (0, 2, 1))
+
+def single_rollout_cost(
+    initial_state,
+    action_seq,
+    initial_prev_action,
+    W,
+    B,
+    canyon_north_samples_ft,
+    canyon_width_samples_ft,
+    canyon_center_east_samples_ft,
+    canyon_heading_samples_rad,
+    config: JaxMPPIConfig,
+):
+    horizon_f = jnp.maximum(float(config.horizon), 1.0)
+
+    def body(carry, inputs):
+        state, active, prev_action, prev_dist_start_ft, cumulative_cost = carry
+        action, step_idx = inputs
+
+        low = jnp.asarray(config.action_low, dtype=jnp.float32)
+        high = jnp.asarray(config.action_high, dtype=jnp.float32)
+        bounded_action = clip_action(action, low, high)
+        next_state_raw = f16_kinematics_step(state, bounded_action, W, B)
+
+        p_N = next_state_raw[0]
+        p_E = next_state_raw[1]
+        h = next_state_raw[2]
+        u = next_state_raw[3]
+        v = next_state_raw[4]
+        w = next_state_raw[5]
+        p_rate = next_state_raw[6]
+        q_rate = next_state_raw[7]
+        r_rate = next_state_raw[8]
+        psi = next_state_raw[11]
+
+        width_ft = canyon_width_from_profile(p_N, canyon_north_samples_ft, canyon_width_samples_ft)
+        center_east_ft = canyon_center_east_from_profile(
+            p_N,
+            canyon_north_samples_ft,
+            canyon_center_east_samples_ft,
+        )
+        centerline_heading_rad = canyon_centerline_heading_from_profile(
+            p_N,
+            canyon_north_samples_ft,
+            canyon_heading_samples_rad,
+        )
+        half_width_ft = 0.5 * width_ft
+        usable_half_ft = jnp.maximum(half_width_ft - config.wall_margin_ft, 1.0)
+
+        raw_lateral_error_ft = p_E - center_east_ft
+        invalid_centerline = jnp.abs(raw_lateral_error_ft) > 4.0 * jnp.maximum(width_ft, 1.0)
+        effective_center_east_ft = jnp.where(invalid_centerline, initial_state[1], center_east_ft)
+        effective_heading_rad = jnp.where(invalid_centerline, psi, centerline_heading_rad)
+
+        dn_ft = p_N - state[0]
+        de_ft = p_E - state[1]
+        progress_ft = dn_ft * jnp.cos(effective_heading_rad) + de_ft * jnp.sin(effective_heading_rad)
+        dist_start_ft = jnp.sqrt(
+            jnp.maximum(
+                (p_N - initial_state[0]) * (p_N - initial_state[0])
+                + (p_E - initial_state[1]) * (p_E - initial_state[1]),
+                0.0,
+            )
+        )
+        progress_from_start_ft = dist_start_ft - prev_dist_start_ft
+
+        progress_local = jnp.clip(progress_ft / 25.0, -2.0, 3.0)
+        progress_global = jnp.clip(progress_from_start_ft / 25.0, -2.0, 2.0)
+        progress_term = config.progress_gain * (0.8 * progress_local + 0.2 * progress_global)
+
+        speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
+        speed_term = config.speed_gain * jnp.clip((speed_fps - 350.0) / 450.0, -0.5, 1.5)
+
+        clearance_error = jnp.abs(h - config.target_altitude_ft)
+        low_altitude_term = config.low_altitude_gain * (
+            1.0 - jnp.clip(clearance_error / jnp.maximum(config.target_altitude_ft, 1.0), 0.0, 2.0)
+        )
+
+        lateral_error_ft = p_E - effective_center_east_ft
+        lateral_norm = jnp.abs(lateral_error_ft) / usable_half_ft
+        centerline_term = config.centerline_gain * (1.0 - jnp.clip(lateral_norm / 1.5, 0.0, 1.0))
+        offcenter_term = -config.offcenter_penalty_gain * jnp.clip(lateral_norm - 1.5, 0.0, 2.0)
+
+        heading_error_rad = wrap_angle_rad(psi - effective_heading_rad)
+        heading_term = config.heading_alignment_gain * (
+            1.0
+            - jnp.clip(
+                jnp.abs(heading_error_rad) / jnp.maximum(config.heading_alignment_scale_rad, 1e-3),
+                0.0,
+                2.0,
+            )
+        )
+
+        rate_mag_rad_s = jnp.sqrt(jnp.maximum(p_rate * p_rate + q_rate * q_rate + r_rate * r_rate, 0.0))
+        rate_mag_deg_s = jnp.degrees(rate_mag_rad_s)
+        angular_rate_term = -config.angular_rate_penalty_gain * jnp.clip(
+            (rate_mag_deg_s - config.angular_rate_threshold_deg_s)
+            / jnp.maximum(config.angular_rate_threshold_deg_s, 1.0),
+            0.0,
+            3.0,
+        )
+
+        stage_reward = (
+            config.alive_bonus
+            + progress_term
+            + speed_term
+            + low_altitude_term
+            + centerline_term
+            + offcenter_term
+            + heading_term
+            + angular_rate_term
+        )
+        stage_reward = jnp.clip(stage_reward, -config.max_step_reward_abs, config.max_step_reward_abs)
+
+        terrain_collision = h <= config.terrain_collision_height_ft
+        out_of_canyon = jnp.abs(lateral_error_ft) > usable_half_ft
+        out_of_altitude = (h < config.min_altitude_ft) | (h > config.max_altitude_ft)
+        terminated_now = terrain_collision | out_of_canyon | out_of_altitude
+
+        remaining_frac = (horizon_f - (step_idx.astype(jnp.float32) + 1.0)) / horizon_f
+        early_penalty = config.early_termination_penalty_gain * jnp.clip(remaining_frac, 0.0, 1.0)
+        termination_penalty = jnp.where(
+            terrain_collision,
+            config.terrain_crash_penalty + early_penalty,
+            jnp.where(
+                out_of_canyon,
+                config.wall_crash_penalty + 0.75 * early_penalty,
+                jnp.where(
+                    out_of_altitude,
+                    config.altitude_violation_penalty + 0.5 * early_penalty,
+                    0.0,
+                ),
+            ),
+        )
+
+        survived_to_end = jnp.logical_and(step_idx == (config.horizon - 1), jnp.logical_not(terminated_now))
+        stage_reward = stage_reward - termination_penalty + jnp.where(survived_to_end, config.time_limit_bonus, 0.0)
+
+        action_cost = (
+            config.action_l2_weight * jnp.sum(jnp.square(bounded_action))
+            + config.action_diff_weight * jnp.sum(jnp.square(bounded_action - prev_action))
+        )
+        stage_cost = -stage_reward + action_cost
+        stage_cost = jnp.where(active, stage_cost, 0.0)
+
+        next_state = jnp.where(active, next_state_raw, state)
+        next_prev_action = jnp.where(active, bounded_action, prev_action)
+        next_prev_dist = jnp.where(active, dist_start_ft, prev_dist_start_ft)
+        terminated_active = jnp.logical_and(active, terminated_now)
+        next_active = jnp.logical_and(active, jnp.logical_not(terminated_active))
+        next_cumulative_cost = cumulative_cost + stage_cost
+
+        return (next_state, next_active, next_prev_action, next_prev_dist, next_cumulative_cost), stage_cost
+
+    init_prev_action = clip_action(
+        initial_prev_action,
+        jnp.asarray(config.action_low, dtype=jnp.float32),
+        jnp.asarray(config.action_high, dtype=jnp.float32),
+    )
+    init_dist_start_ft = jnp.asarray(0.0, dtype=jnp.float32)
+
+    carry, _ = jax.lax.scan(
+        body,
+        (
+            initial_state,
+            jnp.asarray(True),
+            init_prev_action,
+            init_dist_start_ft,
+            jnp.asarray(0.0, dtype=jnp.float32),
+        ),
+        (action_seq, jnp.arange(config.horizon, dtype=jnp.int32)),
+    )
+    return carry[-1]
 
 @functools.partial(jax.jit, static_argnames=['config'])
-def mppi_optimize_step(initial_state, base_action_plan, key, W, B, config: JaxMPPIConfig):
-    sigma = jnp.array(config.action_noise_std)
-    low = jnp.array(config.action_low)
-    high = jnp.array(config.action_high)
-    
-    def evaluate_candidate(noise):
-        candidate_actions = jnp.clip(base_action_plan + noise, low, high)
-        state_seq = rollout_trajectory(initial_state, candidate_actions, W, B)
-        cost = compute_cost(state_seq, candidate_actions, config)
-        return cost
-    
-    keys = jax.random.split(key, config.num_samples)
-    noise = jax.random.normal(keys[0], shape=(config.num_samples, config.horizon, 4)) * sigma
-    
-    costs = jax.vmap(evaluate_candidate)(noise)
-    
-    beta = jnp.min(costs)
-    weights = jnp.exp(- (costs - beta) / config.lambda_)
-    weights = weights / (jnp.sum(weights) + 1e-8)
-    
+def mppi_optimize_step(
+    initial_state,
+    base_action_plan,
+    initial_prev_action,
+    key,
+    W,
+    B,
+    canyon_north_samples_ft,
+    canyon_width_samples_ft,
+    canyon_center_east_samples_ft,
+    canyon_heading_samples_rad,
+    config: JaxMPPIConfig,
+):
+    sigma = jnp.asarray(config.action_noise_std, dtype=jnp.float32)
+    low = jnp.asarray(config.action_low, dtype=jnp.float32)
+    high = jnp.asarray(config.action_high, dtype=jnp.float32)
+
+    noise = jax.random.normal(
+        key,
+        shape=(config.num_samples, config.horizon, 4),
+        dtype=jnp.float32,
+    ) * sigma
+    candidate_actions = clip_action(base_action_plan[None, :, :] + noise, low, high)
+
+    costs = jax.vmap(
+        lambda candidate_action_seq: single_rollout_cost(
+            initial_state,
+            candidate_action_seq,
+            initial_prev_action,
+            W,
+            B,
+            canyon_north_samples_ft,
+            canyon_width_samples_ft,
+            canyon_center_east_samples_ft,
+            canyon_heading_samples_rad,
+            config,
+        )
+    )(candidate_actions)
+
+    perturbation_cost = config.gamma_ * jnp.sum(
+        jnp.square(noise / jnp.maximum(sigma, 1e-6)),
+        axis=(1, 2),
+    )
+    total_costs = costs + perturbation_cost
+
+    weights = softmax_weights(total_costs, config.lambda_)
     weighted_noise = jnp.tensordot(weights, noise, axes=(0, 0))
-    optimized_plan = jnp.clip(base_action_plan + weighted_noise, low, high)
-    
-    return optimized_plan, costs, state_seq_best(initial_state, optimized_plan, W, B)
+    optimized_plan = clip_action(base_action_plan + weighted_noise, low, high)
+
+    return optimized_plan, total_costs, state_seq_best(initial_state, optimized_plan, W, B), candidate_actions
+
+
+@functools.partial(jax.jit, static_argnames=['config'])
+def smooth_mppi_optimize_step(
+    initial_state,
+    base_action_plan,
+    initial_prev_action,
+    key,
+    W,
+    B,
+    canyon_north_samples_ft,
+    canyon_width_samples_ft,
+    canyon_center_east_samples_ft,
+    canyon_heading_samples_rad,
+    config: JaxSmoothMPPIConfig,
+):
+    low = jnp.asarray(config.action_low, dtype=jnp.float32)
+    high = jnp.asarray(config.action_high, dtype=jnp.float32)
+    delta_sigma = jnp.asarray(config.delta_noise_std, dtype=jnp.float32)
+    delta_bounds = jnp.asarray(config.delta_action_bounds, dtype=jnp.float32)
+
+    raw_delta = jax.random.normal(
+        key,
+        shape=(config.num_samples, config.horizon, 4),
+        dtype=jnp.float32,
+    ) * delta_sigma
+    smoothed_delta = smooth_noise_batch(raw_delta, config.noise_smoothing_kernel)
+    bounded_delta = jnp.clip(smoothed_delta, -delta_bounds, delta_bounds)
+
+    candidate_actions = clip_action(base_action_plan[None, :, :] + bounded_delta, low, high)
+
+    costs = jax.vmap(
+        lambda candidate_action_seq: single_rollout_cost(
+            initial_state,
+            candidate_action_seq,
+            initial_prev_action,
+            W,
+            B,
+            canyon_north_samples_ft,
+            canyon_width_samples_ft,
+            canyon_center_east_samples_ft,
+            canyon_heading_samples_rad,
+            config,
+        )
+    )(candidate_actions)
+
+    perturbation_cost = config.gamma_ * jnp.sum(
+        jnp.square(bounded_delta / jnp.maximum(delta_sigma, 1e-6)),
+        axis=(1, 2),
+    )
+    action_diff = candidate_actions[:, 1:, :] - candidate_actions[:, :-1, :]
+    smoothness_cost = config.smoothness_penalty_weight * jnp.sum(jnp.square(action_diff), axis=(1, 2))
+    total_costs = costs + perturbation_cost + smoothness_cost
+
+    weights = softmax_weights(total_costs, config.lambda_)
+    weighted_delta = jnp.tensordot(weights, bounded_delta, axes=(0, 0))
+    optimized_plan = clip_action(base_action_plan + weighted_delta, low, high)
+
+    return optimized_plan, total_costs, state_seq_best(initial_state, optimized_plan, W, B), candidate_actions
 
 def state_seq_best(initial_state, plan, W, B):
     return rollout_trajectory(initial_state, plan, W, B)
 
 class JaxMPPIController:
-    def __init__(self, config=None):
+    def __init__(
+        self,
+        config=None,
+        canyon_north_samples_ft=None,
+        canyon_width_samples_ft=None,
+        canyon_center_east_samples_ft=None,
+        canyon_centerline_heading_rad_samples=None,
+    ):
         self.config = config or JaxMPPIConfig()
         self.W, self.B = load_nominal_weights()
-        self.key = jax.random.PRNGKey(42)
-        self.base_plan = jnp.zeros((self.config.horizon, 4))
-        # Warm start throttle at 0.5
-        self.base_plan = self.base_plan.at[:, 3].set(0.5)
+        self.key = jax.random.PRNGKey(self.config.seed)
+        self.base_plan = jnp.zeros((self.config.horizon, 4), dtype=jnp.float32)
+        self.base_plan = self.base_plan.at[:, 3].set(0.55)
+        self._last_action = np.array([0.0, 0.0, 0.0, 0.55], dtype=np.float32)
+        self._cached_action = self._last_action.copy()
+        self._last_replan_step = -10**9
+        self._step_index = 0
+        self._latest_render_debug = None
+
+        if canyon_north_samples_ft is None or canyon_width_samples_ft is None:
+            north_default = np.linspace(0.0, 24000.0, 256, dtype=np.float32)
+            width_default = np.asarray(canyon_width(jnp.asarray(north_default)), dtype=np.float32)
+            center_default = np.zeros_like(north_default, dtype=np.float32)
+            heading_default = np.zeros_like(north_default, dtype=np.float32)
+
+            self._canyon_north_np = north_default
+            self._canyon_width_np = width_default
+            self._canyon_center_east_np = center_default
+            self._canyon_heading_rad_np = heading_default
+        else:
+            north_np = np.asarray(canyon_north_samples_ft, dtype=np.float32).reshape(-1)
+            width_np = np.asarray(canyon_width_samples_ft, dtype=np.float32).reshape(-1)
+
+            if north_np.size != width_np.size:
+                raise ValueError("canyon_north_samples_ft and canyon_width_samples_ft must have same length")
+            if north_np.size < 2:
+                raise ValueError("canyon profile arrays must contain at least two samples")
+
+            if canyon_center_east_samples_ft is None:
+                center_east_np = np.zeros_like(north_np, dtype=np.float32)
+            else:
+                center_east_np = np.asarray(canyon_center_east_samples_ft, dtype=np.float32).reshape(-1)
+                if center_east_np.size != north_np.size:
+                    raise ValueError("canyon_center_east_samples_ft must have same length as canyon_north_samples_ft")
+
+            if canyon_centerline_heading_rad_samples is None:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    slope = np.gradient(center_east_np, north_np, edge_order=1)
+                slope = np.nan_to_num(slope, nan=0.0, posinf=0.0, neginf=0.0)
+                heading_np = np.arctan(slope).astype(np.float32)
+            else:
+                heading_np = np.asarray(canyon_centerline_heading_rad_samples, dtype=np.float32).reshape(-1)
+                if heading_np.size != north_np.size:
+                    raise ValueError(
+                        "canyon_centerline_heading_rad_samples must have same length as canyon_north_samples_ft"
+                    )
+
+            order = np.argsort(north_np)
+            self._canyon_north_np = north_np[order]
+            self._canyon_width_np = width_np[order]
+            self._canyon_center_east_np = center_east_np[order]
+            self._canyon_heading_rad_np = heading_np[order]
+
+        self.canyon_north_samples_ft = jnp.asarray(self._canyon_north_np)
+        self.canyon_width_samples_ft = jnp.asarray(self._canyon_width_np)
+        self.canyon_center_east_samples_ft = jnp.asarray(self._canyon_center_east_np)
+        self.canyon_heading_samples_rad = jnp.asarray(self._canyon_heading_rad_np)
+
+    @staticmethod
+    def _wrap_angle_rad(angle_rad):
+        return float(np.arctan2(np.sin(angle_rad), np.cos(angle_rad)))
+
+    def _centerline_east_ft(self, p_n_ft):
+        return float(np.interp(float(p_n_ft), self._canyon_north_np, self._canyon_center_east_np))
+
+    def _centerline_heading_rad(self, p_n_ft):
+        return float(np.interp(float(p_n_ft), self._canyon_north_np, self._canyon_heading_rad_np))
+
+    def get_lateral_error_ft(self, p_n_ft, p_e_ft):
+        return float(p_e_ft - self._centerline_east_ft(p_n_ft))
+
+    def get_canyon_width_ft(self, p_n_ft):
+        return float(np.interp(float(p_n_ft), self._canyon_north_np, self._canyon_width_np))
+
+    def get_centerline_heading_rad(self, p_n_ft):
+        return self._centerline_heading_rad(p_n_ft)
+
+    def reset(self, seed=None):
+        if seed is not None:
+            self.key = jax.random.PRNGKey(int(seed) + int(self.config.seed))
+        else:
+            self.key = jax.random.PRNGKey(self.config.seed)
+
+        self.base_plan = jnp.zeros((self.config.horizon, 4), dtype=jnp.float32)
+        self.base_plan = self.base_plan.at[:, 3].set(0.55)
+        self._last_action = np.array([0.0, 0.0, 0.0, 0.55], dtype=np.float32)
+        self._cached_action = self._last_action.copy()
+        self._last_replan_step = -10**9
+        self._step_index = 0
+        self._latest_render_debug = None
+
+    def _update_render_debug(self, initial_state, candidate_actions, final_state_seq):
+        if not bool(self.config.debug_render_plans):
+            self._latest_render_debug = None
+            return
+        if candidate_actions is None or final_state_seq is None:
+            self._latest_render_debug = None
+            return
+
+        limit = int(min(max(int(self.config.debug_num_trajectories), 1), int(candidate_actions.shape[0])))
+        sampled_actions = candidate_actions[:limit]
+        sampled_state_seq = rollout_trajectory_batch(initial_state, sampled_actions, self.W, self.B)
+
+        initial_state_tiled = jnp.broadcast_to(
+            initial_state[None, None, :],
+            (limit, 1, int(initial_state.shape[0])),
+        )
+        sampled_with_start = jnp.concatenate([initial_state_tiled, sampled_state_seq], axis=1)
+        final_with_start = jnp.concatenate([initial_state[None, :], final_state_seq], axis=0)
+
+        sampled_np = np.asarray(sampled_with_start, dtype=np.float32)
+        final_np = np.asarray(final_with_start, dtype=np.float32)
+
+        self._latest_render_debug = {
+            "candidate_xy": sampled_np[:, :, :2].copy(),
+            "candidate_h_ft": sampled_np[:, :, 2].copy(),
+            "final_xy": final_np[:, :2].copy(),
+            "final_h_ft": final_np[:, 2].copy(),
+        }
+
+    def _tail_action(self, state_dict):
+        alt_error_ft = float(state_dict["h"] - self.config.target_altitude_ft)
+        p_rate = float(state_dict["p"])
+        q_rate = float(state_dict["q"])
+        r_rate = float(state_dict["r"])
+        p_n_ft = float(state_dict["p_N"])
+        p_e_ft = float(state_dict["p_E"])
+        width_ft = self.get_canyon_width_ft(p_n_ft)
+        raw_lateral_error_ft = self.get_lateral_error_ft(p_n_ft, p_e_ft)
+        if abs(raw_lateral_error_ft) > 4.0 * max(width_ft, 1.0):
+            lateral_error_ft = 0.0
+            heading_error_rad = 0.0
+        else:
+            lateral_error_ft = raw_lateral_error_ft
+            heading_ref_rad = self._centerline_heading_rad(p_n_ft)
+            heading_error_rad = self._wrap_angle_rad(float(state_dict["psi"]) - heading_ref_rad)
+        speed_fps = float(
+            np.sqrt(
+                float(state_dict["u"]) ** 2
+                + float(state_dict["v"]) ** 2
+                + float(state_dict["w"]) ** 2
+            )
+        )
+
+        roll_cmd = np.clip(-0.0028 * lateral_error_ft - 0.60 * heading_error_rad - 0.20 * p_rate, -0.55, 0.55)
+        pitch_cmd = np.clip(0.0018 * alt_error_ft + 0.18 * q_rate, -0.40, 0.40)
+        yaw_cmd = np.clip(-0.20 * r_rate - 0.12 * heading_error_rad, -0.30, 0.30)
+        throttle_cmd = np.clip(0.58 + 0.0012 * (450.0 - speed_fps), 0.35, 0.95)
+        return np.array([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd], dtype=np.float32)
+
+    def _shift_plan(self, state_dict):
+        shifted = np.roll(np.asarray(self.base_plan, dtype=np.float32), shift=-1, axis=0)
+        shifted[-1] = self._tail_action(state_dict)
+        self.base_plan = jnp.asarray(shifted, dtype=jnp.float32)
+
+    def _optimize_step(self, state, prev_action, key):
+        return mppi_optimize_step(
+            state,
+            self.base_plan,
+            prev_action,
+            key,
+            self.W,
+            self.B,
+            self.canyon_north_samples_ft,
+            self.canyon_width_samples_ft,
+            self.canyon_center_east_samples_ft,
+            self.canyon_heading_samples_rad,
+            self.config,
+        )
 
     def get_action(self, state_dict):
+        if self._step_index - self._last_replan_step < int(max(self.config.replan_interval, 1)):
+            self._step_index += 1
+            return self._cached_action.copy()
+
         # State: p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi
         state = jnp.array([
             state_dict['p_N'],
@@ -218,23 +749,66 @@ class JaxMPPIController:
             state_dict['r'],
             state_dict['phi'],
             state_dict['theta'],
-            state_dict['psi']
-        ])
-        
-        # Shift plan
-        shifted_plan = jnp.roll(self.base_plan, shift=-1, axis=0)
-        shifted_plan = shifted_plan.at[-1].set(shifted_plan[-2])
-        self.base_plan = shifted_plan
-        
+            state_dict['psi'],
+        ], dtype=jnp.float32)
+
+        self._shift_plan(state_dict)
+
+        prev_action = jnp.asarray(self._last_action, dtype=jnp.float32)
+        last_candidate_actions = None
+        best_seq = None
         for idx in range(self.config.optimization_steps):
             self.key, subkey = jax.random.split(self.key)
-            self.base_plan, costs, best_seq = mppi_optimize_step(
-                state, self.base_plan, subkey, self.W, self.B, self.config
-            )
+            self.base_plan, costs, best_seq, candidate_actions = self._optimize_step(state, prev_action, subkey)
+            last_candidate_actions = candidate_actions
             if jnp.isnan(costs).any() or jnp.isinf(costs).any():
                 print(f"NAN/INF in costs at opt step {idx}!")
                 print(f"Costs sample: {costs[:10]}")
+                self._latest_render_debug = None
+                self._step_index += 1
+                return self._cached_action.copy()
 
-            
-        action = self.base_plan[0]
-        return np.array(action)
+        self._update_render_debug(state, last_candidate_actions, best_seq)
+
+        action = np.asarray(self.base_plan[0], dtype=np.float32)
+        self._last_action = action.copy()
+        self._cached_action = action.copy()
+        self._last_replan_step = self._step_index
+        self._step_index += 1
+        return action
+
+    def get_render_debug(self):
+        return self._latest_render_debug
+
+
+class JaxSmoothMPPIController(JaxMPPIController):
+    def __init__(
+        self,
+        config=None,
+        canyon_north_samples_ft=None,
+        canyon_width_samples_ft=None,
+        canyon_center_east_samples_ft=None,
+        canyon_centerline_heading_rad_samples=None,
+    ):
+        super().__init__(
+            config=config or JaxSmoothMPPIConfig(),
+            canyon_north_samples_ft=canyon_north_samples_ft,
+            canyon_width_samples_ft=canyon_width_samples_ft,
+            canyon_center_east_samples_ft=canyon_center_east_samples_ft,
+            canyon_centerline_heading_rad_samples=canyon_centerline_heading_rad_samples,
+        )
+
+    def _optimize_step(self, state, prev_action, key):
+        return smooth_mppi_optimize_step(
+            state,
+            self.base_plan,
+            prev_action,
+            key,
+            self.W,
+            self.B,
+            self.canyon_north_samples_ft,
+            self.canyon_width_samples_ft,
+            self.canyon_center_east_samples_ft,
+            self.canyon_heading_samples_rad,
+            self.config,
+        )
