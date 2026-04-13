@@ -9,6 +9,7 @@ from jsbsim_gym.canyon_artifacts import CanyonRunRecorder
 from jsbsim_gym.simple_controller import (
     SimpleCanyonController,
     SimpleCanyonControllerConfig,
+    with_default_simple_controller_optuna_gains,
 )
 
 DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
@@ -97,6 +98,15 @@ def main():
         use_dem_centerline=True,
         use_terrain_following=True,
     )
+    config, simple_tuning_source, simple_tuned_keys = with_default_simple_controller_optuna_gains(config)
+    if simple_tuned_keys:
+        print(
+            f"Auto-loaded simple-controller tuned gains from {simple_tuning_source} "
+            f"({len(simple_tuned_keys)} parameters)."
+        )
+    else:
+        print("Note: No tuned simple-controller gains found; using built-in defaults.")
+
     controller = SimpleCanyonController(
         env=env,
         config=config,

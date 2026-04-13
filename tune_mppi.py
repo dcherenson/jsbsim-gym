@@ -26,7 +26,7 @@ DEM_START_PIXEL = (1400, 950)
 # This is separate from the env's internal max_episode_steps to avoid the Gymnasium
 # TimeLimit wrapper bug where env.unwrapped.max_episode_steps returns a different
 # value than what was passed to gym.make.
-TUNE_MAX_STEPS = 600
+TUNE_MAX_STEPS = 1200
 
 # Seeds to evaluate each trial on. Using multiple seeds prevents overfitting
 # to a single canyon configuration. Seed 3 matches run_mppi.py.

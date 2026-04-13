@@ -21,6 +21,7 @@ from jsbsim_gym.mppi_jax import (
 from jsbsim_gym.simple_controller import (
     SimpleCanyonController,
     SimpleCanyonControllerConfig,
+    with_default_simple_controller_optuna_gains,
 )
 
 DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
@@ -110,6 +111,12 @@ def parse_args():
         default=450.0,
         help="Target flight speed in knots (kts).",
     )
+    parser.add_argument(
+        "--study-name",
+        type=str,
+        default="mppi_canyon_tuning",
+        help="Name of the Optuna study to load tuned parameters from.",
+    )
     return parser.parse_args()
 
 
@@ -186,9 +193,9 @@ def main():
     if Path("mppi_tuning.db").exists():
         try:
             import optuna
-            study = optuna.load_study(study_name="mppi_canyon_tuning", storage="sqlite:///mppi_tuning.db")
+            study = optuna.load_study(study_name=args.study_name, storage="sqlite:///mppi_tuning.db")
             optuna_params = study.best_params
-            print(f"Auto-loaded tuned parameters from mppi_canyon_tuning! (Reward: {study.best_value:.2f})")
+            print(f"Auto-loaded tuned parameters from {args.study_name}! (Reward: {study.best_value:.2f})")
             if "target_alt_tune_ft" in optuna_params:
                 mppi_target_altitude_ft = float(optuna_params["target_alt_tune_ft"])
         except Exception as e:
@@ -232,6 +239,14 @@ def main():
             target_speed_fps=args.target_speed_kts * 1.68781,
             use_terrain_following=args.simple_terrain,
         )
+        simple_config, simple_tuning_source, simple_tuned_keys = with_default_simple_controller_optuna_gains(simple_config)
+        if simple_tuned_keys:
+            print(
+                f"Auto-loaded simple-controller tuned gains from {simple_tuning_source} "
+                f"({len(simple_tuned_keys)} parameters)."
+            )
+        else:
+            print("Note: No tuned simple-controller gains found; using built-in defaults.")
         controller = SimpleCanyonController(
             env=env,
             config=simple_config,

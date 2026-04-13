@@ -1,6 +1,13 @@
+import json
 import numpy as np
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Tuple
+
+
+SIMPLE_TUNING_JSON_PATH = Path("output/simple_controller/simple_controller_optuna_best.json")
+SIMPLE_TUNING_STUDY_NAME = "simple_controller_gain_tuning"
+SIMPLE_TUNING_STORAGE = "sqlite:///simple_controller_tuning.db"
 
 @dataclass
 class SimpleCanyonControllerConfig:
@@ -41,6 +48,86 @@ class SimpleCanyonControllerConfig:
     throttle_speed_gain: float = 0.0014
     throttle_climb_penalty: float = -0.0007
     throttle_max: float = 0.80
+
+
+def _sqlite_storage_to_path(storage_url: str):
+    prefix = "sqlite:///"
+    if not isinstance(storage_url, str) or not storage_url.startswith(prefix):
+        return None
+    return Path(storage_url[len(prefix):])
+
+
+def load_simple_controller_optuna_params(
+    summary_json_path: Path = SIMPLE_TUNING_JSON_PATH,
+    study_name: str = SIMPLE_TUNING_STUDY_NAME,
+    storage: str = SIMPLE_TUNING_STORAGE,
+):
+    """Load best tuned SimpleCanyonController params from JSON, then SQLite fallback."""
+    params = {}
+    source = None
+
+    summary_path = Path(summary_json_path)
+    if summary_path.exists():
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            best_params = payload.get("best_params", {}) if isinstance(payload, dict) else {}
+            if isinstance(best_params, dict) and best_params:
+                params = dict(best_params)
+                source = str(summary_path)
+        except Exception:
+            pass
+
+    if params:
+        return params, source
+
+    sqlite_path = _sqlite_storage_to_path(storage)
+    if sqlite_path is None or not sqlite_path.exists():
+        return {}, None
+
+    try:
+        import optuna
+
+        study = optuna.load_study(study_name=study_name, storage=storage)
+        return dict(study.best_params), f"{storage}::{study_name}"
+    except Exception:
+        return {}, None
+
+
+def apply_simple_controller_optuna_params(config: SimpleCanyonControllerConfig, params: dict):
+    """Apply tuned Optuna params onto a controller config and return applied keys."""
+    if not isinstance(params, dict) or not params:
+        return config, []
+
+    field_names = set(SimpleCanyonControllerConfig.__dataclass_fields__.keys())
+    overrides = {}
+
+    for key, value in params.items():
+        if key in field_names:
+            overrides[key] = float(value) if isinstance(value, (int, float, np.integer, np.floating)) else value
+
+    if "throttle_climb_penalty_mag" in params and "throttle_climb_penalty" not in overrides:
+        overrides["throttle_climb_penalty"] = -abs(float(params["throttle_climb_penalty_mag"]))
+
+    if not overrides:
+        return config, []
+
+    return replace(config, **overrides), sorted(overrides.keys())
+
+
+def with_default_simple_controller_optuna_gains(
+    config: SimpleCanyonControllerConfig,
+    summary_json_path: Path = SIMPLE_TUNING_JSON_PATH,
+    study_name: str = SIMPLE_TUNING_STUDY_NAME,
+    storage: str = SIMPLE_TUNING_STORAGE,
+):
+    """Return config with best tuned gains applied when tuning artifacts are available."""
+    params, source = load_simple_controller_optuna_params(
+        summary_json_path=summary_json_path,
+        study_name=study_name,
+        storage=storage,
+    )
+    tuned_config, tuned_keys = apply_simple_controller_optuna_params(config, params)
+    return tuned_config, source, tuned_keys
 
 
 
