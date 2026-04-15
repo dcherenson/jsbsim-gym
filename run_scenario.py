@@ -6,21 +6,15 @@ from pathlib import Path
 import gymnasium as gym
 import numpy as np
 
-import jax
 import jax.numpy as jnp
 
 from drs_gatekeeper import DRSGatekeeper, GatekeeperParams, TrackBoundsEstimate
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
 from jsbsim_gym.canyon_env import OBS_ALTITUDE_ERROR_FT, OBS_PHI, OBS_P, OBS_Q, OBS_R, OBS_THETA
 from jsbsim_gym.canyon_artifacts import CanyonRunRecorder
-from jsbsim_gym.mppi_jax import (
-    JaxMPPIConfig,
-    JaxMPPIController,
-    JaxSmoothMPPIConfig,
-    JaxSmoothMPPIController,
-    f16_kinematics_step_with_load_factors,
-    load_nominal_weights,
-)
+from jsbsim_gym.mppi_jax import JaxMPPIConfig, JaxMPPIController
+from jsbsim_gym.mppi_support import f16_kinematics_step_with_load_factors, load_nominal_weights
+from jsbsim_gym.smooth_mppi_jax import JaxSmoothMPPIConfig, JaxSmoothMPPIController
 from jsbsim_gym.simple_controller import (
     SimpleCanyonController,
     SimpleCanyonControllerConfig,

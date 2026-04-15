@@ -16,12 +16,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
-from jsbsim_gym.mppi_jax import (
-    JaxMPPIConfig,
-    JaxMPPIController,
-    JaxSmoothMPPIConfig,
-    JaxSmoothMPPIController,
-)
+from jsbsim_gym.mppi_jax import JaxMPPIConfig, JaxMPPIController
+from jsbsim_gym.smooth_mppi_jax import JaxSmoothMPPIConfig, JaxSmoothMPPIController
 from run_scenario import to_mppi_state
 
 DEM_PATH = REPO_ROOT / "data/dem/black-canyon-gunnison_USGS10m.tif"
