@@ -4,7 +4,7 @@ import imageio.v2 as iio
 import imageio.v3 as iio_v3
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 
 FT_TO_M = 1.0 / 3.28084
@@ -292,8 +292,25 @@ class CanyonRunRecorder:
             planner_debug.get("lookahead_h_ft", np.zeros((0,), dtype=np.float32)),
             dtype=np.float32,
         )
+        gk_trajectories = np.asarray(
+            planner_debug.get("gk_trajectories", np.zeros((0, 0, 2), dtype=np.float32)),
+            dtype=np.float32,
+        )
+        gk_h_ft = np.asarray(
+            planner_debug.get("gk_h_ft", np.zeros((0, 0), dtype=np.float32)),
+            dtype=np.float32,
+        )
+        failure_mask = np.asarray(
+            planner_debug.get("failure_mask", np.zeros((0,), dtype=bool)),
+            dtype=bool,
+        )
 
-        if candidate_xy.size == 0 and final_xy.size == 0 and lookahead_xy.size == 0:
+        if (
+            candidate_xy.size == 0
+            and final_xy.size == 0
+            and lookahead_xy.size == 0
+            and gk_trajectories.size == 0
+        ):
             return frame
 
         height, width = frame.shape[0], frame.shape[1]
@@ -303,23 +320,51 @@ class CanyonRunRecorder:
         image = Image.fromarray(frame.astype(np.uint8), mode="RGB").convert("RGBA")
         draw = ImageDraw.Draw(image, "RGBA")
 
-        for idx, traj_xy in enumerate(candidate_xy):
-            traj_h = candidate_h[idx] if idx < len(candidate_h) else np.zeros((traj_xy.shape[0],), dtype=np.float32)
-            world_points = self._trajectory_world_points(traj_xy, traj_h)
-            pixels = self._project_world_points(world_points, view, projection, width, height)
-            pixels = pixels[np.all(np.isfinite(pixels), axis=1)]
-            pixels = pixels[2:]
-            if len(pixels) >= 2:
-                draw.line([tuple(point) for point in pixels], fill=(84, 180, 255, 52), width=1)
+        if gk_trajectories.size > 0:
+            traj_len = int(gk_trajectories.shape[1]) if gk_trajectories.ndim == 3 else 0
+            s_t = int(planner_debug.get("s_t", 0))
+            plan_start_t = int(planner_debug.get("plan_start_t", 0))
+            local_m = s_t - plan_start_t
+            m_slice = int(np.clip(local_m, 0, max(traj_len - 1, 0)))
 
-        if len(final_xy) >= 2:
-            world_points = self._trajectory_world_points(final_xy, final_h)
-            pixels = self._project_world_points(world_points, view, projection, width, height)
-            pixels = pixels[np.all(np.isfinite(pixels), axis=1)]
-            pixels = pixels[2:]
-            if len(pixels) >= 2:
-                draw.line([tuple(point) for point in pixels], fill=(255, 184, 44, 255), width=4)
-                draw.line([tuple(point) for point in pixels], fill=(255, 236, 180, 176), width=2)
+            for idx, traj_xy in enumerate(gk_trajectories):
+                traj_h = gk_h_ft[idx] if idx < len(gk_h_ft) else np.zeros((traj_xy.shape[0],), dtype=np.float32)
+                world_points = self._trajectory_world_points(traj_xy, traj_h)
+                pixels = self._project_world_points(world_points, view, projection, width, height)
+                valid_mask = np.all(np.isfinite(pixels), axis=1)
+
+                nom_pixels = pixels[1 : m_slice + 2][valid_mask[1 : m_slice + 2]]
+                if len(nom_pixels) >= 2:
+                    draw.line([tuple(point) for point in nom_pixels], fill=(34, 193, 114, 72), width=1)
+
+                is_failed = bool(failure_mask[idx]) if idx < len(failure_mask) else False
+                backup_color = (255, 30, 30, 96) if is_failed else (52, 152, 219, 72)
+                back_pixels = pixels[m_slice + 2 :][valid_mask[m_slice + 2 :]]
+                if len(back_pixels) >= 2:
+                    draw.line([tuple(point) for point in back_pixels], fill=backup_color, width=1)
+
+                switch_idx = local_m + 1
+                if 0 <= switch_idx < len(pixels) and valid_mask[switch_idx]:
+                    x_pix, y_pix = pixels[switch_idx]
+                    draw.ellipse((x_pix - 3, y_pix - 3, x_pix + 3, y_pix + 3), fill=(255, 235, 59, 210))
+        else:
+            for idx, traj_xy in enumerate(candidate_xy):
+                traj_h = candidate_h[idx] if idx < len(candidate_h) else np.zeros((traj_xy.shape[0],), dtype=np.float32)
+                world_points = self._trajectory_world_points(traj_xy, traj_h)
+                pixels = self._project_world_points(world_points, view, projection, width, height)
+                pixels = pixels[np.all(np.isfinite(pixels), axis=1)]
+                pixels = pixels[2:]
+                if len(pixels) >= 2:
+                    draw.line([tuple(point) for point in pixels], fill=(84, 180, 255, 52), width=1)
+
+            if len(final_xy) >= 2:
+                world_points = self._trajectory_world_points(final_xy, final_h)
+                pixels = self._project_world_points(world_points, view, projection, width, height)
+                pixels = pixels[np.all(np.isfinite(pixels), axis=1)]
+                pixels = pixels[2:]
+                if len(pixels) >= 2:
+                    draw.line([tuple(point) for point in pixels], fill=(255, 184, 44, 255), width=4)
+                    draw.line([tuple(point) for point in pixels], fill=(255, 236, 180, 176), width=2)
 
         if len(lookahead_xy) >= 1:
             world_points = self._trajectory_world_points(lookahead_xy, lookahead_h)
@@ -415,8 +460,63 @@ class CanyonRunRecorder:
 
         image = Image.fromarray(frame.astype(np.uint8), mode="RGB").convert("RGBA")
         draw = ImageDraw.Draw(image, "RGBA")
+        font = ImageFont.load_default()
 
         frame_h, frame_w = frame.shape[0], frame.shape[1]
+
+        if bool(hud_debug.get("gatekeeper_active", False)):
+            using_backup = bool(hud_debug.get("using_backup", False))
+            is_reverting = bool(hud_debug.get("is_reverting", False))
+            s_t = int(hud_debug.get("s_t", 0))
+            m_star = int(hud_debug.get("m_star", 0))
+            q_bar_star = float(hud_debug.get("q_bar_star", 0.0))
+            epsilon = float(hud_debug.get("epsilon", 0.0))
+
+            status_x0 = 16
+            status_y0 = 16
+            status_x1 = min(frame_w - 8, status_x0 + 246)
+            status_y1 = min(frame_h - 8, status_y0 + 104)
+            draw.rounded_rectangle(
+                (status_x0, status_y0, status_x1, status_y1),
+                radius=12,
+                fill=(8, 12, 18, 176),
+                outline=(180, 210, 235, 190),
+                width=2,
+            )
+
+            mode_text = "BACKUP" if using_backup else "NOMINAL"
+            mode_color = (255, 87, 34, 255) if using_backup else (76, 175, 80, 255)
+            draw.text((status_x0 + 12, status_y0 + 10), mode_text, fill=mode_color, font=font)
+            if is_reverting:
+                draw.text((status_x0 + 94, status_y0 + 10), "REVERT", fill=(255, 235, 59, 255), font=font)
+
+            draw.text(
+                (status_x0 + 12, status_y0 + 34),
+                f"Switch: {s_t} (T{m_star:+d})",
+                fill=(228, 236, 244, 245),
+                font=font,
+            )
+
+            prob_color = (255, 255, 255, 255)
+            if q_bar_star > 0.5 * epsilon:
+                prob_color = (255, 235, 59, 255)
+            if q_bar_star > 0.8 * epsilon:
+                prob_color = (255, 152, 0, 255)
+            if q_bar_star > 1.0 * epsilon:
+                prob_color = (255, 30, 30, 255)
+
+            draw.text(
+                (status_x0 + 12, status_y0 + 58),
+                f"P(fail) Bound: {q_bar_star:.3f}",
+                fill=prob_color,
+                font=font,
+            )
+            draw.text(
+                (status_x0 + 12, status_y0 + 80),
+                f"Threshold eps: {epsilon:.2f}",
+                fill=(180, 180, 180, 255),
+                font=font,
+            )
 
         panel_w = int(min(410, max(300, frame_w * 0.34)))
         panel_h = 168

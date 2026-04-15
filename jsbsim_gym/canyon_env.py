@@ -766,7 +766,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         else:
             chase_forward = forward
 
-        chase_distance = 320.0 * scale
+        chase_distance = 100.0 * scale
         chase_height = 95.0 * scale
         look_ahead = 185.0 * scale
         look_up = 28.0 * scale

@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpy as np
 
 
@@ -196,6 +197,147 @@ def build_reference_trajectory(
         "width_ft": width_arr,
         "closed_loop": bool(closed_loop),
     }
+
+
+def build_simple_trajectory_policy_jax(
+    config: SimpleCanyonControllerConfig,
+    reference_trajectory,
+    target_altitude_ft,
+    wall_margin_ft=0.0,
+    altitude_reference_offset_ft=0.0,
+):
+    """Build a JAX policy closure that mirrors the simple trajectory controller.
+
+    The gatekeeper rollout state uses the flat convention:
+    [p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi, ny, nz]
+    """
+
+    reference = SimpleTrajectoryController._normalize_reference_trajectory(reference_trajectory)
+    north_samples = jnp.asarray(reference["north_ft"], dtype=jnp.float32)
+    east_samples = jnp.asarray(reference["east_ft"], dtype=jnp.float32)
+    heading_samples = jnp.asarray(reference["heading_rad"], dtype=jnp.float32)
+    width_samples = jnp.asarray(reference["width_ft"], dtype=jnp.float32)
+    closed_loop = bool(reference["closed_loop"])
+    sample_count = int(len(reference["north_ft"]))
+    lookahead_rows = int(max(1, config.lookahead_rows))
+    target_speed_fps = float(config.target_speed_fps)
+    target_altitude_ft = float(target_altitude_ft)
+    wall_margin_ft = float(wall_margin_ft)
+    altitude_reference_offset_ft = float(altitude_reference_offset_ft)
+
+    def _wrap_angle_rad(angle_rad):
+        return jnp.arctan2(jnp.sin(angle_rad), jnp.cos(angle_rad))
+
+    def _position_rates(state_flat):
+        u, v, w = state_flat[3], state_flat[4], state_flat[5]
+        phi, theta, psi = state_flat[9], state_flat[10], state_flat[11]
+        c_psi = jnp.cos(psi)
+        s_psi = jnp.sin(psi)
+        c_theta = jnp.cos(theta)
+        s_theta = jnp.sin(theta)
+        c_phi = jnp.cos(phi)
+        s_phi = jnp.sin(phi)
+        p_n_dot = u * (c_theta * c_psi) + v * (s_phi * s_theta * c_psi - c_phi * s_psi) + w * (c_phi * s_theta * c_psi + s_phi * s_psi)
+        p_e_dot = u * (c_theta * s_psi) + v * (s_phi * s_theta * s_psi + c_phi * c_psi) + w * (c_phi * s_theta * s_psi - s_phi * c_psi)
+        h_dot = u * s_theta - v * s_phi * c_theta - w * c_phi * c_theta
+        return p_n_dot, p_e_dot, h_dot
+
+    def policy_fn(state_flat):
+        p_n_ft = state_flat[0]
+        p_e_ft = state_flat[1]
+        h_ft = state_flat[2]
+        u = state_flat[3]
+        v = state_flat[4]
+        w = state_flat[5]
+        p_rate = state_flat[6]
+        q_rate = state_flat[7]
+        r_rate = state_flat[8]
+        phi = state_flat[9]
+        psi = state_flat[11]
+        ny_current = state_flat[12]
+        nz_current = state_flat[13]
+
+        dn_all = north_samples - p_n_ft
+        de_all = east_samples - p_e_ft
+        ontrack_idx = jnp.argmin(dn_all * dn_all + de_all * de_all)
+        if closed_loop:
+            look_idx = jnp.mod(ontrack_idx + lookahead_rows, sample_count)
+        else:
+            look_idx = jnp.clip(ontrack_idx + lookahead_rows, 0, sample_count - 1)
+
+        ontrack_north_ft = north_samples[ontrack_idx]
+        ontrack_center_east_ft = east_samples[ontrack_idx]
+        desired_heading_rad = heading_samples[look_idx]
+
+        dn = p_n_ft - ontrack_north_ft
+        de = p_e_ft - ontrack_center_east_ft
+        lateral_error_ft = dn * (-jnp.sin(desired_heading_rad)) + de * jnp.cos(desired_heading_rad)
+        heading_error_rad = _wrap_angle_rad(psi - desired_heading_rad)
+
+        width_ft = width_samples[ontrack_idx]
+        width_ft = jnp.where(jnp.logical_or(~jnp.isfinite(width_ft), width_ft <= 1.0), 600.0, width_ft)
+        half_width_ft = 0.5 * width_ft
+        usable_half_ft = jnp.maximum(half_width_ft - wall_margin_ft, 80.0)
+        del usable_half_ft
+
+        p_n_dot, p_e_dot, _ = _position_rates(state_flat)
+        lateral_error_rate_fps = p_n_dot * (-jnp.sin(desired_heading_rad)) + p_e_dot * jnp.cos(desired_heading_rad)
+
+        altitude_error_raw_ft = h_ft - target_altitude_ft
+        altitude_error_offset_ft = (h_ft + altitude_reference_offset_ft) - target_altitude_ft
+        altitude_error_ft = jnp.where(
+            jnp.abs(altitude_error_raw_ft) <= jnp.abs(altitude_error_offset_ft),
+            altitude_error_raw_ft,
+            altitude_error_offset_ft,
+        )
+
+        speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
+        track_accel_cmd_fps2 = jnp.clip(
+            config.track_accel_lateral_gain * lateral_error_ft
+            + config.track_accel_lateral_rate_gain * lateral_error_rate_fps
+            + config.track_accel_heading_gain * speed_fps * jnp.sin(heading_error_rad),
+            -config.track_accel_max_fps2,
+            config.track_accel_max_fps2,
+        )
+
+        roll_des_rad = jnp.clip(
+            jnp.arctan2(track_accel_cmd_fps2, G_FTPS2),
+            -config.roll_max_rad,
+            config.roll_max_rad,
+        )
+        roll_cmd = jnp.clip(
+            config.roll_p_gain * (roll_des_rad - phi) + config.roll_rate_damping * p_rate,
+            -1.0,
+            1.0,
+        )
+
+        nz_altitude_bias = jnp.clip(
+            -config.nz_altitude_gain * altitude_error_ft,
+            -config.nz_altitude_max_bias,
+            config.nz_altitude_max_bias,
+        )
+        nz_des = jnp.clip(
+            jnp.sqrt(1.0 + (track_accel_cmd_fps2 / G_FTPS2) ** 2) + nz_altitude_bias,
+            config.nz_min_cmd,
+            config.nz_max_cmd,
+        )
+        pitch_cmd = jnp.clip(config.pitch_nz_gain * (nz_des - nz_current) + config.pitch_q_damping * q_rate, -1.0, 1.0)
+
+        yaw_cmd = jnp.clip(
+            config.yaw_rate_damping * r_rate + config.yaw_ny_gain * ny_current,
+            -config.yaw_max_cmd,
+            config.yaw_max_cmd,
+        )
+
+        throttle_cmd = jnp.clip(
+            config.throttle_base + config.throttle_speed_gain * (target_speed_fps - speed_fps),
+            0.0,
+            config.throttle_max,
+        )
+
+        return jnp.asarray([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd], dtype=jnp.float32)
+
+    return policy_fn
 
 
 class SimpleTrajectoryController:

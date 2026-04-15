@@ -28,7 +28,6 @@ TODOs
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Callable, NamedTuple, Optional, Tuple
 import time
 
@@ -38,37 +37,7 @@ import jax.numpy as jnp
 from jax import lax
 import numpy as np
 import scipy.special as sc_special
-
-try:
-    from uncertain_racecar_gym.dynamics import VehicleState  # type: ignore
-except Exception:
-    @dataclass
-    class VehicleState:
-        x: float
-        y: float
-        yaw: float
-        vx: float
-        vy: float
-        yaw_rate: float
-        steer: float
-        throttle: float
-        brake: float
-        progress: float
-        lateral_error: float
-        heading_error: float
-        wheel_rotation: float = 0.0
-
-try:
-    from uncertain_racecar_gym.uncertainty_jax import JAXEmpiricalData, sample_empirical_jax  # type: ignore
-except Exception:
-    class JAXEmpiricalData(NamedTuple):
-        pass
-
-    def sample_empirical_jax(*args, **kwargs):
-        raise RuntimeError(
-            "JAX empirical uncertainty sampling is unavailable in this environment. "
-            "Use the offline noise_sampler hook instead."
-        )
+from jsbsim_gym.uncertainty import JAXEmpiricalData, sample_empirical_jax
 
 # ---------------------------------------------------------------------------
 # Type aliases
@@ -79,8 +48,8 @@ Array = jax.Array
 # A JAX-compatible state type stored as a flat float32 vector.
 # The exact semantics are scenario-defined by the supplied dynamics / policy /
 # safety callbacks.  The JSBSim integration uses:
-# [p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi]
-STATE_DIM = 12
+# [p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi, ny, nz]
+STATE_DIM = 14
 
 # The JSBSim integration uses [roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd].
 ACTION_DIM = 4
@@ -169,73 +138,9 @@ class GatekeeperState(NamedTuple):
     plan_start_t: int = 0
 
 # ---------------------------------------------------------------------------
-# Track-boundary observation model  (perception module for θ)
+# Corridor-boundary observation model  (perception module for θ)
 # ---------------------------------------------------------------------------
-# Defined in a separate module for use within rollouts and the DRSGatekeeper
-# class.  The estimate is generic despite the historical name.
 from drs_gatekeeper.track_bounds import TrackBoundsEstimate  # noqa: F401
-
-# State packing / unpacking helpers
-# ---------------------------------------------------------------------------
-
-
-def pack_state(x, y, yaw, vx, vy, yaw_rate, steer, throttle, brake,
-               progress, lateral_error, heading_error) -> Array:
-    """Pack individual state components into a flat JAX array."""
-    return jnp.array(
-        [x, y, yaw, vx, vy, yaw_rate, steer, throttle, brake,
-         progress, lateral_error, heading_error],
-        dtype=jnp.float32,
-    )
-
-
-def unpack_state(s: Array):
-    """Unpack a flat state vector into named components."""
-    return dict(
-        x=s[0], y=s[1], yaw=s[2],
-        vx=s[3], vy=s[4], yaw_rate=s[5],
-        steer=s[6], throttle=s[7], brake=s[8],
-        progress=s[9], lateral_error=s[10], heading_error=s[11],
-    )
-
-
-def jax_feature_extractor(state: Array, curvature: float, lr: float = 0.16) -> Array:
-    """
-    Extract a JAX-native feature vector from the flat state vector.
-    Used to drive the empirical sampler inside the JAX kernel.
-    """
-    # state: [x, y, yaw, vx, vy, yaw_rate, steer, throttle, brake, progress, lateral_error, heading_error]
-    vx = state[3]
-    vy = state[4]
-    yaw_rate = state[5]
-    steer = state[6]
-    throttle = state[7]
-    brake = state[8]
-    progress = state[9]
-
-    # Proxies for telemetry-based features
-    accel_y = vx * yaw_rate
-    rear_slip_angle = jnp.arctan2(vy - lr * yaw_rate, jnp.maximum(jnp.abs(vx), 0.5))
-    
-    feat = jnp.zeros(21)
-    feat = feat.at[0].set(curvature)
-    feat = feat.at[1].set(progress)
-    feat = feat.at[2].set(vx)
-    feat = feat.at[3].set(vy)
-    feat = feat.at[4].set(yaw_rate)
-    feat = feat.at[5].set(steer)
-    feat = feat.at[6].set(throttle)
-    feat = feat.at[7].set(brake)
-    feat = feat.at[13].set(rear_slip_angle)
-    # Simplified gear/rpm proxies for regime logic
-    feat = feat.at[14].set(jnp.clip(vx / 50.0, 0.0, 1.0))
-    # History placeholders
-    feat = feat.at[18].set(steer)
-    feat = feat.at[19].set(throttle)
-    feat = feat.at[20].set(brake)
-    
-    return feat
-
 
 def rollout_single(
     x0: Array,
@@ -301,7 +206,6 @@ def rollout_single_empirical(
     T: int,
     empirical_feature_fn: Callable,
     empirical_sampler_fn: Callable,
-    lr: float = 0.16,
     nominal_trajectory: Optional[Array] = None,
 ) -> Array:
     """
@@ -852,7 +756,7 @@ class DRSGatekeeper:
         noise_dim: int,
         theta_dim: int = 2,
         noise_sampler: Optional[Callable] = None,
-        uncertainty_model: Optional[EmpiricalUncertaintyModel] = None,
+        uncertainty_model: Optional[Any] = None,
         empirical_feature_fn: Optional[Callable] = None,
         empirical_sampler_fn: Optional[Callable] = None,
         calibration_model: Optional[Any] = None,
@@ -882,14 +786,15 @@ class DRSGatekeeper:
             Dimension of the environment-parameter vector θ.
         noise_sampler : callable or None
             If provided, overrides internal sampling logic.
-        uncertainty_model : EmpiricalUncertaintyModel or None
-            Model for empirical state-dependent sampling.
+        uncertainty_model : Any or None
+            Model for empirical state-dependent sampling with a ``to_jax()``
+            export method.
         calibration_model : Any or None
             (Optional) Calibration model for mean residuals.
-        track : TrackModel or None
-            Reference to the track for context rollouts.
-        vehicle_config : VehicleConfig or None
-            Reference to vehicle parameters for feature building.
+        track : Any or None
+            Optional scenario geometry/context object.
+        vehicle_config : Any or None
+            Optional vehicle parameter bundle.
         initial_track_bounds : TrackBoundsEstimate or None
             Initial perception estimate.
         seed : int
@@ -942,9 +847,10 @@ class DRSGatekeeper:
         if self.uncertainty_data is not None:
             feature_fn = self.empirical_feature_fn
             if feature_fn is None:
-                def feature_fn(state, action, prev_action, step_idx):
-                    del action, prev_action, step_idx
-                    return jax_feature_extractor(state, 0.0)
+                raise ValueError(
+                    "empirical_feature_fn is required when online empirical "
+                    "sampling is enabled."
+                )
             # We'll assume a default gate_id of 0 for now or manage it per step
             self._rollout_all_empirical = jax.jit(
                 build_rollout_all_empirical(
@@ -985,8 +891,9 @@ class DRSGatekeeper:
 
         Process noise (w^f)
         ~~~~~~~~~~~~~~~~~~~
-        Shape: [M, N, T, noise_dim].  Represents stochastic model error on the
-        vehicle dynamics (e.g. delta_vx / delta_vy / delta_yaw_rate).
+        Shape: [M, N, T, noise_dim]. Represents stochastic model error on the
+        vehicle dynamics. In the JSBSim setup these are coefficient residuals
+        for the polynomial aerodynamic model.
 
         Currently uses i.i.d. Gaussian as a placeholder.
         TODO: Replace with EmpiricalUncertaintyModel.sample() calls.  The
@@ -995,8 +902,8 @@ class DRSGatekeeper:
 
         Environment parameters (w^θ)
         ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        Shape: [M, N, T, theta_dim].  Represents the uncertain track-boundary
-        geometry drawn from P̂^θ_t = P(θ | x_t, z_t).
+        Shape: [M, N, T, theta_dim]. Represents uncertain environment
+        parameters drawn from the perception model.
 
         If a TrackBoundsEstimate is provided (either here or via the stored
         self._track_bounds), samples are drawn from its Gaussian model.  Each
@@ -1006,7 +913,7 @@ class DRSGatekeeper:
         Parameters
         ----------
         track_bounds : TrackBoundsEstimate or None
-            Perception estimate to use.  If None, uses self._track_bounds.
+            Perception estimate to use. If None, uses self._track_bounds.
 
         Returns
         -------
@@ -1272,7 +1179,7 @@ class DRSGatekeeper:
         x_flat : Array [STATE_DIM]
             Current flat state vector.
         track_bounds : TrackBoundsEstimate or None
-            Current perception estimate of the track boundaries.
+            Current perception estimate of the operating corridor.
             Pass None to reuse the last supplied estimate.
         nominal_trajectory : Array [T, ACTION_DIM] or None
             Optional open-loop future actions for the nominal policy.
@@ -1286,105 +1193,15 @@ class DRSGatekeeper:
         self.tick()
         return action
 
-    # ------------------------------------------------------------------
-    # Utility: convert JaxRacecarState to flat array
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def state_from_flat(s_flat: Array) -> VehicleState:
-        """Convert flat array back to VehicleState dataclass."""
-        s = np.asarray(s_flat)
-        return VehicleState(
-            x=float(s[0]), y=float(s[1]), yaw=float(s[2]),
-            vx=float(s[3]), vy=float(s[4]), yaw_rate=float(s[5]),
-            steer=float(s[6]), throttle=float(s[7]), brake=float(s[8]),
-            progress=float(s[9]), lateral_error=float(s[10]), heading_error=float(s[11]),
-            wheel_rotation=0.0
-        )
-
-    @staticmethod
-    def state_to_flat(s: VehicleState) -> Array:
-        """Convert VehicleState dataclass to flat array."""
-        return jnp.array([
-            s.x, s.y, s.yaw, s.vx, s.vy, s.yaw_rate,
-            s.steer, s.throttle, s.brake,
-            s.progress, s.lateral_error, s.heading_error
-        ], dtype=jnp.float32)
-
-    @staticmethod
-    def state_from_jax_racecar(jax_state) -> Array:
-        """
-        Convert a ``JaxRacecarState`` NamedTuple into the flat STATE_DIM vector
-        used internally by the gatekeeper.
-
-        Parameters
-        ----------
-        jax_state : JaxRacecarState
-
-        Returns
-        -------
-        flat : Array [STATE_DIM]
-        """
-        return jnp.array(
-            [
-                jax_state.x,
-                jax_state.y,
-                jax_state.yaw,
-                jax_state.vx,
-                jax_state.vy,
-                jax_state.yaw_rate,
-                jax_state.steer,
-                jax_state.throttle,
-                jax_state.brake,
-                jax_state.progress,
-                jax_state.lateral_error,
-                jax_state.heading_error,
-            ],
-            dtype=jnp.float32,
-        )
-
-    @staticmethod
-    def state_from_vehicle_state(vehicle_state) -> Array:
-        """
-        Convert a ``VehicleState`` dataclass into the flat STATE_DIM vector.
-
-        Parameters
-        ----------
-        vehicle_state : VehicleState (from uncertain_racecar_gym.dynamics)
-
-        Returns
-        -------
-        flat : Array [STATE_DIM]
-        """
-        return jnp.array(
-            [
-                vehicle_state.x,
-                vehicle_state.y,
-                vehicle_state.yaw,
-                vehicle_state.vx,
-                vehicle_state.vy,
-                vehicle_state.yaw_rate,
-                vehicle_state.steer,
-                vehicle_state.throttle,
-                vehicle_state.brake,
-                vehicle_state.progress,
-                vehicle_state.lateral_error,
-                vehicle_state.heading_error,
-            ],
-            dtype=jnp.float32,
-        )
-
-
 # ---------------------------------------------------------------------------
-# Default safety / PCIS functions for the racecar scenario
+# Default corridor safety / PCIS helpers
 # ---------------------------------------------------------------------------
 
 
 def make_track_safety_fn(road_half_width: float) -> Callable:
     """
-    Create a safety function h(state, env_param) for track-boundary safety.
+    Create a safety function h(state, env_param) for lateral corridor safety.
 
-    In the racecar setting the "unsafe set" is outside the track boundaries.
     The signed distance to the boundary is::
 
         h(x) = road_half_width - |lateral_error|
@@ -1398,7 +1215,7 @@ def make_track_safety_fn(road_half_width: float) -> Callable:
     Parameters
     ----------
     road_half_width : float
-        Half-width of the driveable track in metres.
+        Half-width of the admissible corridor.
 
     Returns
     -------
@@ -1417,14 +1234,12 @@ def make_track_pcis_fn(pcis_half_width: float) -> Callable:
     """
     Create a PCIS membership function h_c(state).
 
-    The PCIS is the set of states with |lateral_error| < pcis_half_width,
-    which the backup (centerline-following) policy renders probabilistically
-    controlled-invariant.
+    The PCIS is the set of states with |lateral_error| < pcis_half_width.
 
     Parameters
     ----------
     pcis_half_width : float
-        Half-width of the PCIS region (should be ≤ road_half_width).
+        Half-width of the PCIS region.
 
     Returns
     -------
