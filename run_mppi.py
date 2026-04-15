@@ -28,6 +28,9 @@ DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)
 DEM_START_PIXEL = (1400, 950)
 OUTPUT_DIR = Path("output/canyon_mppi")
+REPO_ROOT = Path(__file__).resolve().parent
+DEM_PATH = REPO_ROOT / DEM_PATH
+OUTPUT_DIR = REPO_ROOT / OUTPUT_DIR
 
 
 def render_state(lateral_error_ft, width_ft):
@@ -190,20 +193,29 @@ def main():
     mppi_target_altitude_ft = target_altitude_ft
 
     optuna_params = {}
-    if Path("mppi_tuning.db").exists():
+    tuning_db_candidates = [
+        REPO_ROOT / "optuna" / "mppi_tuning.db",
+        REPO_ROOT / "mppi_tuning.db",
+    ]
+    tuning_db_path = next((candidate for candidate in tuning_db_candidates if candidate.exists()), None)
+    if tuning_db_path is not None:
         try:
             import optuna
-            study = optuna.load_study(study_name=args.study_name, storage="sqlite:///mppi_tuning.db")
+            storage = f"sqlite:///{tuning_db_path.as_posix()}"
+            study = optuna.load_study(study_name=args.study_name, storage=storage)
             optuna_params = study.best_params
-            print(f"Auto-loaded tuned parameters from {args.study_name}! (Reward: {study.best_value:.2f})")
+            print(
+                f"Auto-loaded tuned parameters from {args.study_name} "
+                f"at {tuning_db_path}! (Reward: {study.best_value:.2f})"
+            )
             if "target_alt_tune_ft" in optuna_params:
                 mppi_target_altitude_ft = float(optuna_params["target_alt_tune_ft"])
         except Exception as e:
-            print(f"Note: Could not load mppi_tuning.db ({e})")
+            print(f"Note: Could not load tuning DB {tuning_db_path} ({e})")
 
     config_base_kwargs = dict(
-        horizon=optuna_params.get("horizon", 45),
-        num_samples=4000,
+        horizon=30,
+        num_samples=1000,
         optimization_steps=3,
         lambda_=optuna_params.get("lambda_", 2.0),
         progress_gain=optuna_params.get("progress_gain", 0.60),

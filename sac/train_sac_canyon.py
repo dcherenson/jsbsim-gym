@@ -1,10 +1,15 @@
 import argparse
-from os import makedirs, path
+import sys
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
 from stable_baselines3 import SAC
 from stable_baselines3.common.monitor import Monitor
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
 from jsbsim_gym.canyon_env import (
@@ -17,7 +22,7 @@ from jsbsim_gym.canyon_env import (
     OBS_W_FPS,
 )
 
-DEM_PATH = "data/dem/black-canyon-gunnison_USGS10m.tif"
+DEM_PATH = REPO_ROOT / "data/dem/black-canyon-gunnison_USGS10m.tif"
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)
 DEM_START_PIXEL = (1400, 950)
 
@@ -272,7 +277,7 @@ def make_canyon_env(
         "JSBSimCanyon-v0",
         render_mode=None,
         canyon_mode="dem",
-        dem_path=DEM_PATH,
+        dem_path=str(DEM_PATH),
         dem_bbox=DEM_BBOX,
         dem_valley_rel_elev=0.08,
         dem_smoothing_window=11,
@@ -374,14 +379,15 @@ def parse_args():
 def train():
     args = parse_args()
 
-    root = path.abspath(path.dirname(__file__))
-    makedirs(path.join(root, "logs"), exist_ok=True)
-    makedirs(path.join(root, "models"), exist_ok=True)
+    log_dir = REPO_ROOT / "logs"
+    model_dir = REPO_ROOT / "models"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    model_dir.mkdir(parents=True, exist_ok=True)
 
-    log_path = path.join(root, "logs", "canyon_sac")
-    model_path = path.join(root, "models", "jsbsim_canyon_sac")
-    replay_path = path.join(root, "models", "jsbsim_canyon_sac_buffer")
-    monitor_path = path.join(root, "logs", "canyon_sac_monitor.csv")
+    log_path = log_dir / "canyon_sac"
+    model_path = model_dir / "jsbsim_canyon_sac"
+    replay_path = model_dir / "jsbsim_canyon_sac_buffer"
+    monitor_path = log_dir / "canyon_sac_monitor.csv"
 
     env = Monitor(
         make_canyon_env(
@@ -390,7 +396,7 @@ def train():
             angular_rate_penalty_gain=args.angular_rate_penalty_gain,
             angular_rate_threshold_deg_s=args.angular_rate_threshold_deg_s,
         ),
-        filename=monitor_path,
+        filename=str(monitor_path),
         info_keywords=(
             "termination_reason",
             "start_pixel_x",
@@ -433,7 +439,7 @@ def train():
             "MlpPolicy",
             env,
             verbose=1,
-            tensorboard_log=log_path,
+            tensorboard_log=str(log_path),
             learning_rate=args.learning_rate,
             gradient_steps=args.gradient_steps,
             learning_starts=args.learning_starts,
@@ -445,8 +451,8 @@ def train():
     finally:
         env.close()
         if model is not None:
-            model.save(model_path)
-            model.save_replay_buffer(replay_path)
+            model.save(str(model_path))
+            model.save_replay_buffer(str(replay_path))
 
 
 if __name__ == "__main__":

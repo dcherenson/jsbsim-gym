@@ -501,41 +501,82 @@ def _collect_multimodal_examples(df, centered_res, state_names):
     ]
 
     examples = []
+    min_group_count = 200
     for channel in state_names:
-        candidates = []
+        multimodal_candidates = []
+        fallback_candidates = []
         for group_cols in groupings:
             grouped = frame.groupby(list(group_cols), observed=True)
             for key, group in grouped:
                 values = group[channel].to_numpy(dtype=float)
-                if len(values) < 350:
+                if len(values) < min_group_count:
                     continue
                 centers, smooth, peaks = _multimodal_histogram(values)
-                if len(peaks) < 2:
-                    continue
-                candidates.append(
-                    {
-                        'channel': channel,
-                        'group_cols': group_cols,
-                        'group_key': key if isinstance(key, tuple) else (key,),
-                        'count': int(len(values)),
-                        'peak_count': int(len(peaks)),
-                        'peak_score': float(np.sum(smooth[peaks])),
-                        'values': values,
-                        'centers': centers,
-                        'smooth': smooth,
-                        'peaks': peaks,
-                    }
-                )
-        if candidates:
-            candidates.sort(key=lambda item: (-item['peak_count'], -item['peak_score'], -item['count']))
-            examples.append(candidates[0])
+                candidate = {
+                    'channel': channel,
+                    'group_cols': group_cols,
+                    'group_key': key if isinstance(key, tuple) else (key,),
+                    'count': int(len(values)),
+                    'peak_count': int(len(peaks)),
+                    'peak_score': float(np.sum(smooth[peaks])) if len(peaks) > 0 else 0.0,
+                    'values': values,
+                    'centers': centers,
+                    'smooth': smooth,
+                    'peaks': peaks,
+                }
+                if len(peaks) >= 2:
+                    multimodal_candidates.append(candidate)
+                else:
+                    fallback_candidates.append(candidate)
+
+        if multimodal_candidates:
+            multimodal_candidates.sort(key=lambda item: (-item['peak_count'], -item['peak_score'], -item['count']))
+            chosen = dict(multimodal_candidates[0])
+            chosen['selection_mode'] = 'multimodal'
+            examples.append(chosen)
+            continue
+
+        if fallback_candidates:
+            fallback_candidates.sort(key=lambda item: (-item['peak_score'], -item['count']))
+            chosen = dict(fallback_candidates[0])
+            chosen['selection_mode'] = 'slice_fallback'
+            examples.append(chosen)
+            continue
+
+        # Last-resort fallback: use the full-channel residual distribution.
+        values = centered_res[channel].to_numpy(dtype=float)
+        centers, smooth, peaks = _multimodal_histogram(values)
+        examples.append(
+            {
+                'channel': channel,
+                'group_cols': ('scope',),
+                'group_key': ('all',),
+                'count': int(len(values)),
+                'peak_count': int(len(peaks)),
+                'peak_score': float(np.sum(smooth[peaks])) if len(peaks) > 0 else 0.0,
+                'values': values,
+                'centers': centers,
+                'smooth': smooth,
+                'peaks': peaks,
+                'selection_mode': 'global_fallback',
+            }
+        )
     return examples
 
 
 def _save_multimodal_slices(df, centered_res, state_names, plot_dir):
     examples = _collect_multimodal_examples(df, centered_res, state_names)
-    fig, axes = plt.subplots(3, 2, figsize=(16, 12))
-    axes = axes.flatten()
+    n_examples = max(len(examples), 1)
+    n_cols = 2
+    n_rows = int(np.ceil(n_examples / float(n_cols)))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4.0 * n_rows))
+    axes = np.atleast_1d(axes).flatten()
+
+    selection_label = {
+        'multimodal': 'multimodal',
+        'slice_fallback': 'slice fallback',
+        'global_fallback': 'global fallback',
+    }
 
     for axis, example in zip(axes, examples):
         axis.hist(example['values'], bins=50, density=True, color="#bfdbfe", alpha=0.6)
@@ -548,7 +589,7 @@ def _save_multimodal_slices(df, centered_res, state_names, plot_dir):
             zorder=3,
         )
         axis.set_title(
-            f"{example['channel']} | peaks={example['peak_count']} | n={example['count']}\n{_format_multimodal_group(example)}",
+            f"{example['channel']} | peaks={example['peak_count']} | n={example['count']} | {selection_label.get(example.get('selection_mode'), 'multimodal')}\n{_format_multimodal_group(example)}",
             fontsize=9,
         )
         axis.set_xlabel("residual")
@@ -567,11 +608,13 @@ def generate_nominal_calibration_package():
     df = pd.read_parquet('f16_dataset.parquet')
     df = add_prev_actions(df)
 
-    # Backward compatibility: older datasets may not include these columns.
-    if 'mach' not in df.columns:
-        df['mach'] = _mach_from_dataframe(df)
-    if 'mass_slugs' not in df.columns:
-        df['mass_slugs'] = DEFAULT_MASS_SLUGS
+    required_columns = ['mach', 'mass_slugs']
+    missing_columns = [column for column in required_columns if column not in df.columns]
+    if missing_columns:
+        raise KeyError(
+            "Dataset missing required columns "
+            f"{missing_columns}. Regenerate the dataset with current collection pipeline."
+        )
     
     print("Module 1: Nominal Coefficient Model Identification (degree=3)")
     targets = rigid_body_kinematics(df)
@@ -683,8 +726,8 @@ def generate_nominal_calibration_package():
     print("Artifact successfully exported to f16_uncertainty_model.pkl")
 
 if __name__ == "__main__":
-    # Dispatch through the package import path so pickled artifacts reference
-    # jsbsim_gym.calibration.NominalModel rather than __main__.NominalModel.
+    # Dispatch through the package import path so pickled artifacts keep stable
+    # module-qualified class references.
     import sys
 
     project_root = os.path.dirname(os.path.dirname(__file__))

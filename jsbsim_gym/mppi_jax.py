@@ -3,18 +3,29 @@ import jax.numpy as jnp
 import numpy as np
 import functools
 from dataclasses import dataclass
+from itertools import combinations_with_replacement
 
 
 MPPI_FEATURE_NAMES = (
     "alpha",
     "beta",
+    "mach",
     "p",
     "q",
     "r",
+    "delta_t",
     "delta_e",
     "delta_a",
     "delta_r",
-    "delta_t",
+)
+
+MPPI_TARGET_NAMES = (
+    "C_X",
+    "C_Y",
+    "C_Z",
+    "C_L",
+    "C_M",
+    "C_N",
 )
 
 # F-16 inertia terms from aircraft/f16/f16.xml (slug*ft^2)
@@ -23,6 +34,15 @@ IYY = 55814.0
 IZZ = 63100.0
 IXZ = -982.0
 INERTIA_DET = IXX * IZZ - IXZ * IXZ
+
+WING_AREA_FT2 = 300.0
+WING_SPAN_FT = 30.0
+MEAN_AERODYNAMIC_CHORD_FT = 11.32
+DEFAULT_MASS_LBS = 17400.0 + 230.0 + 2000.0
+DEFAULT_MASS_SLUGS = DEFAULT_MASS_LBS / 32.174
+STANDARD_SPEED_OF_SOUND_FPS = 1116.45
+AIR_DENSITY_SLUG_FT3 = 0.0023769
+MIN_QBAR_PSF = 1.0
 
 @dataclass(frozen=True)
 class JaxMPPIConfig:
@@ -179,54 +199,79 @@ class JaxSmoothMPPIConfig(JaxMPPIConfig):
 
 jax.tree_util.register_pytree_node_class(JaxSmoothMPPIConfig)
 
+
+def _build_polynomial_powers(n_features, degree, include_bias):
+    powers = []
+    if include_bias:
+        powers.append(np.zeros(n_features, dtype=np.int32))
+    for deg in range(1, int(degree) + 1):
+        for combo in combinations_with_replacement(range(n_features), deg):
+            row = np.zeros(n_features, dtype=np.int32)
+            for idx in combo:
+                row[idx] += 1
+            powers.append(row)
+    return np.asarray(powers, dtype=np.int32)
+
+
 def load_nominal_weights():
     # Load from the npz file
     import os
-    path = os.path.join(os.path.dirname(__file__), "mppi_nominal_weights.npz")
+    path = os.path.join(os.path.dirname(__file__), "nominal_coeff_weights.npz")
     data = np.load(path, allow_pickle=True)
     W = np.asarray(data['W'])
     B = np.asarray(data['B'])
 
-    feature_names = tuple(MPPI_FEATURE_NAMES)
-    if "feature_names" in data:
-        feature_names = tuple(str(x) for x in data["feature_names"])
+    if "feature_names" not in data:
+        raise ValueError("nominal_coeff_weights.npz missing required metadata 'feature_names'.")
+    feature_names = tuple(str(x) for x in data["feature_names"])
 
     if feature_names != MPPI_FEATURE_NAMES:
         raise ValueError(
-            "mppi_nominal_weights.npz feature set mismatch. "
-            "Expected throttle-inclusive features "
+            "nominal_coeff_weights.npz feature set mismatch. "
+            "Expected feature order "
             f"{MPPI_FEATURE_NAMES}, got {feature_names}. "
-            "Regenerate weights via: uv run python extract_nominal_weights.py"
+            "Regenerate weights via: uv run python -m jsbsim_gym.calibration"
         )
 
-    n = len(MPPI_FEATURE_NAMES)
-    expected_rows = 1 + n + (n * (n + 1)) // 2
+    if "target_names" not in data:
+        raise ValueError("nominal_coeff_weights.npz missing required metadata 'target_names'.")
+    target_names = tuple(str(x) for x in data["target_names"])
+    if target_names != MPPI_TARGET_NAMES:
+        raise ValueError(
+            "nominal_coeff_weights.npz target set mismatch. "
+            f"Expected {MPPI_TARGET_NAMES}, got {target_names}."
+        )
+
+    if "model_space" not in data:
+        raise ValueError("nominal_coeff_weights.npz missing required metadata 'model_space'.")
+    model_space = str(data["model_space"][0])
+    if model_space != "aerodynamic_coefficients":
+        raise ValueError(
+            "nominal_coeff_weights.npz model space mismatch. "
+            f"Expected 'aerodynamic_coefficients', got '{model_space}'."
+        )
+
+    if "poly_degree" not in data:
+        raise ValueError("nominal_coeff_weights.npz missing required metadata 'poly_degree'.")
+    poly_degree = int(data["poly_degree"][0])
+    include_bias = bool(int(data["include_bias"][0])) if "include_bias" in data else True
+    poly_powers = _build_polynomial_powers(len(MPPI_FEATURE_NAMES), poly_degree, include_bias)
+    expected_rows = int(poly_powers.shape[0])
+
     if W.shape[0] != expected_rows:
         raise ValueError(
-            "mppi_nominal_weights.npz has incompatible polynomial size. "
+            "nominal_coeff_weights.npz has incompatible polynomial size. "
             f"Expected W rows={expected_rows}, got {W.shape[0]}. "
-            "Regenerate weights via: uv run python extract_nominal_weights.py"
+            "Regenerate weights via: uv run python -m jsbsim_gym.calibration"
         )
     if B.shape[0] != 6:
         raise ValueError(f"Expected 6 output channels in B, got shape {B.shape}")
 
-    return jnp.asarray(W), jnp.asarray(B)
+    return jnp.asarray(W), jnp.asarray(B), jnp.asarray(poly_powers, dtype=jnp.int32)
 
-def expand_poly(x):
-    # x shape (n_features,)
-    # The polynomials features order: 1, x, x^2 + cross terms
-    # Using the same order as sklearn PolynomialFeatures(degree=2)
-    # Features: alpha, beta, p, q, r, delta_e, delta_a, delta_r, delta_t
-    ones = jnp.ones((1,))
-
-    n_features = int(x.shape[0])
-    quad = []
-    for i in range(n_features):
-        for j in range(i, n_features):
-            quad.append(x[i] * x[j])
-
-    quad_stack = jnp.stack(quad)
-    return jnp.concatenate([ones, x, quad_stack])
+def expand_poly(x, poly_powers):
+    # Matches sklearn PolynomialFeatures ordering using precomputed exponent vectors.
+    return jnp.prod(jnp.power(x[None, :], poly_powers), axis=1)
 
 def canyon_width(p_N):
     W_base = 300.0
@@ -281,7 +326,7 @@ def moments_to_angular_rate_derivatives(p, q, r, L, M, N):
     r_dot = (IXX * rhs_z - IXZ * rhs_x) / INERTIA_DET
     return p_dot, q_dot, r_dot
 
-def f16_kinematics_step(state, action, W, B):
+def f16_kinematics_step(state, action, W, B, poly_powers):
     # State: p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi
     p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi = state
     
@@ -296,11 +341,26 @@ def f16_kinematics_step(state, action, W, B):
     V = jnp.sqrt(jnp.maximum(V_sq, 1.0))
     beta = jnp.arcsin(jnp.clip(v / V, -1.0, 1.0))
     
-    features = jnp.array([alpha, beta, p, q, r, delta_e, delta_a, delta_r, delta_t])
-    phi_vec = expand_poly(features)
+    mach = V / STANDARD_SPEED_OF_SOUND_FPS
+
+    features = jnp.array([alpha, beta, mach, p, q, r, delta_t, delta_e, delta_a, delta_r], dtype=jnp.float32)
+    phi_vec = expand_poly(features, poly_powers)
     
     preds = jnp.dot(phi_vec, W) + B
-    X, Y, Z, L, M, N = preds
+    C_X, C_Y, C_Z, C_L, C_M, C_N = preds
+
+    qbar_psf = jnp.maximum(0.5 * AIR_DENSITY_SLUG_FT3 * V_sq, MIN_QBAR_PSF)
+    force_scale = qbar_psf * WING_AREA_FT2 / DEFAULT_MASS_SLUGS
+    roll_moment_scale = qbar_psf * WING_AREA_FT2 * WING_SPAN_FT
+    pitch_moment_scale = qbar_psf * WING_AREA_FT2 * MEAN_AERODYNAMIC_CHORD_FT
+    yaw_moment_scale = qbar_psf * WING_AREA_FT2 * WING_SPAN_FT
+
+    X = C_X * force_scale
+    Y = C_Y * force_scale
+    Z = C_Z * force_scale
+    L = C_L * roll_moment_scale
+    M = C_M * pitch_moment_scale
+    N = C_N * yaw_moment_scale
     
     G = 32.174
     u_dot = X + r*v - q*w - G*jnp.sin(theta)
@@ -360,9 +420,9 @@ def f16_kinematics_step(state, action, W, B):
     
     return state_next
 
-def rollout_trajectory(initial_state, action_seq, W, B):
+def rollout_trajectory(initial_state, action_seq, W, B, poly_powers):
     def step_fn(state, action):
-        next_state = f16_kinematics_step(state, action, W, B)
+        next_state = f16_kinematics_step(state, action, W, B, poly_powers)
         return next_state, next_state
     
     _, state_seq = jax.lax.scan(step_fn, initial_state, action_seq)
@@ -370,8 +430,8 @@ def rollout_trajectory(initial_state, action_seq, W, B):
 
 
 @jax.jit
-def rollout_trajectory_batch(initial_state, action_batch, W, B):
-    return jax.vmap(lambda action_seq: rollout_trajectory(initial_state, action_seq, W, B))(action_batch)
+def rollout_trajectory_batch(initial_state, action_batch, W, B, poly_powers):
+    return jax.vmap(lambda action_seq: rollout_trajectory(initial_state, action_seq, W, B, poly_powers))(action_batch)
 
 
 def smooth_noise_batch(noise, kernel_weights):
@@ -400,6 +460,7 @@ def single_rollout_cost(
     initial_prev_action,
     W,
     B,
+    poly_powers,
     canyon_north_samples_ft,
     canyon_width_samples_ft,
     canyon_center_east_samples_ft,
@@ -415,7 +476,7 @@ def single_rollout_cost(
         low = jnp.asarray(config.action_low, dtype=jnp.float32)
         high = jnp.asarray(config.action_high, dtype=jnp.float32)
         bounded_action = clip_action(action, low, high)
-        next_state_raw = f16_kinematics_step(state, bounded_action, W, B)
+        next_state_raw = f16_kinematics_step(state, bounded_action, W, B, poly_powers)
 
         p_N = next_state_raw[0]
         p_E = next_state_raw[1]
@@ -577,6 +638,7 @@ def mppi_optimize_step(
     key,
     W,
     B,
+    poly_powers,
     canyon_north_samples_ft,
     canyon_width_samples_ft,
     canyon_center_east_samples_ft,
@@ -601,6 +663,7 @@ def mppi_optimize_step(
             initial_prev_action,
             W,
             B,
+            poly_powers,
             canyon_north_samples_ft,
             canyon_width_samples_ft,
             canyon_center_east_samples_ft,
@@ -619,7 +682,7 @@ def mppi_optimize_step(
     weighted_noise = jnp.tensordot(weights, noise, axes=(0, 0))
     optimized_plan = clip_action(base_action_plan + weighted_noise, low, high)
 
-    return optimized_plan, total_costs, state_seq_best(initial_state, optimized_plan, W, B), candidate_actions
+    return optimized_plan, total_costs, state_seq_best(initial_state, optimized_plan, W, B, poly_powers), candidate_actions
 
 
 @jax.jit
@@ -630,6 +693,7 @@ def smooth_mppi_optimize_step(
     key,
     W,
     B,
+    poly_powers,
     canyon_north_samples_ft,
     canyon_width_samples_ft,
     canyon_center_east_samples_ft,
@@ -658,6 +722,7 @@ def smooth_mppi_optimize_step(
             initial_prev_action,
             W,
             B,
+            poly_powers,
             canyon_north_samples_ft,
             canyon_width_samples_ft,
             canyon_center_east_samples_ft,
@@ -678,10 +743,10 @@ def smooth_mppi_optimize_step(
     weighted_delta = jnp.tensordot(weights, bounded_delta, axes=(0, 0))
     optimized_plan = clip_action(base_action_plan + weighted_delta, low, high)
 
-    return optimized_plan, total_costs, state_seq_best(initial_state, optimized_plan, W, B), candidate_actions
+    return optimized_plan, total_costs, state_seq_best(initial_state, optimized_plan, W, B, poly_powers), candidate_actions
 
-def state_seq_best(initial_state, plan, W, B):
-    return rollout_trajectory(initial_state, plan, W, B)
+def state_seq_best(initial_state, plan, W, B, poly_powers):
+    return rollout_trajectory(initial_state, plan, W, B, poly_powers)
 
 class JaxMPPIController:
     def __init__(
@@ -693,7 +758,7 @@ class JaxMPPIController:
         canyon_centerline_heading_rad_samples=None,
     ):
         self.config = config or JaxMPPIConfig()
-        self.W, self.B = load_nominal_weights()
+        self.W, self.B, self.poly_powers = load_nominal_weights()
         self.key = jax.random.PRNGKey(self.config.seed)
         self.base_plan = jnp.zeros((self.config.horizon, 4), dtype=jnp.float32)
         self.base_plan = self.base_plan.at[:, 3].set(0.55)
@@ -795,7 +860,7 @@ class JaxMPPIController:
 
         limit = int(min(max(int(self.config.debug_num_trajectories), 1), int(candidate_actions.shape[0])))
         sampled_actions = candidate_actions[:limit]
-        sampled_state_seq = rollout_trajectory_batch(initial_state, sampled_actions, self.W, self.B)
+        sampled_state_seq = rollout_trajectory_batch(initial_state, sampled_actions, self.W, self.B, self.poly_powers)
 
         initial_state_tiled = jnp.broadcast_to(
             initial_state[None, None, :],
@@ -857,6 +922,7 @@ class JaxMPPIController:
             key,
             self.W,
             self.B,
+            self.poly_powers,
             self.canyon_north_samples_ft,
             self.canyon_width_samples_ft,
             self.canyon_center_east_samples_ft,
@@ -939,6 +1005,7 @@ class JaxSmoothMPPIController(JaxMPPIController):
             key,
             self.W,
             self.B,
+            self.poly_powers,
             self.canyon_north_samples_ft,
             self.canyon_width_samples_ft,
             self.canyon_center_east_samples_ft,

@@ -1,5 +1,6 @@
 import argparse
 import json
+import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -7,15 +8,19 @@ import gymnasium as gym
 import numpy as np
 import optuna
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
 from jsbsim_gym.simple_controller import SimpleCanyonController, SimpleCanyonControllerConfig
 
-DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
+DEM_PATH = REPO_ROOT / "data/dem/black-canyon-gunnison_USGS10m.tif"
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)
 DEM_START_PIXEL = (1400, 950)
 
 KTS_TO_FPS = 1.68781
-DEFAULT_STORAGE = "sqlite:///simple_controller_tuning.db"
+DEFAULT_STORAGE = f"sqlite:///{(REPO_ROOT / 'optuna' / 'simple_controller_tuning.db').as_posix()}"
 
 
 def parse_args():
@@ -89,7 +94,7 @@ def parse_args():
     parser.add_argument(
         "--output-json",
         type=Path,
-        default=Path("output/simple_controller/simple_controller_optuna_best.json"),
+        default=REPO_ROOT / "output/simple_controller/simple_controller_optuna_best.json",
         help="Path to write the best-parameter JSON summary.",
     )
 

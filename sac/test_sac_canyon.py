@@ -14,16 +14,20 @@ sys.modules["gym"] = gym
 sys.modules["gym.spaces"] = gymnasium.spaces
 sys.modules["gym.envs"] = gymnasium.envs
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
 
 
-DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
+DEM_PATH = REPO_ROOT / "data/dem/black-canyon-gunnison_USGS10m.tif"
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)
 DEM_START_PIXEL = (1400, 950)
-MODEL_PATH = "models/jsbsim_canyon_sac"
-MP4_OUTPUT = "canyon_sac.mp4"
-GIF_OUTPUT = "canyon_sac.gif"
-OVERLAY_OUTPUT = Path("data/dem/plots/black_canyon_trajectory_overlay_sac.png")
+MODEL_PATH = REPO_ROOT / "models/jsbsim_canyon_sac"
+MP4_OUTPUT = REPO_ROOT / "canyon_sac.mp4"
+GIF_OUTPUT = REPO_ROOT / "canyon_sac.gif"
+OVERLAY_OUTPUT = REPO_ROOT / "data/dem/plots/black_canyon_trajectory_overlay_sac.png"
 
 
 def latlon_to_pixel(lat_deg, lon_deg, south, north, west, east, rows, cols):
@@ -127,10 +131,10 @@ custom_objects = {
     "observation_space": env.observation_space,
     "action_space": env.action_space,
 }
-model = SAC.load(MODEL_PATH, env=env, custom_objects=custom_objects)
+model = SAC.load(str(MODEL_PATH), env=env, custom_objects=custom_objects)
 
-mp4_writer = iio.get_writer(MP4_OUTPUT, format="ffmpeg", fps=30)
-gif_writer = iio.get_writer(GIF_OUTPUT, format="gif", fps=8)
+mp4_writer = iio.get_writer(str(MP4_OUTPUT), format="ffmpeg", fps=30)
+gif_writer = iio.get_writer(str(GIF_OUTPUT), format="gif", fps=8)
 
 obs, info = env.reset(seed=3)
 print(
