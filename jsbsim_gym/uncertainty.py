@@ -2,12 +2,29 @@ import numpy as np
 import pandas as pd
 import joblib
 
+
+def _load_artifact_with_legacy_nominalmodel_support(artifact_path):
+    try:
+        return joblib.load(artifact_path)
+    except AttributeError as exc:
+        # Older artifacts serialized from direct script execution may reference
+        # __main__.NominalModel. Rebind that symbol and retry loading.
+        if "NominalModel" not in str(exc):
+            raise
+
+        import __main__
+        from jsbsim_gym.calibration import NominalModel
+
+        if not hasattr(__main__, "NominalModel"):
+            __main__.NominalModel = NominalModel
+        return joblib.load(artifact_path)
+
 class RuntimeUncertaintySampler:
     def __init__(self, artifact_path='f16_uncertainty_model.pkl'):
         """
         Loads the compiled empirical uncertainty model artifact.
         """
-        artifact = joblib.load(artifact_path)
+        artifact = _load_artifact_with_legacy_nominalmodel_support(artifact_path)
         
         # Unpack serialized components
         self.kdtree = artifact['kdtree']
@@ -20,8 +37,16 @@ class RuntimeUncertaintySampler:
         # we can iloc appropriately.
         self.dataset = self.dataset.reset_index(drop=True)
         
-        # State variables containing centered residuals
-        self.residual_columns = ['w_u', 'w_v', 'w_w', 'w_p', 'w_q', 'w_r']
+        artifact_residual_columns = artifact.get('residual_columns')
+        if artifact_residual_columns is not None:
+            self.residual_columns = [str(column) for column in artifact_residual_columns]
+        else:
+            coeff_columns = ['w_C_X', 'w_C_Y', 'w_C_Z', 'w_C_L', 'w_C_M', 'w_C_N']
+            if all(column in self.dataset.columns for column in coeff_columns):
+                self.residual_columns = coeff_columns
+            else:
+                # Backward compatibility for older artifacts that stored state residuals.
+                self.residual_columns = ['w_u', 'w_v', 'w_w', 'w_p', 'w_q', 'w_r']
         
     def sample(self, z_q, W_c_q, config=None):
         """

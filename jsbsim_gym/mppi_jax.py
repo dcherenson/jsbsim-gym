@@ -17,10 +17,17 @@ MPPI_FEATURE_NAMES = (
     "delta_t",
 )
 
+# F-16 inertia terms from aircraft/f16/f16.xml (slug*ft^2)
+IXX = 9496.0
+IYY = 55814.0
+IZZ = 63100.0
+IXZ = -982.0
+INERTIA_DET = IXX * IZZ - IXZ * IXZ
+
 @dataclass(frozen=True)
 class JaxMPPIConfig:
     horizon: int = 40
-    num_samples: int = 1024
+    num_samples: int = 4000
     optimization_steps: int = 2
     replan_interval: int = 1
     lambda_: float = 2.0
@@ -255,6 +262,25 @@ def softmax_weights(costs, temperature):
     weights = jnp.exp(logits)
     return weights / (jnp.sum(weights) + 1e-8)
 
+
+def moments_to_angular_rate_derivatives(p, q, r, L, M, N):
+    h_x = IXX * p + IXZ * r
+    h_y = IYY * q
+    h_z = IXZ * p + IZZ * r
+
+    cross_x = q * h_z - r * h_y
+    cross_y = r * h_x - p * h_z
+    cross_z = p * h_y - q * h_x
+
+    rhs_x = L - cross_x
+    rhs_y = M - cross_y
+    rhs_z = N - cross_z
+
+    p_dot = (IZZ * rhs_x - IXZ * rhs_z) / INERTIA_DET
+    q_dot = rhs_y / IYY
+    r_dot = (IXX * rhs_z - IXZ * rhs_x) / INERTIA_DET
+    return p_dot, q_dot, r_dot
+
 def f16_kinematics_step(state, action, W, B):
     # State: p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi
     p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi = state
@@ -281,10 +307,8 @@ def f16_kinematics_step(state, action, W, B):
     
     v_dot = Y + p*w - r*u + G*jnp.sin(phi)*jnp.cos(theta)
     w_dot = Z + q*u - p*v + G*jnp.cos(phi)*jnp.cos(theta)
-    
-    p_dot = L
-    q_dot = M
-    r_dot = N
+
+    p_dot, q_dot, r_dot = moments_to_angular_rate_derivatives(p, q, r, L, M, N)
     
     u_dot = jnp.clip(u_dot, -1000.0, 1000.0)
     v_dot = jnp.clip(v_dot, -1000.0, 1000.0)

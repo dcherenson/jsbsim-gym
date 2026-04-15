@@ -4,6 +4,8 @@ from jsbsim_gym.env import JSBSimEnv, RADIUS
 from jsbsim_gym.canyon import ProceduralCanyon
 
 RADIUS_FT = RADIUS * 3.28084  # Radius of earth in feet
+DEFAULT_MASS_LBS = 17400.0 + 230.0 + 2000.0
+DEFAULT_MASS_SLUGS = DEFAULT_MASS_LBS / 32.174
 
 class DataCollectionEnv(JSBSimEnv):
     def __init__(self, render_mode=None):
@@ -44,6 +46,7 @@ class DataCollectionEnv(JSBSimEnv):
         v = self.simulation.get_property_value("velocities/v-fps")
         w = self.simulation.get_property_value("velocities/w-fps")
         V = self.simulation.get_property_value("velocities/vt-fps")
+        mach = self.simulation.get_property_value("velocities/mach")
         
         alpha = self.simulation.get_property_value("aero/alpha-rad")
         beta = self.simulation.get_property_value("aero/beta-rad")
@@ -58,6 +61,9 @@ class DataCollectionEnv(JSBSimEnv):
         
         qbar = self.simulation.get_property_value("aero/qbar-psf")
         alpha_dot = self.simulation.get_property_value("aero/alphadot-rad_sec")
+        mass_slugs = self.simulation.get_property_value("inertia/mass-slugs")
+        if not np.isfinite(mass_slugs) or mass_slugs <= 0.0:
+            mass_slugs = DEFAULT_MASS_SLUGS
         
         width, grad = self.canyon.get_geometry(p_N)
         
@@ -67,11 +73,12 @@ class DataCollectionEnv(JSBSimEnv):
         
         return {
             'p_N': p_N, 'p_E': p_E, 'h': h, 
-            'V': V, 'u': u, 'v': v, 'w': w,
+            'V': V, 'mach': mach, 'u': u, 'v': v, 'w': w,
             'alpha': alpha, 'beta': beta,
             'phi': phi, 'theta': theta, 'psi': psi,
             'p': p, 'q': q, 'r': r,
             'qbar': qbar, 'alpha_dot': alpha_dot,
+            'mass_slugs': mass_slugs,
             'canyon_width': width, 'canyon_width_grad': grad,
             'wind_u': wind_n, 'wind_v': wind_e, 'wind_w': wind_d
         }

@@ -7,12 +7,17 @@ class PersistentExcitationController:
         target_p_e=0.0,
         speed_schedule_fps=None,
         aoa_schedule_deg=None,
+        beta_schedule_deg=None,
         schedule_segment_sec=12.0,
+        schedule_phase_offset_sec=0.0,
+        excitation_scale=1.0,
         seed=0,
     ):
         self.target_h = target_h
         self.target_p_e = target_p_e
         self.schedule_segment_sec = float(max(schedule_segment_sec, 1.0))
+        self.schedule_phase_offset_sec = float(max(schedule_phase_offset_sec, 0.0))
+        self.excitation_scale = float(np.clip(excitation_scale, 0.5, 2.0))
         self.rng = np.random.default_rng(seed)
         self.speed_schedule_fps = np.asarray(
             speed_schedule_fps if speed_schedule_fps is not None else [320.0, 420.0, 520.0, 620.0, 740.0, 860.0],
@@ -22,32 +27,40 @@ class PersistentExcitationController:
             aoa_schedule_deg if aoa_schedule_deg is not None else [-2.0, 2.0, 6.0, 10.0, 14.0, 18.0],
             dtype=np.float64,
         )
+        self.beta_schedule_deg = np.asarray(
+            beta_schedule_deg if beta_schedule_deg is not None else [-10.0, -6.0, -2.0, 0.0, 2.0, 6.0, 10.0],
+            dtype=np.float64,
+        )
         if self.speed_schedule_fps.size == 0:
             raise ValueError("speed_schedule_fps must not be empty")
         if self.aoa_schedule_deg.size == 0:
             raise ValueError("aoa_schedule_deg must not be empty")
+        if self.beta_schedule_deg.size == 0:
+            raise ValueError("beta_schedule_deg must not be empty")
 
         self._speed_error_int = 0.0
         self._aoa_error_int = 0.0
+        self._beta_error_int = 0.0
         self._last_targets = {
             "target_speed_fps": float(self.speed_schedule_fps[0]),
             "target_aoa_deg": float(self.aoa_schedule_deg[0]),
+            "target_beta_deg": float(self.beta_schedule_deg[0]),
         }
         
         # Mutually prime frequencies for persistent excitation
         self.frequencies = {
             'throttle': [0.11, 0.31, 0.73],
             'elevator': [0.13, 0.37, 0.79],
-            'aileron':  [0.17, 0.41, 0.83],
-            'rudder':   [0.19, 0.43, 0.89]
+            'aileron':  [0.07, 0.17, 0.41],
+            'rudder':   [0.05, 0.13, 0.31],
         }
         
         # Amplitudes for the perturbations
         self.amplitudes = {
-            'throttle': 0.12,
-            'elevator': 0.44,
-            'aileron': 0.2,
-            'rudder': 0.1
+            'throttle': 0.16 * self.excitation_scale,
+            'elevator': 0.48 * self.excitation_scale,
+            'aileron': 0.26 * self.excitation_scale,
+            'rudder': 0.18 * self.excitation_scale,
         }
 
     @property
@@ -55,14 +68,17 @@ class PersistentExcitationController:
         return dict(self._last_targets)
 
     def _scheduled_targets(self, time_sec):
-        idx = int(max(time_sec, 0.0) // self.schedule_segment_sec)
+        shifted_time = max(time_sec + self.schedule_phase_offset_sec, 0.0)
+        idx = int(shifted_time // self.schedule_segment_sec)
         speed = float(self.speed_schedule_fps[idx % self.speed_schedule_fps.size])
         aoa = float(self.aoa_schedule_deg[idx % self.aoa_schedule_deg.size])
+        beta = float(self.beta_schedule_deg[idx % self.beta_schedule_deg.size])
         self._last_targets = {
             "target_speed_fps": speed,
             "target_aoa_deg": aoa,
+            "target_beta_deg": beta,
         }
-        return speed, aoa
+        return speed, aoa, beta
 
     def get_action(self, state_dict, time_sec):
         """
@@ -80,17 +96,21 @@ class PersistentExcitationController:
         theta = state_dict['theta']
         phi = state_dict['phi']
         q = state_dict['q']
+        r = state_dict['r']
+        beta_deg = float(np.degrees(state_dict['beta']))
 
         speed_fps = float(np.sqrt(state_dict['u'] ** 2 + state_dict['v'] ** 2 + state_dict['w'] ** 2))
         aoa_deg = float(np.degrees(state_dict['alpha']))
-        target_speed_fps, target_aoa_deg = self._scheduled_targets(time_sec)
+        target_speed_fps, target_aoa_deg, target_beta_deg = self._scheduled_targets(time_sec)
 
         # Track speed and AoA envelopes to increase model coverage across the
         # nonlinear flight envelope while maintaining safe canyon flight.
         speed_error = target_speed_fps - speed_fps
         aoa_error = target_aoa_deg - aoa_deg
+        beta_error = target_beta_deg - beta_deg
         self._speed_error_int = float(np.clip(self._speed_error_int + speed_error * (1.0 / 30.0), -800.0, 800.0))
         self._aoa_error_int = float(np.clip(self._aoa_error_int + aoa_error * (1.0 / 30.0), -400.0, 400.0))
+        self._beta_error_int = float(np.clip(self._beta_error_int + beta_error * (1.0 / 30.0), -500.0, 500.0))
         
         # Simple baseline controller to keep aircraft alive and roughly centered
         # 1. Altitude and AoA envelope control
@@ -119,9 +139,40 @@ class PersistentExcitationController:
         
         # 2. Heading / lateral position control
         pE_error = self.target_p_e - p_E
-        baseline_aileron = np.clip(pE_error * 0.001 - phi * 0.8, -0.5, 0.5)
-        
-        baseline_rudder = 0.0
+        baseline_aileron = np.clip(
+            pE_error * 0.0010
+            - phi * 0.65,
+            -0.65,
+            0.65,
+        )
+
+        if abs(target_beta_deg) >= 8.0:
+            beta_program_bias = 0.65 * np.sign(target_beta_deg)
+        elif abs(target_beta_deg) >= 3.0:
+            beta_program_bias = 0.35 * np.sign(target_beta_deg)
+        else:
+            beta_program_bias = 0.0
+
+        segment_phase = (max(time_sec, 0.0) % self.schedule_segment_sec) / self.schedule_segment_sec
+        if abs(target_beta_deg) >= 6.0 and segment_phase < 0.55:
+            beta_program_bias *= 1.25
+
+        beta_kick = 0.0
+        if abs(target_beta_deg) >= 8.0:
+            beta_kick = 0.35 * np.sign(np.sin(2.0 * np.pi * 0.06 * time_sec + 0.6))
+        elif abs(target_beta_deg) >= 3.0:
+            beta_kick = 0.20 * np.sin(2.0 * np.pi * 0.05 * time_sec + 0.4)
+
+        baseline_rudder = np.clip(
+            0.16 * beta_error
+            + 0.004 * self._beta_error_int
+            - 0.24 * r
+            + 0.04 * phi
+            + beta_program_bias,
+            + beta_kick
+            -1.00,
+            1.00,
+        )
         baseline_throttle = np.clip(
             0.56
             + 0.0018 * speed_error

@@ -203,7 +203,7 @@ def main():
 
     config_base_kwargs = dict(
         horizon=optuna_params.get("horizon", 45),
-        num_samples=768,
+        num_samples=4000,
         optimization_steps=3,
         lambda_=optuna_params.get("lambda_", 2.0),
         progress_gain=optuna_params.get("progress_gain", 0.60),

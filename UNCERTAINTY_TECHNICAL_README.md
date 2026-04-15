@@ -35,22 +35,41 @@ The sequences are serialized out of the loop at discrete times producing an extr
 Operating exclusively via offline dataset inspection, the process attempts to estimate a robust, completely discretized polynomial map for $x_{t+1} \approx f_{\text{nom}}(x_t, u_t)$.
 
 ### 1. Kinematic Target Extraction
-Unlike typical deep-learning formulations, we utilize explicit rigid body kinematic simplifications separating inherent non-linear Coriolis and Gravitational effects from the purely interactive specific aerodynamic forces.
+Unlike typical deep-learning formulations, we utilize an explicit rigid-body decomposition that separates Coriolis and gravitational coupling from aerodynamic specific-force channels while preserving full rotational inertia coupling.
 
 $$ \hat{X}_{t} = \frac{u_{t+1} - u_t}{\Delta t} - (r_t v_t - q_t w_t - g \sin\theta_t) $$
 $$ \hat{Y}_{t} = \frac{v_{t+1} - v_t}{\Delta t} - (p_t w_t - r_t u_t + g \sin\phi_t \cos\theta_t) $$
 $$ \hat{Z}_{t} = \frac{w_{t+1} - w_t}{\Delta t} - (q_t u_t - p_t v_t + g \cos\phi_t \cos\theta_t) $$
 
-By assuming arbitrary constant inertial decoupling, the specific rolling elements $\hat{L}, \hat{M}, \hat{N}$ strictly evaluate temporal displacement scaling.
+Angular accelerations are first recovered from the dataset:
+
+$$ \dot p = \frac{p_{t+1} - p_t}{\Delta t},\quad \dot q = \frac{q_{t+1} - q_t}{\Delta t},\quad \dot r = \frac{r_{t+1} - r_t}{\Delta t}. $$
+
+Then rotational channels are mapped to body moments via the full Euler rigid-body relation:
+
+$$ \begin{bmatrix} \hat{L} \\ \hat{M} \\ \hat{N} \end{bmatrix} = I\,\dot\omega + \omega \times (I\omega),\quad \omega = [p, q, r]^T, $$
+
+using the F-16 inertia tensor (including non-zero $I_{xz}$).
 
 ### 2. Analytical Ridge Regression (Nominal Base)
-Rather than parameterizing strict F-16 wind tunnel coefficient graphs ($C_{L_q}$, $C_{m_{\delta_e}}$, etc.), we subsume the target dimensional forces across a general $L_2$-regularized multivariate polynomial.
+Rather than regressing dimensional force/moment channels directly, we first convert them to aerodynamic coefficients and fit those coefficients with a single global polynomial map.
 
-Extracting a structured space vector: $\upsilon = [\alpha, \beta, p, q, r, \delta_e, \delta_a, \delta_r]^T$. 
+Using $S$ (wing area), $b$ (wingspan), and $\bar c$ (mean aerodynamic chord), the coefficient targets are
 
-We construct the expanded $2^{\text{nd}}$ degree combinations $\mathcal{X}_{poly} = \text{Poly}^2(\upsilon_t)$. 
+$$ C_{X,t} = \frac{\hat{X}_t}{q_{\text{bar},t}S/m_t},\quad C_{Y,t} = \frac{\hat{Y}_t}{q_{\text{bar},t}S/m_t},\quad C_{Z,t} = \frac{\hat{Z}_t}{q_{\text{bar},t}S/m_t}, $$
+$$ C_{L,t} = \frac{\hat{L}_t}{q_{\text{bar},t}Sb},\quad C_{M,t} = \frac{\hat{M}_t}{q_{\text{bar},t}S\bar c},\quad C_{N,t} = \frac{\hat{N}_t}{q_{\text{bar},t}Sb}. $$
 
-$$ \min_{\Theta} \sum_{t=1}^{N} || \hat{X}_{t} - \Theta \mathcal{X}_{poly}^{(t)} ||^2_2 + \lambda ||\Theta||^2_2 $$
+The polynomial feature vector is
+
+$$\upsilon = [\alpha,\beta,\mathrm{Mach},p,q,r,\delta_t,\delta_e,\delta_a,\delta_r]^T,$$
+
+and we use degree-$3$ expansion $\phi_3(\upsilon_t)$ with ridge regularization for each coefficient channel:
+
+$$ \min_{\Theta_j} \sum_{t=1}^{N} \left\lVert C_{j,t} - \Theta_j\phi_3(\upsilon_t) \right\rVert_2^2 + \lambda \lVert \Theta_j \rVert_2^2,\quad j \in \{X,Y,Z,L,M,N\}. $$
+
+At rollout time, predicted coefficients are mapped back to dimensional channels by the same scaling:
+
+$$ \hat{X}=\frac{q_{\text{bar}}S}{m}\hat{C}_X,\;\hat{Y}=\frac{q_{\text{bar}}S}{m}\hat{C}_Y,\;\hat{Z}=\frac{q_{\text{bar}}S}{m}\hat{C}_Z,\;\hat{L}=q_{\text{bar}}Sb\hat{C}_L,\;\hat{M}=q_{\text{bar}}S\bar c\hat{C}_M,\;\hat{N}=q_{\text{bar}}Sb\hat{C}_N. $$
 
 ### 3. Residual Extraction
 Projecting the resulting trained analytical weights back through rigid mechanics produces the *Nominal Kinematic Prediction* string $x_{t+1}^{nom}$. The difference to the environment observation defines the unfiltered baseline variations holding all stochastic structure.
@@ -168,9 +187,9 @@ $$\dot u = X + rv - qw - g\sin\theta,$$
 $$\dot v = Y + pw - ru + g\sin\phi\cos\theta,$$
 $$\dot w = Z + qu - pv + g\cos\phi\cos\theta,$$
 
-and MPPI uses a simplified angular-rate model
+and MPPI uses the full coupled angular-rate model
 
-$$\dot p = L,\qquad \dot q = M,\qquad \dot r = N.$$
+$$\dot\omega = I^{-1}\!\left(\begin{bmatrix}L\\M\\N\end{bmatrix} - \omega \times (I\omega)\right),\qquad \omega = [p, q, r]^T.$$
 
 Euler angle rates:
 
