@@ -10,6 +10,9 @@ import numpy as np
 # Default to CPU for this script unless the user explicitly overrides it.
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
+import jax.numpy as jnp
+
+from drs_gatekeeper import DRSGatekeeper, GatekeeperParams, TrackBoundsEstimate
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
 from jsbsim_gym.canyon_env import OBS_ALTITUDE_ERROR_FT, OBS_PHI, OBS_P, OBS_Q, OBS_R, OBS_THETA
 from jsbsim_gym.canyon_artifacts import CanyonRunRecorder
@@ -18,12 +21,17 @@ from jsbsim_gym.mppi_jax import (
     JaxMPPIController,
     JaxSmoothMPPIConfig,
     JaxSmoothMPPIController,
+    f16_kinematics_step,
+    load_nominal_weights,
 )
 from jsbsim_gym.simple_controller import (
     SimpleCanyonController,
     SimpleCanyonControllerConfig,
+    SimpleTrajectoryController,
+    build_reference_trajectory,
     with_default_simple_controller_optuna_gains,
 )
+from jsbsim_gym.uncertainty import RuntimeUncertaintySampler, sample_empirical_jax as sample_empirical_coeff_jax
 
 DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)
@@ -31,6 +39,10 @@ DEM_START_PIXEL = (1400, 950)
 REPO_ROOT = Path(__file__).resolve().parent
 DEM_PATH = REPO_ROOT / DEM_PATH
 OUTPUT_ROOT = REPO_ROOT / "output"
+UNCERTAINTY_ARTIFACT_PATH = REPO_ROOT / "f16_uncertainty_model.pkl"
+KTS_TO_FPS = 1.68781
+M_TO_FT = 3.28084
+G_FTPS2 = 32.174
 
 
 def render_state(lateral_error_ft, width_ft):
@@ -46,6 +58,10 @@ def render_state(lateral_error_ft, width_ft):
 
 def _wrap_heading_deg(angle_rad):
     return float(np.mod(np.degrees(float(angle_rad)), 360.0))
+
+
+def _wrap_angle_rad(angle_rad):
+    return float(np.arctan2(np.sin(float(angle_rad)), np.cos(float(angle_rad))))
 
 
 def to_mppi_state(env, state, altitude_ref_ft):
@@ -76,6 +92,319 @@ def to_mppi_state(env, state, altitude_ref_ft):
         "phi": float(state["phi"]),
         "theta": float(state["theta"]),
         "psi": float(state["psi"]),
+        "beta": float(state.get("beta", 0.0)),
+        "ny": float(state.get("ny", 0.0)),
+        "nz": float(state.get("nz", 1.0)),
+    }
+
+
+def controller_state_to_gatekeeper_flat(state_dict):
+    return jnp.asarray(
+        [
+            float(state_dict["p_N"]),
+            float(state_dict["p_E"]),
+            float(state_dict["h"]),
+            float(state_dict["u"]),
+            float(state_dict["v"]),
+            float(state_dict["w"]),
+            float(state_dict["p"]),
+            float(state_dict["q"]),
+            float(state_dict["r"]),
+            float(state_dict["phi"]),
+            float(state_dict["theta"]),
+            float(state_dict["psi"]),
+        ],
+        dtype=jnp.float32,
+    )
+
+
+def _pad_action_plan(action_plan, horizon):
+    horizon = int(max(horizon, 1))
+    if action_plan is None:
+        return np.zeros((horizon, 4), dtype=np.float32)
+
+    plan = np.asarray(action_plan, dtype=np.float32).reshape(-1, 4)
+    if plan.shape[0] == 0:
+        return np.zeros((horizon, 4), dtype=np.float32)
+    if plan.shape[0] >= horizon:
+        return plan[:horizon].copy()
+
+    pad = np.repeat(plan[-1:, :], horizon - plan.shape[0], axis=0)
+    return np.concatenate([plan, pad], axis=0).astype(np.float32, copy=False)
+
+
+def build_jsbsim_gatekeeper(
+    env,
+    initial_controller_state,
+    nominal_horizon,
+    debug_timing=False,
+):
+    canyon = env.unwrapped.canyon
+
+    north_samples_ft = np.asarray(canyon.north_samples_ft, dtype=np.float32)
+    center_east_samples_ft = np.asarray(canyon.center_east_samples_ft, dtype=np.float32)
+    width_samples_ft = np.asarray(canyon.width_samples_ft, dtype=np.float32)
+    heading_samples_rad = np.asarray(canyon.centerline_heading_samples_rad, dtype=np.float32)
+    width_grad_samples_ft = np.gradient(width_samples_ft, north_samples_ft).astype(np.float32)
+
+    if hasattr(canyon, "ordered_dem_msl_m"):
+        terrain_floor_msl_ft = np.nanmin(np.asarray(canyon.ordered_dem_msl_m, dtype=np.float32), axis=1) * M_TO_FT
+    else:
+        terrain_floor_msl_ft = np.zeros_like(north_samples_ft, dtype=np.float32)
+    if hasattr(canyon, "wall_height_samples_ft"):
+        wall_height_samples_ft = np.asarray(canyon.wall_height_samples_ft, dtype=np.float32)
+    else:
+        wall_height_samples_ft = np.zeros_like(north_samples_ft, dtype=np.float32)
+
+    altitude_ref_ft = float(getattr(env.unwrapped, "dem_start_elev_ft", 0.0))
+    terrain_floor_rel_ft = terrain_floor_msl_ft - altitude_ref_ft
+    canyon_top_rel_ft = terrain_floor_rel_ft + wall_height_samples_ft
+    backup_peek_ft = 25.0
+    pcis_centerline_tol_ft = 100.0
+    pcis_altitude_tol_ft = 100.0
+    backup_target_speed_fps = 250.0 * KTS_TO_FPS
+    pcis_speed_limit_fps = 300.0 * KTS_TO_FPS
+    backup_target_altitude_ft = float(np.nanmax(canyon_top_rel_ft) + backup_peek_ft)
+
+    backup_reference = build_reference_trajectory(
+        north_ft=north_samples_ft,
+        east_ft=center_east_samples_ft,
+        heading_rad=heading_samples_rad,
+        width_ft=width_samples_ft,
+        closed_loop=False,
+    )
+
+    backup_config = SimpleCanyonControllerConfig(
+        target_speed_fps=backup_target_speed_fps,
+        use_dem_centerline=False,
+    )
+    backup_config, _, _ = with_default_simple_controller_optuna_gains(backup_config)
+    backup_controller = SimpleTrajectoryController(
+        config=backup_config,
+        target_altitude_ft=backup_target_altitude_ft,
+        wall_margin_ft=float(getattr(env.unwrapped, "wall_margin_ft", 0.0)),
+        altitude_reference_offset_ft=0.0,
+        reference_trajectory=backup_reference,
+    )
+    backup_controller.reset(
+        state_dict=initial_controller_state,
+        target_altitude_ft=backup_target_altitude_ft,
+        reference_trajectory=backup_reference,
+    )
+
+    W, B, poly_powers = load_nominal_weights()
+    W_jax = jnp.asarray(W, dtype=jnp.float32)
+    B_jax = jnp.asarray(B, dtype=jnp.float32)
+    poly_powers_jax = jnp.asarray(poly_powers, dtype=jnp.int32)
+    north_samples_jax = jnp.asarray(north_samples_ft, dtype=jnp.float32)
+    center_east_jax = jnp.asarray(center_east_samples_ft, dtype=jnp.float32)
+    heading_samples_jax = jnp.asarray(heading_samples_rad, dtype=jnp.float32)
+    width_samples_jax = jnp.asarray(width_samples_ft, dtype=jnp.float32)
+    width_grad_jax = jnp.asarray(width_grad_samples_ft, dtype=jnp.float32)
+    terrain_floor_jax = jnp.asarray(terrain_floor_rel_ft, dtype=jnp.float32)
+
+    latest_nominal = {
+        "action": jnp.zeros((4,), dtype=jnp.float32),
+    }
+    uncertainty_sampler = RuntimeUncertaintySampler(str(UNCERTAINTY_ARTIFACT_PATH))
+
+    def _interp(profile, p_n_ft):
+        return jnp.interp(p_n_ft, north_samples_jax, profile)
+
+    def _wrap_jax(angle_rad):
+        return jnp.arctan2(jnp.sin(angle_rad), jnp.cos(angle_rad))
+
+    def _speed_fps(state_flat):
+        return jnp.sqrt(jnp.maximum(jnp.sum(jnp.square(state_flat[3:6])), 1.0))
+
+    def _position_rates(state_flat):
+        u, v, w = state_flat[3], state_flat[4], state_flat[5]
+        phi, theta, psi = state_flat[9], state_flat[10], state_flat[11]
+        c_psi = jnp.cos(psi)
+        s_psi = jnp.sin(psi)
+        c_theta = jnp.cos(theta)
+        s_theta = jnp.sin(theta)
+        c_phi = jnp.cos(phi)
+        s_phi = jnp.sin(phi)
+        p_n_dot = u * (c_theta * c_psi) + v * (s_phi * s_theta * c_psi - c_phi * s_psi) + w * (c_phi * s_theta * c_psi + s_phi * s_psi)
+        p_e_dot = u * (c_theta * s_psi) + v * (s_phi * s_theta * s_psi + c_phi * c_psi) + w * (c_phi * s_theta * s_psi - s_phi * c_psi)
+        h_dot = u * s_theta - v * s_phi * c_theta - w * c_phi * c_theta
+        return p_n_dot, p_e_dot, h_dot
+
+    def nominal_policy_fn(_state_flat):
+        return latest_nominal["action"]
+
+    def backup_policy_fn(state_flat):
+        p_n_ft = state_flat[0]
+        p_e_ft = state_flat[1]
+        h_ft = state_flat[2]
+        phi = state_flat[9]
+        q_rate = state_flat[7]
+        r_rate = state_flat[8]
+        p_rate = state_flat[6]
+        psi = state_flat[11]
+
+        center_east_ft = _interp(center_east_jax, p_n_ft)
+        centerline_heading_rad = _interp(heading_samples_jax, p_n_ft)
+        canyon_width_ft = jnp.maximum(_interp(width_samples_jax, p_n_ft), 1.0)
+        lateral_error_ft = p_e_ft - center_east_ft
+        heading_error_rad = _wrap_jax(psi - centerline_heading_rad)
+
+        p_n_dot, p_e_dot, _ = _position_rates(state_flat)
+        lateral_error_rate_fps = p_n_dot * (-jnp.sin(centerline_heading_rad)) + p_e_dot * jnp.cos(centerline_heading_rad)
+        speed_fps = _speed_fps(state_flat)
+
+        track_accel_cmd_fps2 = jnp.clip(
+            backup_config.track_accel_lateral_gain * lateral_error_ft
+            + backup_config.track_accel_lateral_rate_gain * lateral_error_rate_fps
+            + backup_config.track_accel_heading_gain * speed_fps * jnp.sin(heading_error_rad),
+            -backup_config.track_accel_max_fps2,
+            backup_config.track_accel_max_fps2,
+        )
+
+        roll_des_rad = jnp.clip(
+            jnp.arctan2(track_accel_cmd_fps2, G_FTPS2),
+            -backup_config.roll_max_rad,
+            backup_config.roll_max_rad,
+        )
+        roll_cmd = jnp.clip(
+            backup_config.roll_p_gain * (roll_des_rad - phi)
+            + backup_config.roll_rate_damping * p_rate,
+            -1.0,
+            1.0,
+        )
+
+        altitude_error_ft = h_ft - backup_target_altitude_ft
+        nz_bias = jnp.clip(
+            -backup_config.nz_altitude_gain * altitude_error_ft,
+            -backup_config.nz_altitude_max_bias,
+            backup_config.nz_altitude_max_bias,
+        )
+        nz_des = jnp.clip(
+            jnp.sqrt(1.0 + jnp.square(track_accel_cmd_fps2 / G_FTPS2)) + nz_bias,
+            backup_config.nz_min_cmd,
+            backup_config.nz_max_cmd,
+        )
+        pitch_cmd = jnp.clip(
+            backup_config.pitch_nz_gain * (nz_des - 1.0)
+            + backup_config.pitch_q_damping * q_rate,
+            -1.0,
+            1.0,
+        )
+        yaw_cmd = jnp.clip(
+            backup_config.yaw_rate_damping * r_rate,
+            -backup_config.yaw_max_cmd,
+            backup_config.yaw_max_cmd,
+        )
+        throttle_cmd = jnp.clip(
+            backup_config.throttle_base
+            + backup_config.throttle_speed_gain * (backup_target_speed_fps - speed_fps),
+            0.0,
+            backup_config.throttle_max,
+        )
+        return jnp.asarray([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd], dtype=jnp.float32)
+
+    def dynamics_fn(state_flat, action, noise):
+        noise = jnp.asarray(noise, dtype=jnp.float32)
+        return f16_kinematics_step(state_flat, action, W_jax, B_jax + noise, poly_powers_jax)
+
+    def safety_fn(state_flat, _env_param):
+        terrain_floor_ft = _interp(terrain_floor_jax, state_flat[0])
+        return state_flat[2] - terrain_floor_ft
+
+    def pcis_fn(state_flat):
+        speed_margin = pcis_speed_limit_fps - _speed_fps(state_flat)
+        centerline_margin = pcis_centerline_tol_ft - jnp.abs(state_flat[1] - _interp(center_east_jax, state_flat[0]))
+        altitude_margin = pcis_altitude_tol_ft - jnp.abs(state_flat[2] - backup_target_altitude_ft)
+        return jnp.minimum(speed_margin, jnp.minimum(centerline_margin, altitude_margin))
+
+    def empirical_feature_fn(state_flat, action, prev_action, step_idx):
+        del step_idx
+        u = state_flat[3]
+        v = state_flat[4]
+        w = state_flat[5]
+        p_rate = state_flat[6]
+        q_rate = state_flat[7]
+        r_rate = state_flat[8]
+        p_n_ft = state_flat[0]
+
+        v_sq = u * u + v * v + w * w
+        v_total = jnp.sqrt(jnp.maximum(v_sq, 1.0))
+        alpha = jnp.arctan2(w, jnp.maximum(u, 1.0))
+        beta = jnp.arcsin(jnp.clip(v / v_total, -1.0, 1.0))
+        mach = v_total / 1116.45
+        qbar = jnp.maximum(0.5 * 0.0023769 * v_sq, 1.0)
+        canyon_width = _interp(width_samples_jax, p_n_ft)
+        canyon_width_grad = _interp(width_grad_jax, p_n_ft)
+
+        return jnp.asarray(
+            [
+                alpha,
+                beta,
+                mach,
+                p_rate,
+                q_rate,
+                r_rate,
+                action[3],
+                action[1],
+                action[0],
+                action[2],
+                prev_action[3],
+                prev_action[1],
+                prev_action[0],
+                prev_action[2],
+                qbar,
+                jnp.float32(0.0),
+                jnp.float32(0.0),
+                jnp.float32(0.0),
+                jnp.float32(0.0),
+                canyon_width,
+                canyon_width_grad,
+            ],
+            dtype=jnp.float32,
+        )
+
+    params = GatekeeperParams(
+        M=min(8, int(max(nominal_horizon, 1))),
+        T=int(max(nominal_horizon, 1)),
+        N=32,
+        delta=0.05,
+        epsilon=0.10,
+        beta=0.02,
+        alpha=0.0,
+        p=1,
+        lipschitz_mode="fixed",
+        lipschitz_constant=0.0,
+        debug_timing=bool(debug_timing),
+    )
+    initial_bounds = TrackBoundsEstimate.from_track_width(
+        half_width=max(float(np.nanmean(width_samples_ft) * 0.5), 1.0),
+        relative_uncertainty=0.0,
+    )
+    gatekeeper = DRSGatekeeper(
+        params=params,
+        dynamics_fn=dynamics_fn,
+        nominal_policy_fn=nominal_policy_fn,
+        backup_policy_fn=backup_policy_fn,
+        safety_fn=safety_fn,
+        pcis_fn=pcis_fn,
+        noise_dim=6,
+        theta_dim=2,
+        uncertainty_model=uncertainty_sampler,
+        empirical_feature_fn=empirical_feature_fn,
+        empirical_sampler_fn=sample_empirical_coeff_jax,
+        initial_track_bounds=initial_bounds,
+        seed=3,
+    )
+    gatekeeper.reset(controller_state_to_gatekeeper_flat(initial_controller_state), t=0)
+
+    return {
+        "gatekeeper": gatekeeper,
+        "backup_controller": backup_controller,
+        "backup_reference": backup_reference,
+        "backup_target_altitude_ft": backup_target_altitude_ft,
+        "latest_nominal": latest_nominal,
+        "pcis_centerline_tol_ft": pcis_centerline_tol_ft,
     }
 
 
@@ -157,6 +486,16 @@ def parse_args():
         default="mppi_canyon_tuning",
         help="Name of the Optuna study to load tuned parameters from.",
     )
+    parser.add_argument(
+        "--gatekeeper",
+        action="store_true",
+        help="Wrap the nominal MPPI controller with the DRS gatekeeper and a conservative simple-controller backup.",
+    )
+    parser.add_argument(
+        "--gatekeeper-debug-timing",
+        action="store_true",
+        help="Print gatekeeper timing diagnostics each step.",
+    )
     return parser.parse_args()
 
 
@@ -165,6 +504,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.gatekeeper and args.controller not in {"mppi", "smooth_mppi"}:
+        raise ValueError("--gatekeeper currently requires --controller mppi or --controller smooth_mppi.")
+
     output_subdirs = {
         "mppi": "canyon_mppi",
         "smooth_mppi": "canyon_smooth_mppi",
@@ -173,7 +515,10 @@ def main():
     }
     output_dir = args.output_dir
     if output_dir is None:
-        output_dir = Path(args.output_root) / output_subdirs[args.controller]
+        subdir = output_subdirs[args.controller]
+        if args.gatekeeper:
+            subdir = f"{subdir}_gatekeeper"
+        output_dir = Path(args.output_root) / subdir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     mode_tag = "render" if args.render else "headless"
@@ -356,11 +701,27 @@ def main():
     recorder.set_centerline_profile(north_samples_ft, center_east_samples_ft)
     termination_reason = "running"
 
+    gatekeeper_bundle = None
+    gatekeeper_prev_using_backup = False
+
     print(f"Initializing {controller_tag} canyon controller...")
     if controller_tag in {"mppi", "smooth_mppi"}:
         print("Compiling JAX JIT... (this takes a moment)")
         _ = controller.get_action(initial_controller_state)
         print("JIT compilation finished.")
+        if args.gatekeeper:
+            if not UNCERTAINTY_ARTIFACT_PATH.exists():
+                raise FileNotFoundError(f"Missing uncertainty artifact: {UNCERTAINTY_ARTIFACT_PATH}")
+            gatekeeper_bundle = build_jsbsim_gatekeeper(
+                env=env,
+                initial_controller_state=initial_controller_state,
+                nominal_horizon=int(controller.config.horizon),
+                debug_timing=bool(args.gatekeeper_debug_timing),
+            )
+            print(
+                f"Initialized gatekeeper with backup simple controller at 250 kts and "
+                f"target altitude {gatekeeper_bundle['backup_target_altitude_ft']:.0f} ft above DEM origin."
+            )
 
     print("\nStarting Canyon Flight...")
     print(
@@ -377,8 +738,38 @@ def main():
             if controller_tag == "altitude_hold":
                 action = controller.get_action(obs)
             else:
-                action = controller.get_action(controller_state)
+                nominal_action = controller.get_action(controller_state)
+                action = nominal_action
             plan_ms = (time.time() - t0) * 1000.0
+
+            gatekeeper_state = None
+            if gatekeeper_bundle is not None:
+                gatekeeper = gatekeeper_bundle["gatekeeper"]
+                latest_nominal = gatekeeper_bundle["latest_nominal"]
+                latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
+                nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
+                current_width_ft = float(state.get("canyon_width", np.nanmean(width_samples_ft)))
+                track_bounds = TrackBoundsEstimate.from_track_width(
+                    half_width=max(0.5 * current_width_ft, 1.0),
+                    relative_uncertainty=0.0,
+                )
+                gatekeeper_state = gatekeeper.update(
+                    controller_state_to_gatekeeper_flat(controller_state),
+                    track_bounds=track_bounds,
+                    nominal_trajectory=jnp.asarray(nominal_trajectory, dtype=jnp.float32),
+                    max_steps=int(args.max_steps),
+                )
+                if gatekeeper_state.using_backup:
+                    backup_controller = gatekeeper_bundle["backup_controller"]
+                    if not gatekeeper_prev_using_backup:
+                        backup_controller.reset(
+                            state_dict=controller_state,
+                            target_altitude_ft=gatekeeper_bundle["backup_target_altitude_ft"],
+                            reference_trajectory=gatekeeper_bundle["backup_reference"],
+                        )
+                    action = backup_controller.get_action(controller_state)
+                gatekeeper.tick()
+                gatekeeper_prev_using_backup = bool(gatekeeper_state.using_backup)
 
             planner_debug = None
             debug_getter = getattr(controller, "get_render_debug", None)
@@ -403,6 +794,23 @@ def main():
                             dtype=np.float32,
                         ).copy(),
                     }
+            if gatekeeper_state is not None and gatekeeper_state.predicted_trajectories is not None:
+                predicted_xy = np.asarray(gatekeeper_state.predicted_trajectories, dtype=np.float32)
+                if planner_debug is None:
+                    planner_debug = {
+                        "candidate_xy": np.zeros((0, 0, 2), dtype=np.float32),
+                        "candidate_h_ft": np.zeros((0, 0), dtype=np.float32),
+                        "final_xy": np.zeros((0, 2), dtype=np.float32),
+                        "final_h_ft": np.zeros((0,), dtype=np.float32),
+                    }
+                if predicted_xy.ndim == 3 and predicted_xy.shape[-1] == 2:
+                    planner_debug["candidate_xy"] = predicted_xy
+                    planner_debug["candidate_h_ft"] = np.zeros(
+                        (predicted_xy.shape[0], predicted_xy.shape[1]),
+                        dtype=np.float32,
+                    )
+                    planner_debug["final_xy"] = predicted_xy[0]
+                    planner_debug["final_h_ft"] = np.zeros((predicted_xy.shape[1],), dtype=np.float32)
 
             if controller_tag == "simple":
                 guidance = dict(getattr(controller, "last_guidance", {}) or {})

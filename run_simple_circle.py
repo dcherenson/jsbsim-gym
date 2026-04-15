@@ -146,6 +146,8 @@ def _extract_state(env, start_n_m, start_e_m):
         "u_fps": u_fps,
         "v_fps": v_fps,
         "w_fps": w_fps,
+        "ny": float(sim.get_property_value("accelerations/Ny")),
+        "nz": float(sim.get_property_value("accelerations/Nz")),
         "p_rad_s": float(state[6]),
         "q_rad_s": float(state[7]),
         "r_rad_s": float(state[8]),
@@ -171,6 +173,8 @@ def _to_controller_state(state):
         "theta": float(state["theta_rad"]),
         "psi": float(state["psi_rad"]),
         "beta": float(state["beta_rad"]),
+        "ny": float(state["ny"]),
+        "nz": float(state["nz"]),
     }
 
 

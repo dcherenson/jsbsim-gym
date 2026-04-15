@@ -6,6 +6,7 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+G_FTPS2 = 32.174
 SIMPLE_TUNING_JSON_PATH = REPO_ROOT / "output" / "simple_controller" / "simple_controller_optuna_best.json"
 SIMPLE_TUNING_STUDY_NAME = "simple_controller_gain_tuning"
 SIMPLE_TUNING_STORAGE = f"sqlite:///{(REPO_ROOT / 'optuna' / 'simple_controller_tuning.db').as_posix()}"
@@ -19,38 +20,40 @@ SIMPLE_TUNING_STORAGE_FALLBACKS = (
 @dataclass
 class SimpleCanyonControllerConfig:
     target_speed_fps: float = 450.0 * 1.68781
-    lookahead_rows: int = 20
+    lookahead_rows: int = 47
     dt: float = 1.0 / 30.0
     use_dem_centerline: bool = True
 
-    # Roll / Lateral Guidance Gains
-    roll_lateral_gain: float = -0.0030
-    roll_rate_gain: float = -0.0005
-    roll_heading_gain: float = -0.70
-    roll_p_gain: float = 2.80
-    roll_rate_damping: float = -0.35
-    roll_max_rad: float = 0.75
+    # Lookahead guidance -> desired track-normal acceleration.
+    track_accel_lateral_gain: float = -0.09850032355946046
+    track_accel_heading_gain: float = -0.9644787825008925
+    track_accel_lateral_rate_gain: float = -0.01948905209200466
+    track_accel_max_fps2: float = 290.044307694915
 
-    # Pitch / Altitude Guidance Gains
-    pitch_clearance_gain: float = -0.0050
-    pitch_integral_gain: float = -0.000020
-    pitch_rate_gain: float = -0.0030
-    pitch_q_gain: float = -4.2
-    pitch_rate_damping: float = -0.75
-    pitch_min_rad: float = -0.40
-    pitch_max_rad: float = 0.55
+    # Roll alignment loop.
+    roll_p_gain: float = 4.433283185003266
+    roll_rate_damping: float = -0.020215299750720214
+    roll_max_rad: float = 100.0
 
-    # Yaw Gains
-    yaw_rate_damping: float = -0.28
-    yaw_beta_gain: float = -0.10
-    yaw_roll_trim: float = 0.08
-    yaw_max_cmd: float = 0.35
+    # Pitch / normal-acceleration control.
+    pitch_nz_gain: float = -0.34054249300335954
+    # Positive elevator command pitches the airframe down, so q damping is positive.
+    pitch_q_damping: float = 1.8981038253607778
+    nz_altitude_gain: float = 0.0034980977894353282
+    nz_altitude_max_bias: float = 1.3763138089938012
+    nz_min_cmd: float = -1000.0
+    nz_max_cmd: float = 1000.0
 
-    # Throttle Gains
-    throttle_base: float = 0.26
-    throttle_speed_gain: float = 0.0014
-    throttle_climb_penalty: float = -0.0007
-    throttle_max: float = 0.80
+    # Yaw / sideslip coordination.
+    # Positive rudder command drives Ny and r negative, so both feedback gains are positive.
+    yaw_ny_gain: float = 0.23025036625288484
+    yaw_rate_damping: float = 0.0655463313714547
+    yaw_max_cmd: float = 100.0
+
+    # Throttle / speed hold.
+    throttle_base: float = 0.42584375471835306
+    throttle_speed_gain: float = 0.006791701936145756
+    throttle_max: float = 1.0
 
 
 def _sqlite_storage_to_path(storage_url: str):
@@ -111,15 +114,21 @@ def apply_simple_controller_optuna_params(config: SimpleCanyonControllerConfig, 
     if not isinstance(params, dict) or not params:
         return config, []
 
-    field_names = set(SimpleCanyonControllerConfig.__dataclass_fields__.keys())
+    field_defs = SimpleCanyonControllerConfig.__dataclass_fields__
+    field_names = set(field_defs.keys())
     overrides = {}
 
     for key, value in params.items():
         if key in field_names:
-            overrides[key] = float(value) if isinstance(value, (int, float, np.integer, np.floating)) else value
-
-    if "throttle_climb_penalty_mag" in params and "throttle_climb_penalty" not in overrides:
-        overrides["throttle_climb_penalty"] = -abs(float(params["throttle_climb_penalty_mag"]))
+            field_type = field_defs[key].type
+            if field_type is int:
+                overrides[key] = int(value)
+            elif field_type is float:
+                overrides[key] = float(value)
+            elif field_type is bool:
+                overrides[key] = bool(value)
+            else:
+                overrides[key] = value
 
     if not overrides:
         return config, []
@@ -193,7 +202,7 @@ class SimpleTrajectoryController:
     """Generic simple tracking controller for any 2D reference trajectory.
 
     Input state convention matches DataCollectionEnv state dict keys:
-    p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi, beta.
+    p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi, beta, ny, nz.
     """
 
     def __init__(
@@ -216,7 +225,6 @@ class SimpleTrajectoryController:
 
         self.reference_trajectory = None
         self._ontrack_idx = None
-        self._altitude_error_integral = 0.0
         self._prev_altitude_error_ft = 0.0
         self._prev_lateral_error_ft = 0.0
         self.last_guidance = {}
@@ -272,7 +280,6 @@ class SimpleTrajectoryController:
             self.set_reference_trajectory(reference_trajectory)
 
         self._ontrack_idx = None
-        self._altitude_error_integral = 0.0
         self._prev_altitude_error_ft = self._altitude_error_ft(state_dict)
         self._prev_lateral_error_ft = 0.0
         self.last_guidance = {}
@@ -404,18 +411,15 @@ class SimpleTrajectoryController:
         lateral_norm = np.clip(lateral_error_ft / usable_half_ft, -2.5, 2.5)
 
         phi = float(state_dict["phi"])
-        theta = float(state_dict["theta"])
         p_rate = float(state_dict["p"])
         q_rate = float(state_dict["q"])
         r_rate = float(state_dict["r"])
-        beta = float(state_dict.get("beta", 0.0))
+        ny_current = float(state_dict.get("ny", 0.0))
+        nz_current = float(state_dict.get("nz", 1.0))
 
         altitude_error_ft = self._altitude_error_ft(state_dict)
         altitude_error_rate_fps = (altitude_error_ft - self._prev_altitude_error_ft) / self.dt
         self._prev_altitude_error_ft = altitude_error_ft
-
-        self._altitude_error_integral += altitude_error_ft * self.dt
-        self._altitude_error_integral = float(np.clip(self._altitude_error_integral, -3000.0, 3000.0))
 
         speed_fps = float(
             np.sqrt(
@@ -425,10 +429,16 @@ class SimpleTrajectoryController:
             )
         )
 
+        track_accel_cmd_fps2 = np.clip(
+            self.config.track_accel_lateral_gain * lateral_error_ft
+            + self.config.track_accel_lateral_rate_gain * lateral_error_rate_fps
+            + self.config.track_accel_heading_gain * speed_fps * np.sin(heading_error_rad),
+            -self.config.track_accel_max_fps2,
+            self.config.track_accel_max_fps2,
+        )
+
         roll_des_rad = np.clip(
-            self.config.roll_lateral_gain * lateral_error_ft
-            + self.config.roll_rate_gain * lateral_error_rate_fps
-            + self.config.roll_heading_gain * heading_error_rad,
+            np.arctan2(track_accel_cmd_fps2, G_FTPS2),
             -self.config.roll_max_rad,
             self.config.roll_max_rad,
         )
@@ -438,25 +448,26 @@ class SimpleTrajectoryController:
             1.0,
         )
 
-        desired_theta_rad = np.clip(
-            self.config.pitch_clearance_gain * altitude_error_ft
-            + self.config.pitch_integral_gain * self._altitude_error_integral
-            + self.config.pitch_rate_gain * altitude_error_rate_fps,
-            self.config.pitch_min_rad,
-            self.config.pitch_max_rad,
+        nz_altitude_bias = np.clip(
+            -self.config.nz_altitude_gain * altitude_error_ft,
+            -self.config.nz_altitude_max_bias,
+            self.config.nz_altitude_max_bias,
         )
-        theta_error_rad = desired_theta_rad - theta
+        nz_des = np.clip(
+            np.sqrt(1.0 + (track_accel_cmd_fps2 / G_FTPS2) ** 2) + nz_altitude_bias,
+            self.config.nz_min_cmd,
+            self.config.nz_max_cmd,
+        )
 
         pitch_cmd = np.clip(
-            self.config.pitch_q_gain * theta_error_rad + self.config.pitch_rate_damping * q_rate,
+            self.config.pitch_nz_gain * (nz_des - nz_current) + self.config.pitch_q_damping * q_rate,
             -1.0,
             1.0,
         )
 
         yaw_cmd = np.clip(
             self.config.yaw_rate_damping * r_rate
-            + self.config.yaw_beta_gain * beta
-            + self.config.yaw_roll_trim * (roll_des_rad - phi),
+            + self.config.yaw_ny_gain * ny_current,
             -self.config.yaw_max_cmd,
             self.config.yaw_max_cmd,
         )
@@ -464,7 +475,7 @@ class SimpleTrajectoryController:
         throttle_cmd = np.clip(
             self.config.throttle_base
             + self.config.throttle_speed_gain * (self.target_speed_fps - speed_fps)
-            + self.config.throttle_climb_penalty * np.clip(altitude_error_ft, 0.0, None),
+            ,
             0.0,
             self.config.throttle_max,
         )
@@ -477,8 +488,12 @@ class SimpleTrajectoryController:
             "altitude_error_ft": float(altitude_error_ft),
             "altitude_error_rate_fps": float(altitude_error_rate_fps),
             "speed_fps": float(speed_fps),
+            "track_accel_cmd_fps2": float(track_accel_cmd_fps2),
             "heading_error_deg": float(np.degrees(heading_error_rad)),
             "roll_des_deg": float(np.degrees(roll_des_rad)),
+            "nz_des": float(nz_des),
+            "nz_current": float(nz_current),
+            "ny_current": float(ny_current),
             "margin_to_wall_ft": float(margin_ft),
             "roll_cmd": float(roll_cmd),
             "pitch_cmd": float(pitch_cmd),

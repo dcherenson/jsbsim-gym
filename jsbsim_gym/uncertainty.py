@@ -1,6 +1,54 @@
+from typing import NamedTuple
+
+import jax
+import jax.numpy as jnp
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
+
+
+class JAXEmpiricalData(NamedTuple):
+    features_scaled: jax.Array
+    residuals: jax.Array
+    feature_mean: jax.Array
+    feature_std: jax.Array
+    alpha_values: jax.Array
+    canyon_width_values: jax.Array
+    alpha_feature_index: int
+    canyon_width_feature_index: int
+    neighbor_count: int
+    epsilon_w: float
+    alpha_threshold: float
+
+
+def sample_empirical_jax(
+    feature_vector: jax.Array,
+    gate_id: jax.Array,
+    rng_key: jax.Array,
+    data: JAXEmpiricalData,
+) -> jax.Array:
+    del gate_id
+
+    normalized_q = (feature_vector - data.feature_mean) / data.feature_std
+    query_width = feature_vector[data.canyon_width_feature_index]
+
+    width_mask = jnp.abs(data.canyon_width_values - query_width) <= jnp.float32(data.epsilon_w)
+    regime_mask = jnp.abs(data.alpha_values) < jnp.float32(data.alpha_threshold)
+    mask = jnp.logical_and(width_mask, regime_mask)
+    has_mask = jnp.any(mask)
+
+    diffs = data.features_scaled - normalized_q
+    dists_sq = jnp.sum(jnp.square(diffs), axis=-1)
+    penalized_dists = jnp.where(mask, dists_sq, jnp.where(has_mask, 1.0e12, dists_sq))
+
+    vals, indices = jax.lax.top_k(-penalized_dists, data.neighbor_count)
+    distances = -vals
+
+    scale = jnp.mean(distances) + 1.0e-6
+    logits = -distances / scale
+    weights = jax.nn.softmax(logits)
+    choice_idx = jax.random.choice(rng_key, indices, p=weights)
+    return data.residuals[choice_idx]
 
 class RuntimeUncertaintySampler:
     def __init__(self, artifact_path='f16_uncertainty_model.pkl'):
@@ -34,6 +82,40 @@ class RuntimeUncertaintySampler:
                 "Uncertainty artifact is missing expected coefficient residual columns: "
                 f"{missing_columns}. Regenerate with python -m jsbsim_gym.calibration."
             )
+
+    def to_jax(
+        self,
+        neighbor_count: int = 20,
+        epsilon_w: float = 200.0,
+        alpha_threshold: float = 0.8,
+    ) -> JAXEmpiricalData:
+        feature_values = self.dataset[self.aug_features].to_numpy(dtype=np.float32, copy=True)
+        features_scaled = self.knn_scaler.transform(feature_values).astype(np.float32, copy=False)
+        residual_values = self.dataset[self.residual_columns].to_numpy(dtype=np.float32, copy=True)
+
+        feature_mean = np.asarray(getattr(self.knn_scaler, "mean_", np.zeros(feature_values.shape[1])), dtype=np.float32)
+        feature_std = np.asarray(getattr(self.knn_scaler, "scale_", np.ones(feature_values.shape[1])), dtype=np.float32)
+        feature_std[np.abs(feature_std) < 1.0e-6] = 1.0
+
+        alpha_feature_index = int(self.aug_features.index("alpha"))
+        canyon_width_feature_index = int(self.aug_features.index("canyon_width"))
+        alpha_values = self.dataset["alpha"].to_numpy(dtype=np.float32, copy=True)
+        canyon_width_values = self.dataset["canyon_width"].to_numpy(dtype=np.float32, copy=True)
+
+        max_neighbors = max(1, min(int(neighbor_count), int(features_scaled.shape[0])))
+        return JAXEmpiricalData(
+            features_scaled=jnp.asarray(features_scaled, dtype=jnp.float32),
+            residuals=jnp.asarray(residual_values, dtype=jnp.float32),
+            feature_mean=jnp.asarray(feature_mean, dtype=jnp.float32),
+            feature_std=jnp.asarray(feature_std, dtype=jnp.float32),
+            alpha_values=jnp.asarray(alpha_values, dtype=jnp.float32),
+            canyon_width_values=jnp.asarray(canyon_width_values, dtype=jnp.float32),
+            alpha_feature_index=alpha_feature_index,
+            canyon_width_feature_index=canyon_width_feature_index,
+            neighbor_count=max_neighbors,
+            epsilon_w=float(epsilon_w),
+            alpha_threshold=float(alpha_threshold),
+        )
         
     def sample(self, z_q, W_c_q, config=None):
         """

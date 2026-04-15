@@ -61,6 +61,10 @@ class DataCollectionEnv(JSBSimEnv):
         
         qbar = self.simulation.get_property_value("aero/qbar-psf")
         alpha_dot = self.simulation.get_property_value("aero/alphadot-rad_sec")
+        ny = self.simulation.get_property_value("accelerations/Ny")
+        nz = self.simulation.get_property_value("accelerations/Nz")
+        ay_pilot = self.simulation.get_property_value("accelerations/a-pilot-y-ft_sec2")
+        az_pilot = self.simulation.get_property_value("accelerations/a-pilot-z-ft_sec2")
         mass_slugs = self.simulation.get_property_value("inertia/mass-slugs")
         if not np.isfinite(mass_slugs) or mass_slugs <= 0.0:
             mass_slugs = DEFAULT_MASS_SLUGS
@@ -78,6 +82,8 @@ class DataCollectionEnv(JSBSimEnv):
             'phi': phi, 'theta': theta, 'psi': psi,
             'p': p, 'q': q, 'r': r,
             'qbar': qbar, 'alpha_dot': alpha_dot,
+            'ny': ny, 'nz': nz,
+            'ay_pilot': ay_pilot, 'az_pilot': az_pilot,
             'mass_slugs': mass_slugs,
             'canyon_width': width, 'canyon_width_grad': grad,
             'wind_u': wind_n, 'wind_v': wind_e, 'wind_w': wind_d
