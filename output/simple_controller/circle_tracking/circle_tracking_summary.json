@@ -1,0 +1,51 @@
+{
+  "circle": {
+    "center_e_ft": -2800.0,
+    "center_n_ft": 0.0,
+    "direction": "cw",
+    "radius_ft": 2800.0
+  },
+  "controller": {
+    "effective_target_speed_kts": 145.8951413870505,
+    "gain_source": "/Users/dmrc/git/jsbsim-gym/output/simple_controller/simple_controller_optuna_best.json",
+    "gains": {
+      "dt": 0.03333333333333333,
+      "lookahead_rows": 10.0,
+      "pitch_clearance_gain": -0.005,
+      "pitch_integral_gain": -2e-05,
+      "pitch_max_rad": 0.55,
+      "pitch_min_rad": -0.4,
+      "pitch_q_gain": -4.2,
+      "pitch_rate_damping": -0.75,
+      "pitch_rate_gain": -0.003,
+      "roll_heading_gain": -0.7,
+      "roll_lateral_gain": -0.003,
+      "roll_max_rad": 0.75,
+      "roll_p_gain": 2.8,
+      "roll_rate_damping": -0.35,
+      "roll_rate_gain": -0.0005,
+      "target_speed_fps": 246.2432785844777,
+      "throttle_base": 0.26,
+      "throttle_climb_penalty": -0.0007,
+      "throttle_max": 0.8,
+      "throttle_speed_gain": 0.0014,
+      "use_dem_centerline": 0.0,
+      "yaw_beta_gain": -0.1,
+      "yaw_max_cmd": 0.35,
+      "yaw_rate_damping": -0.28,
+      "yaw_roll_trim": 0.08
+    },
+    "max_turn_feasible_speed_kts": 145.8951413870505,
+    "requested_target_speed_kts": 450.0,
+    "target_altitude_ft": 5000.0
+  },
+  "steps": 1200,
+  "termination_reason": "max_steps",
+  "tracking_metrics": {
+    "mean_abs_altitude_error_ft": 63.13537866159963,
+    "mean_abs_heading_error_deg": 8.170044353696122,
+    "mean_abs_lateral_error_ft": 400.8195496155021,
+    "rms_heading_error_deg": 9.462402949441058,
+    "rms_lateral_error_ft": 462.77714208706277
+  }
+}

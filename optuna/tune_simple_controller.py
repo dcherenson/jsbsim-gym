@@ -55,15 +55,15 @@ def parse_args():
         help="Controller target speed in knots.",
     )
     parser.add_argument(
-        "--target-clearance-ft",
+        "--altitude-error-scale-ft",
         type=float,
-        default=100.0,
-        help="Target terrain clearance used by the controller.",
+        default=250.0,
+        help="Altitude-error normalization scale (ft) used by the tuner score.",
     )
     parser.add_argument(
         "--lookahead-rows",
         type=int,
-        default=40,
+        default=10,
         help="DEM lookahead rows for centerline guidance.",
     )
     parser.add_argument(
@@ -98,31 +98,14 @@ def parse_args():
         help="Path to write the best-parameter JSON summary.",
     )
 
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--terrain-following",
-        dest="terrain_following",
-        action="store_true",
-        help="Tune in terrain-following mode.",
-    )
-    mode_group.add_argument(
-        "--altitude-hold",
-        dest="terrain_following",
-        action="store_false",
-        help="Tune in altitude-hold mode.",
-    )
-    parser.set_defaults(terrain_following=True)
-
     return parser.parse_args()
 
 
 def _base_controller_config(args):
     return SimpleCanyonControllerConfig(
         target_speed_fps=float(args.target_speed_kts) * KTS_TO_FPS,
-        target_clearance_ft=float(args.target_clearance_ft),
         lookahead_rows=int(max(1, args.lookahead_rows)),
         use_dem_centerline=True,
-        use_terrain_following=bool(args.terrain_following),
     )
 
 
@@ -145,7 +128,6 @@ def _sample_controller_config(trial, base_config):
         roll_p_gain=_suggest_signed_magnitude(trial, "roll_p_gain", base_config.roll_p_gain, 0.35, 4.0),
         roll_rate_damping=_suggest_signed_magnitude(trial, "roll_rate_damping", base_config.roll_rate_damping, 0.2, 5.0),
         pitch_clearance_gain=_suggest_signed_magnitude(trial, "pitch_clearance_gain", base_config.pitch_clearance_gain, 0.25, 5.0),
-        pitch_ahead_gain=_suggest_signed_magnitude(trial, "pitch_ahead_gain", base_config.pitch_ahead_gain, 0.25, 5.0),
         pitch_integral_gain=_suggest_signed_magnitude(trial, "pitch_integral_gain", base_config.pitch_integral_gain, 0.2, 8.0),
         pitch_rate_gain=_suggest_signed_magnitude(trial, "pitch_rate_gain", base_config.pitch_rate_gain, 0.25, 5.0),
         pitch_q_gain=_suggest_signed_magnitude(trial, "pitch_q_gain", base_config.pitch_q_gain, 0.35, 3.0),
@@ -191,13 +173,13 @@ def _make_env(max_steps, target_speed_kts, wind_sigma):
     )
 
 
-def _run_episode(config, seed, max_steps, target_speed_kts, wind_sigma):
+def _run_episode(config, seed, max_steps, target_speed_kts, wind_sigma, altitude_error_scale_ft):
     env = _make_env(max_steps=max_steps, target_speed_kts=target_speed_kts, wind_sigma=wind_sigma)
 
     total_score = 0.0
     total_env_reward = 0.0
     total_abs_lateral_norm = 0.0
-    total_abs_clearance_error_norm = 0.0
+    total_abs_altitude_error_norm = 0.0
     total_speed_error_norm = 0.0
     steps = 0
     termination_reason = "running"
@@ -226,17 +208,17 @@ def _run_episode(config, seed, max_steps, target_speed_kts, wind_sigma):
             total_env_reward += float(env_reward)
 
             lateral_norm = float(abs(guidance.get("lateral_norm", 0.0)))
-            clearance_error_ft = float(abs(guidance.get("clearance_error_ft", 0.0)))
+            altitude_error_ft = float(abs(guidance.get("altitude_error_ft", 0.0)))
             speed_fps = float(guidance.get("speed_fps", 0.0))
 
-            clearance_scale_ft = max(float(config.target_clearance_ft), 200.0)
-            clearance_error_norm = clearance_error_ft / clearance_scale_ft
+            altitude_scale_ft = max(float(altitude_error_scale_ft), 1.0)
+            altitude_error_norm = altitude_error_ft / altitude_scale_ft
             speed_error_norm = abs(speed_fps - float(config.target_speed_fps)) / max(float(config.target_speed_fps), 1.0)
 
             tracking_score = (
                 2.0
                 - 1.10 * np.clip(lateral_norm, 0.0, 2.5)
-                - 0.85 * np.clip(clearance_error_norm, 0.0, 2.5)
+                - 0.85 * np.clip(altitude_error_norm, 0.0, 2.5)
                 - 0.45 * np.clip(speed_error_norm, 0.0, 3.0)
             )
 
@@ -248,7 +230,7 @@ def _run_episode(config, seed, max_steps, target_speed_kts, wind_sigma):
             total_score += float(env_reward) + float(tracking_score) - smoothness_penalty
 
             total_abs_lateral_norm += lateral_norm
-            total_abs_clearance_error_norm += clearance_error_norm
+            total_abs_altitude_error_norm += altitude_error_norm
             total_speed_error_norm += speed_error_norm
 
             if terminated or truncated:
@@ -276,7 +258,9 @@ def _run_episode(config, seed, max_steps, target_speed_kts, wind_sigma):
         "steps": int(steps),
         "termination_reason": str(termination_reason),
         "mean_abs_lateral_norm": float(total_abs_lateral_norm / denom),
-        "mean_abs_clearance_error_norm": float(total_abs_clearance_error_norm / denom),
+        "mean_abs_altitude_error_norm": float(total_abs_altitude_error_norm / denom),
+        # Backward-compatible key name used by older analysis scripts.
+        "mean_abs_clearance_error_norm": float(total_abs_altitude_error_norm / denom),
         "mean_speed_error_norm": float(total_speed_error_norm / denom),
     }
     return float(total_score), episode_summary
@@ -293,12 +277,14 @@ def _objective(trial, args, base_config):
             max_steps=args.max_steps,
             target_speed_kts=args.target_speed_kts,
             wind_sigma=args.wind_sigma,
+            altitude_error_scale_ft=args.altitude_error_scale_ft,
         )
         seed_scores.append(float(score))
 
         trial.set_user_attr(f"seed_{seed}_termination", summary["termination_reason"])
         trial.set_user_attr(f"seed_{seed}_steps", summary["steps"])
         trial.set_user_attr(f"seed_{seed}_mean_abs_lateral_norm", summary["mean_abs_lateral_norm"])
+        trial.set_user_attr(f"seed_{seed}_mean_abs_altitude_error_norm", summary["mean_abs_altitude_error_norm"])
         trial.set_user_attr(f"seed_{seed}_mean_abs_clearance_error_norm", summary["mean_abs_clearance_error_norm"])
         trial.set_user_attr(f"seed_{seed}_mean_speed_error_norm", summary["mean_speed_error_norm"])
 
@@ -330,9 +316,8 @@ def _save_best_summary(args, study, base_config):
         "evaluation": {
             "seeds": [int(s) for s in args.seeds],
             "max_steps": int(args.max_steps),
-            "terrain_following": bool(args.terrain_following),
             "target_speed_kts": float(args.target_speed_kts),
-            "target_clearance_ft": float(args.target_clearance_ft),
+            "altitude_error_scale_ft": float(args.altitude_error_scale_ft),
             "wind_sigma": float(args.wind_sigma),
             "robustness_weight": float(args.robustness_weight),
         },
@@ -368,9 +353,8 @@ def main():
         "Evaluation setup: "
         f"seeds={args.seeds}, "
         f"max_steps={args.max_steps}, "
-        f"terrain_following={args.terrain_following}, "
         f"target_speed_kts={args.target_speed_kts:.1f}, "
-        f"target_clearance_ft={args.target_clearance_ft:.1f}, "
+        f"altitude_error_scale_ft={args.altitude_error_scale_ft:.1f}, "
         f"wind_sigma={args.wind_sigma:.2f}"
     )
 

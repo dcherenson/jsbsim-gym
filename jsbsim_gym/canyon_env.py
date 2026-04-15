@@ -188,6 +188,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         self.camera_look_at = None
         self.hud_font = None
         self.hud_small_font = None
+        self.hud_heading_cmd_deg = None
 
         self.observation_space = gym.spaces.Box(
             low=np.full((18,), -np.inf, dtype=np.float32),
@@ -267,6 +268,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         self.step_count = 0
         self.camera_pos = None
         self.camera_look_at = None
+        self.hud_heading_cmd_deg = None
 
         state = self.get_full_state_dict()
         self.last_p_n_ft = state["p_N"]
@@ -579,6 +581,12 @@ class CanyonFlightEnv(DataCollectionEnv):
         self.hud_font = pg.font.Font(None, 30)
         self.hud_small_font = pg.font.Font(None, 22)
 
+    def set_hud_commands(self, heading_cmd_deg=None):
+        if heading_cmd_deg is None or not np.isfinite(heading_cmd_deg):
+            self.hud_heading_cmd_deg = None
+        else:
+            self.hud_heading_cmd_deg = float(heading_cmd_deg) % 360.0
+
     def _draw_hud(self, frame):
         if frame is None:
             return frame
@@ -589,6 +597,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         width, height = surface.get_size()
 
         heading_deg = (float(np.degrees(self.state[11])) + 360.0) % 360.0
+        heading_cmd_deg = self.hud_heading_cmd_deg
         vt_fps = float(self.simulation.get_property_value("velocities/vt-fps"))
         airspeed_kt = vt_fps / 1.687809857
 
@@ -642,6 +651,19 @@ class CanyonFlightEnv(DataCollectionEnv):
             (255, 96, 70),
             [(center_x, panel_y + 8), (center_x - 8, panel_y + 24), (center_x + 8, panel_y + 24)],
         )
+
+        if heading_cmd_deg is not None:
+            rel_cmd = ((float(heading_cmd_deg) - heading_deg + 540.0) % 360.0) - 180.0
+            if abs(rel_cmd) <= 70.0:
+                cmd_x = int(center_x + (rel_cmd / 70.0) * usable_half)
+                pg.draw.polygon(
+                    surface,
+                    (255, 196, 84),
+                    [(cmd_x, baseline_y + 3), (cmd_x - 6, baseline_y - 9), (cmd_x + 6, baseline_y - 9)],
+                )
+            cmd_txt = self.hud_small_font.render(f"CMD {float(heading_cmd_deg):05.1f}", True, (255, 214, 140))
+            surface.blit(cmd_txt, (panel_x + panel_w - cmd_txt.get_width() - 10, panel_y + 6))
+
         hdg_txt = self.hud_font.render(f"HDG {heading_deg:05.1f}", True, (250, 250, 250))
         surface.blit(hdg_txt, (center_x - hdg_txt.get_width() // 2, panel_y + 34))
 

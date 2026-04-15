@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
-from run_canyon_render import AltitudeHoldController
+from run_scenario import AltitudeHoldController
 
 
 def latlon_to_pixel(lat_deg, lon_deg, south, north, west, east, rows, cols):

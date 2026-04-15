@@ -255,7 +255,7 @@ class DEMCanyon:
                 
                 finite_dem = np.where(np.isfinite(self.ordered_dem_msl_m), self.ordered_dem_msl_m, np.inf)
                 
-                # Dynamic valley thresholding similar to run_mppi.py
+                # Dynamic valley thresholding similar to run_scenario.py
                 row_min = np.nanmin(self.ordered_dem_msl_m, axis=1)
                 row_max = np.nanmax(self.ordered_dem_msl_m, axis=1)
                 row_span = row_max - row_min

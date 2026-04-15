@@ -1,24 +1,28 @@
 import json
-import numpy as np
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Tuple
+
+import numpy as np
 
 
-SIMPLE_TUNING_JSON_PATH = Path("output/simple_controller/simple_controller_optuna_best.json")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SIMPLE_TUNING_JSON_PATH = REPO_ROOT / "output" / "simple_controller" / "simple_controller_optuna_best.json"
 SIMPLE_TUNING_STUDY_NAME = "simple_controller_gain_tuning"
-SIMPLE_TUNING_STORAGE = "sqlite:///simple_controller_tuning.db"
+SIMPLE_TUNING_STORAGE = f"sqlite:///{(REPO_ROOT / 'optuna' / 'simple_controller_tuning.db').as_posix()}"
+SIMPLE_TUNING_STORAGE_FALLBACKS = (
+    SIMPLE_TUNING_STORAGE,
+    f"sqlite:///{(REPO_ROOT / 'simple_controller_tuning.db').as_posix()}",
+    "sqlite:///simple_controller_tuning.db",
+)
+
 
 @dataclass
 class SimpleCanyonControllerConfig:
     target_speed_fps: float = 450.0 * 1.68781
-    target_clearance_ft: float = 250.0
-    lookahead_rows: int = 40
-    terrain_lookahead_ft: Tuple[float, ...] = (600.0, 1200.0, 1800.0, 2400.0)
+    lookahead_rows: int = 20
     dt: float = 1.0 / 30.0
     use_dem_centerline: bool = True
-    use_terrain_following: bool = False
-    
+
     # Roll / Lateral Guidance Gains
     roll_lateral_gain: float = -0.0030
     roll_rate_gain: float = -0.0005
@@ -26,23 +30,22 @@ class SimpleCanyonControllerConfig:
     roll_p_gain: float = 2.80
     roll_rate_damping: float = -0.35
     roll_max_rad: float = 0.75
-    
+
     # Pitch / Altitude Guidance Gains
     pitch_clearance_gain: float = -0.0050
-    pitch_ahead_gain: float = -0.0014
     pitch_integral_gain: float = -0.000020
     pitch_rate_gain: float = -0.0030
     pitch_q_gain: float = -4.2
     pitch_rate_damping: float = -0.75
     pitch_min_rad: float = -0.40
     pitch_max_rad: float = 0.55
-    
+
     # Yaw Gains
     yaw_rate_damping: float = -0.28
     yaw_beta_gain: float = -0.10
     yaw_roll_trim: float = 0.08
     yaw_max_cmd: float = 0.35
-    
+
     # Throttle Gains
     throttle_base: float = 0.26
     throttle_speed_gain: float = 0.0014
@@ -80,17 +83,27 @@ def load_simple_controller_optuna_params(
     if params:
         return params, source
 
-    sqlite_path = _sqlite_storage_to_path(storage)
-    if sqlite_path is None or not sqlite_path.exists():
-        return {}, None
+    storage_candidates = []
+    if isinstance(storage, str) and storage:
+        storage_candidates.append(storage)
+    for fallback in SIMPLE_TUNING_STORAGE_FALLBACKS:
+        if fallback not in storage_candidates:
+            storage_candidates.append(fallback)
 
-    try:
-        import optuna
+    for storage_url in storage_candidates:
+        sqlite_path = _sqlite_storage_to_path(storage_url)
+        if sqlite_path is None or not sqlite_path.exists():
+            continue
 
-        study = optuna.load_study(study_name=study_name, storage=storage)
-        return dict(study.best_params), f"{storage}::{study_name}"
-    except Exception:
-        return {}, None
+        try:
+            import optuna
+
+            study = optuna.load_study(study_name=study_name, storage=storage_url)
+            return dict(study.best_params), f"{storage_url}::{study_name}"
+        except Exception:
+            continue
+
+    return {}, None
 
 
 def apply_simple_controller_optuna_params(config: SimpleCanyonControllerConfig, params: dict):
@@ -130,95 +143,215 @@ def with_default_simple_controller_optuna_gains(
     return tuned_config, source, tuned_keys
 
 
+def build_reference_trajectory(
+    north_ft,
+    east_ft,
+    heading_rad=None,
+    width_ft=None,
+    closed_loop=False,
+):
+    north_arr = np.asarray(north_ft, dtype=np.float32).reshape(-1)
+    east_arr = np.asarray(east_ft, dtype=np.float32).reshape(-1)
+    if north_arr.size < 2 or east_arr.size < 2:
+        raise ValueError("Reference trajectory requires at least two points.")
+    if north_arr.size != east_arr.size:
+        raise ValueError("north_ft and east_ft must have the same length.")
 
-class SimpleCanyonController:
-    """Simple centerline-following guidance and control law for canyon flight.
+    if heading_rad is None:
+        if bool(closed_loop):
+            dn = np.roll(north_arr, -1) - north_arr
+            de = np.roll(east_arr, -1) - east_arr
+            heading_arr = np.arctan2(de, dn).astype(np.float32)
+        else:
+            heading_arr = np.zeros_like(north_arr, dtype=np.float32)
+            dn = np.diff(north_arr)
+            de = np.diff(east_arr)
+            heading_arr[:-1] = np.arctan2(de, dn)
+            heading_arr[-1] = heading_arr[-2]
+    else:
+        heading_arr = np.asarray(heading_rad, dtype=np.float32).reshape(-1)
+        if heading_arr.size != north_arr.size:
+            raise ValueError("heading_rad must have the same length as north_ft/east_ft.")
 
-    The controller uses a lightweight guidance layer to estimate cross-track and
-    heading error to the canyon centerline, then applies damped attitude/speed
-    control to produce [roll, pitch, yaw, throttle] commands.
+    if width_ft is None:
+        width_arr = np.full_like(north_arr, 600.0, dtype=np.float32)
+    else:
+        width_arr = np.asarray(width_ft, dtype=np.float32).reshape(-1)
+        if width_arr.size != north_arr.size:
+            raise ValueError("width_ft must have the same length as north_ft/east_ft.")
+
+    return {
+        "north_ft": north_arr,
+        "east_ft": east_arr,
+        "heading_rad": heading_arr,
+        "width_ft": width_arr,
+        "closed_loop": bool(closed_loop),
+    }
+
+
+class SimpleTrajectoryController:
+    """Generic simple tracking controller for any 2D reference trajectory.
+
+    Input state convention matches DataCollectionEnv state dict keys:
+    p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi, beta.
     """
+
     def __init__(
         self,
-        env,
         config: SimpleCanyonControllerConfig = None,
+        target_altitude_ft=None,
+        wall_margin_ft=0.0,
+        altitude_reference_offset_ft=0.0,
+        reference_trajectory=None,
     ):
-        self.env = env.unwrapped
-        self.canyon = self.env.canyon
         self.config = config if config is not None else SimpleCanyonControllerConfig()
-        
+
         self.target_speed_fps = float(self.config.target_speed_fps)
-        self.target_clearance_ft = float(self.config.target_clearance_ft)
         self.lookahead_rows = int(max(1, self.config.lookahead_rows))
-        self.terrain_lookahead_ft = tuple(float(x) for x in self.config.terrain_lookahead_ft)
         self.dt = float(max(self.config.dt, 1e-3))
-        self.use_dem_centerline = bool(self.config.use_dem_centerline)
 
-        self.wall_margin_ft = float(getattr(self.env, "wall_margin_ft", 0.0))
-        self.target_altitude_ft = float(getattr(self.env, "target_altitude_ft", 0.0))
-        self.dem_start_elev_ft = float(getattr(self.env, "dem_start_elev_ft", 0.0))
+        self.target_altitude_ft = None if target_altitude_ft is None else float(target_altitude_ft)
+        self.wall_margin_ft = float(wall_margin_ft)
+        self.altitude_reference_offset_ft = float(altitude_reference_offset_ft)
 
-        self._center_east_ft = None
-        self._reference_heading_rad = None
+        self.reference_trajectory = None
+        self._ontrack_idx = None
         self._altitude_error_integral = 0.0
+        self._prev_altitude_error_ft = 0.0
         self._prev_lateral_error_ft = 0.0
-        self._prev_terrain_clearance_ft = self.target_clearance_ft
-        self._step_count = 0
-
         self.last_guidance = {}
+
+        if reference_trajectory is not None:
+            self.set_reference_trajectory(reference_trajectory)
 
     @staticmethod
     def _wrap_angle_rad(angle_rad):
         return float(np.arctan2(np.sin(angle_rad), np.cos(angle_rad)))
 
-    def _has_dem_centerline(self):
-        return (
-            hasattr(self.canyon, "get_local_from_latlon")
-            and hasattr(self.canyon, "get_centerline_heading_deg")
-            and hasattr(self.canyon, "north_samples_ft")
-            and hasattr(self.canyon, "center_east_samples_ft")
-            and hasattr(self.canyon, "width_samples_ft")
+    @staticmethod
+    def _normalize_reference_trajectory(reference_trajectory):
+        if reference_trajectory is None:
+            return None
+        if not isinstance(reference_trajectory, dict):
+            raise TypeError("reference_trajectory must be a dict or None.")
+
+        north_ft = reference_trajectory.get("north_ft", reference_trajectory.get("north_samples_ft"))
+        east_ft = reference_trajectory.get(
+            "east_ft",
+            reference_trajectory.get("center_east_samples_ft", reference_trajectory.get("east_samples_ft")),
+        )
+        heading_rad = reference_trajectory.get(
+            "heading_rad",
+            reference_trajectory.get("centerline_heading_samples_rad", reference_trajectory.get("heading_samples_rad")),
+        )
+        width_ft = reference_trajectory.get("width_ft", reference_trajectory.get("width_samples_ft"))
+        closed_loop = bool(reference_trajectory.get("closed_loop", False))
+
+        if north_ft is None or east_ft is None:
+            raise ValueError("reference_trajectory must define north_ft/east_ft arrays.")
+
+        return build_reference_trajectory(
+            north_ft=north_ft,
+            east_ft=east_ft,
+            heading_rad=heading_rad,
+            width_ft=width_ft,
+            closed_loop=closed_loop,
         )
 
-    def reset(self, state_dict):
+    def set_reference_trajectory(self, reference_trajectory):
+        self.reference_trajectory = self._normalize_reference_trajectory(reference_trajectory)
+        self._ontrack_idx = None
+
+    def reset(self, state_dict, target_altitude_ft=None, reference_trajectory=None):
+        if target_altitude_ft is not None:
+            self.target_altitude_ft = float(target_altitude_ft)
+        elif self.target_altitude_ft is None:
+            self.target_altitude_ft = float(state_dict["h"])
+
+        if reference_trajectory is not None:
+            self.set_reference_trajectory(reference_trajectory)
+
+        self._ontrack_idx = None
         self._altitude_error_integral = 0.0
-        self._center_east_ft = float(
-            getattr(self.env, "canyon_center_east_ft", state_dict["p_E"])
-        )
-        self._reference_heading_rad = float(state_dict["psi"])
-        self._prev_lateral_error_ft = float(state_dict["p_E"] - self._center_east_ft)
-        self._prev_terrain_clearance_ft = self._terrain_clearance_ft(state_dict)
+        self._prev_altitude_error_ft = self._altitude_error_ft(state_dict)
+        self._prev_lateral_error_ft = 0.0
+        self.last_guidance = {}
 
-    def _guidance_from_dem(self, state_dict):
-        lat_deg = float(self.env.simulation.get_property_value("position/lat-gc-deg"))
-        lon_deg = float(self.env.simulation.get_property_value("position/long-gc-deg"))
+    def _project_to_ontrack_index(self, local_north_ft, local_east_ft, reference):
+        north_samples_ft = reference["north_ft"]
+        east_samples_ft = reference["east_ft"]
+        sample_count = int(len(north_samples_ft))
+        if sample_count <= 0:
+            return 0
 
-        local_north_ft, local_east_ft = self.canyon.get_local_from_latlon(lat_deg, lon_deg)
-        center_east_ft = float(
-            np.interp(
-                local_north_ft,
-                self.canyon.north_samples_ft,
-                self.canyon.center_east_samples_ft,
-            )
-        )
-        width_ft = float(
-            np.interp(
-                local_north_ft,
-                self.canyon.north_samples_ft,
-                self.canyon.width_samples_ft,
-            )
+        window_back = int(max(60, self.lookahead_rows * 8))
+        window_fwd = int(max(120, self.lookahead_rows * 16))
+
+        if self._ontrack_idx is None:
+            dn = north_samples_ft - float(local_north_ft)
+            de = east_samples_ft - float(local_east_ft)
+            ontrack_idx = int(np.argmin(dn * dn + de * de))
+        else:
+            seed_idx = int(np.clip(self._ontrack_idx, 0, sample_count - 1))
+            if reference["closed_loop"]:
+                offsets = np.arange(-window_back, window_fwd + 1, dtype=np.int32)
+                cand_idx = (seed_idx + offsets) % sample_count
+                dn = north_samples_ft[cand_idx] - float(local_north_ft)
+                de = east_samples_ft[cand_idx] - float(local_east_ft)
+                ontrack_idx = int(cand_idx[int(np.argmin(dn * dn + de * de))])
+            else:
+                lo = max(0, seed_idx - window_back)
+                hi = min(sample_count, seed_idx + window_fwd + 1)
+                dn = north_samples_ft[lo:hi] - float(local_north_ft)
+                de = east_samples_ft[lo:hi] - float(local_east_ft)
+                rel_idx = int(np.argmin(dn * dn + de * de))
+                ontrack_idx = int(np.clip(lo + rel_idx, 0, sample_count - 1))
+
+        self._ontrack_idx = ontrack_idx
+        return ontrack_idx
+
+    def _compute_guidance(self, state_dict, reference, position_override=None):
+        if position_override is None:
+            local_north_ft = float(state_dict["p_N"])
+            local_east_ft = float(state_dict["p_E"])
+        else:
+            local_north_ft = float(position_override["p_N"])
+            local_east_ft = float(position_override["p_E"])
+
+        north_samples_ft = reference["north_ft"]
+        east_samples_ft = reference["east_ft"]
+        heading_samples_rad = reference["heading_rad"]
+        width_samples_ft = reference["width_ft"]
+
+        sample_count = int(len(north_samples_ft))
+        ontrack_idx = self._project_to_ontrack_index(
+            local_north_ft=local_north_ft,
+            local_east_ft=local_east_ft,
+            reference=reference,
         )
 
-        desired_heading_rad = float(
-            np.interp(
-                local_north_ft,
-                self.canyon.north_samples_ft,
-                self.canyon.centerline_heading_samples_rad,
-            )
-        )
+        if reference["closed_loop"]:
+            look_idx = int((ontrack_idx + self.lookahead_rows) % sample_count)
+        else:
+            look_idx = int(np.clip(ontrack_idx + self.lookahead_rows, 0, sample_count - 1))
 
-        lateral_error_ft = float(local_east_ft - center_east_ft)
+        ontrack_north_ft = float(north_samples_ft[ontrack_idx])
+        ontrack_center_east_ft = float(east_samples_ft[ontrack_idx])
+        lookahead_north_ft = float(north_samples_ft[look_idx])
+        lookahead_center_east_ft = float(east_samples_ft[look_idx])
+
+        desired_heading_rad = float(heading_samples_rad[look_idx])
+
+        dn = float(local_north_ft - ontrack_north_ft)
+        de = float(local_east_ft - ontrack_center_east_ft)
+        lateral_error_ft = float(
+            dn * (-np.sin(desired_heading_rad)) + de * np.cos(desired_heading_rad)
+        )
         heading_error_rad = self._wrap_angle_rad(float(state_dict["psi"]) - desired_heading_rad)
+
+        width_ft = float(width_samples_ft[ontrack_idx])
+        if (not np.isfinite(width_ft)) or width_ft <= 1.0:
+            width_ft = 600.0
 
         return {
             "lateral_error_ft": lateral_error_ft,
@@ -226,129 +359,38 @@ class SimpleCanyonController:
             "centerline_heading_deg": float(np.rad2deg(desired_heading_rad)),
             "canyon_width_ft": width_ft,
             "local_north_ft": float(local_north_ft),
+            "ontrack_idx": int(ontrack_idx),
+            "ontrack_north_ft": float(ontrack_north_ft),
+            "ontrack_center_east_ft": float(ontrack_center_east_ft),
+            "lookahead_rows": int(self.lookahead_rows),
+            "lookahead_north_ft": float(lookahead_north_ft),
+            "lookahead_center_east_ft": float(lookahead_center_east_ft),
         }
 
-    def _guidance_fallback(self, state_dict):
-        if self._center_east_ft is None:
-            self._center_east_ft = float(state_dict["p_E"])
-        if self._reference_heading_rad is None:
-            self._reference_heading_rad = float(state_dict["psi"])
+    def _altitude_error_ft(self, state_dict):
+        if self.target_altitude_ft is None:
+            self.target_altitude_ft = float(state_dict["h"])
 
-        lateral_error_ft = float(state_dict["p_E"] - self._center_east_ft)
-        heading_error_rad = self._wrap_angle_rad(float(state_dict["psi"]) - self._reference_heading_rad)
+        h_raw_ft = float(state_dict["h"])
+        h_with_offset_ft = h_raw_ft + self.altitude_reference_offset_ft
+        if abs(h_raw_ft - self.target_altitude_ft) <= abs(h_with_offset_ft - self.target_altitude_ft):
+            h_msl_ft = h_raw_ft
+        else:
+            h_msl_ft = h_with_offset_ft
+        return float(h_msl_ft - self.target_altitude_ft)
 
-        return {
-            "lateral_error_ft": lateral_error_ft,
-            "heading_error_rad": heading_error_rad,
-            "centerline_heading_deg": float(np.rad2deg(self._reference_heading_rad)),
-            "canyon_width_ft": float(state_dict.get("canyon_width", 600.0)),
-            "local_north_ft": float(state_dict["p_N"]),
-        }
+    def get_action(self, state_dict, reference_trajectory=None, position_override=None):
+        reference = self.reference_trajectory
+        if reference_trajectory is not None:
+            reference = self._normalize_reference_trajectory(reference_trajectory)
+        if reference is None:
+            raise ValueError("No reference trajectory provided to SimpleTrajectoryController.")
 
-    def _compute_guidance(self, state_dict):
-        if self.use_dem_centerline and self._has_dem_centerline():
-            try:
-                dem_guidance = self._guidance_from_dem(state_dict)
-                width_ft = float(dem_guidance.get("canyon_width_ft", state_dict.get("canyon_width", 1.0)))
-                lateral_ft = float(dem_guidance.get("lateral_error_ft", 0.0))
-                if not np.isfinite(lateral_ft) or abs(lateral_ft) > 4.0 * max(width_ft, 1.0):
-                    return self._guidance_fallback(state_dict)
-                return dem_guidance
-            except Exception:
-                return self._guidance_fallback(state_dict)
-        return self._guidance_fallback(state_dict)
-
-    def _terrain_clearance_ft(self, state_dict):
-        if hasattr(self.canyon, "get_elevation_msl_ft_from_latlon"):
-            try:
-                lat_deg = float(self.env.simulation.get_property_value("position/lat-gc-deg"))
-                lon_deg = float(self.env.simulation.get_property_value("position/long-gc-deg"))
-                # Adjust state_dict["h"] back to MSL if it's relative to the start floor
-                h_msl = float(state_dict["h"]) + self.dem_start_elev_ft
-                terrain_elev_ft = float(self.canyon.get_elevation_msl_ft_from_latlon(lat_deg, lon_deg))
-                return float(h_msl - terrain_elev_ft)
-            except Exception:
-                pass
-        return float(state_dict["h"])
-
-    def _dem_elevation_msl_ft_from_local(self, local_north_ft, local_east_ft):
-        if not (
-            hasattr(self.canyon, "ordered_dem_msl_m")
-            and hasattr(self.canyon, "north_samples_ft")
-            and hasattr(self.canyon, "east_samples_ft")
-        ):
-            return None
-
-        north_axis = np.asarray(self.canyon.north_samples_ft, dtype=np.float32)
-        east_axis = np.asarray(self.canyon.east_samples_ft, dtype=np.float32)
-        dem = np.asarray(self.canyon.ordered_dem_msl_m, dtype=np.float32)
-        rows, cols = dem.shape
-
-        north_ft = float(np.clip(local_north_ft, float(north_axis[0]), float(north_axis[-1])))
-        east_ft = float(np.clip(local_east_ft, float(east_axis[0]), float(east_axis[-1])))
-
-        row_ordered = float(np.interp(north_ft, north_axis, np.arange(rows, dtype=np.float32)))
-        col = float(np.interp(east_ft, east_axis, np.arange(cols, dtype=np.float32)))
-
-        r0 = int(np.floor(row_ordered))
-        c0 = int(np.floor(col))
-        r1 = min(r0 + 1, rows - 1)
-        c1 = min(c0 + 1, cols - 1)
-
-        dr = float(row_ordered - r0)
-        dc = float(col - c0)
-
-        z00 = float(dem[r0, c0])
-        z01 = float(dem[r0, c1])
-        z10 = float(dem[r1, c0])
-        z11 = float(dem[r1, c1])
-
-        z0 = (1.0 - dc) * z00 + dc * z01
-        z1 = (1.0 - dc) * z10 + dc * z11
-        z_msl_m = (1.0 - dr) * z0 + dr * z1
-        return float(z_msl_m * 3.28084)
-
-    def _predict_min_clearance_ahead_ft(self, state_dict, guidance):
-        current_clearance_ft = self._terrain_clearance_ft(state_dict)
-
-        if not (
-            hasattr(self.canyon, "get_local_from_latlon")
-            and hasattr(self.canyon, "north_samples_ft")
-            and hasattr(self.canyon, "center_east_samples_ft")
-        ):
-            return current_clearance_ft
-
-        try:
-            lat_deg = float(self.env.simulation.get_property_value("position/lat-gc-deg"))
-            lon_deg = float(self.env.simulation.get_property_value("position/long-gc-deg"))
-            local_north_ft, local_east_ft = self.canyon.get_local_from_latlon(lat_deg, lon_deg)
-
-            north_axis = np.asarray(self.canyon.north_samples_ft, dtype=np.float32)
-            center_axis = np.asarray(self.canyon.center_east_samples_ft, dtype=np.float32)
-            # Use MSL altitude for DEM elevation comparison
-            aircraft_h_msl_ft = float(state_dict["h"]) + self.dem_start_elev_ft
-
-            min_clearance_ft = current_clearance_ft
-            for delta_north_ft in self.terrain_lookahead_ft:
-                sample_north_ft = float(local_north_ft + delta_north_ft)
-                sample_center_east_ft = float(
-                    np.interp(sample_north_ft, north_axis, center_axis)
-                )
-                elev_msl_ft = self._dem_elevation_msl_ft_from_local(
-                    sample_north_ft,
-                    sample_center_east_ft,
-                )
-                if elev_msl_ft is None:
-                    continue
-                sample_clearance_ft = aircraft_h_msl_ft - elev_msl_ft
-                min_clearance_ft = min(min_clearance_ft, sample_clearance_ft)
-
-            return float(min_clearance_ft)
-        except Exception:
-            return current_clearance_ft
-
-    def get_action(self, state_dict):
-        guidance = self._compute_guidance(state_dict)
+        guidance = self._compute_guidance(
+            state_dict=state_dict,
+            reference=reference,
+            position_override=position_override,
+        )
 
         lateral_error_ft = float(guidance["lateral_error_ft"])
         lateral_error_rate_fps = (lateral_error_ft - self._prev_lateral_error_ft) / self.dt
@@ -368,26 +410,11 @@ class SimpleCanyonController:
         r_rate = float(state_dict["r"])
         beta = float(state_dict.get("beta", 0.0))
 
-        terrain_clearance_ft = self._terrain_clearance_ft(state_dict)
-        if self.config.use_terrain_following:
-            clearance_rate_fps = (terrain_clearance_ft - self._prev_terrain_clearance_ft) / self.dt
-            self._prev_terrain_clearance_ft = terrain_clearance_ft
-            clearance_error_ft = float(terrain_clearance_ft - self.target_clearance_ft)
-            min_ahead_clearance_ft = self._predict_min_clearance_ahead_ft(state_dict, guidance)
-            ahead_clearance_error_ft = float(min_ahead_clearance_ft - self.target_clearance_ft)
-        else:
-            # Absolute altitude hold (relative to MSL target)
-            current_h_ft = float(state_dict["h"]) + self.dem_start_elev_ft
-            clearance_error_ft = current_h_ft - self.target_altitude_ft
-            clearance_velocity_fps = (terrain_clearance_ft - self._prev_terrain_clearance_ft) / self.dt
-            self._prev_terrain_clearance_ft = terrain_clearance_ft
-            
-            # For absolute hold, we use vertical speed (v_down) but we'll use clearance rate for damping if needed
-            clearance_rate_fps = float(state_dict.get("v_down", 0.0)) * -1.0 
-            ahead_clearance_error_ft = clearance_error_ft # No lookahead in absolute hold
-            min_ahead_clearance_ft = current_h_ft # Not used
+        altitude_error_ft = self._altitude_error_ft(state_dict)
+        altitude_error_rate_fps = (altitude_error_ft - self._prev_altitude_error_ft) / self.dt
+        self._prev_altitude_error_ft = altitude_error_ft
 
-        self._altitude_error_integral += clearance_error_ft * self.dt
+        self._altitude_error_integral += altitude_error_ft * self.dt
         self._altitude_error_integral = float(np.clip(self._altitude_error_integral, -3000.0, 3000.0))
 
         speed_fps = float(
@@ -398,7 +425,6 @@ class SimpleCanyonController:
             )
         )
 
-        # Lateral line-following around proxy canyon centerline p_E ~= center_east.
         roll_des_rad = np.clip(
             self.config.roll_lateral_gain * lateral_error_ft
             + self.config.roll_rate_gain * lateral_error_rate_fps
@@ -412,37 +438,33 @@ class SimpleCanyonController:
             1.0,
         )
 
-        # Altitude hold with terrain lookahead feedforward.
         desired_theta_rad = np.clip(
-            self.config.pitch_clearance_gain * clearance_error_ft
-            + self.config.pitch_ahead_gain * ahead_clearance_error_ft
+            self.config.pitch_clearance_gain * altitude_error_ft
             + self.config.pitch_integral_gain * self._altitude_error_integral
-            + self.config.pitch_rate_gain * clearance_rate_fps,
+            + self.config.pitch_rate_gain * altitude_error_rate_fps,
             self.config.pitch_min_rad,
             self.config.pitch_max_rad,
         )
         theta_error_rad = desired_theta_rad - theta
-        
+
         pitch_cmd = np.clip(
             self.config.pitch_q_gain * theta_error_rad + self.config.pitch_rate_damping * q_rate,
             -1.0,
             1.0,
         )
 
-        # Simple yaw damping with a small heading-error trim.
         yaw_cmd = np.clip(
-            self.config.yaw_rate_damping * r_rate 
-            + self.config.yaw_beta_gain * beta 
+            self.config.yaw_rate_damping * r_rate
+            + self.config.yaw_beta_gain * beta
             + self.config.yaw_roll_trim * (roll_des_rad - phi),
             -self.config.yaw_max_cmd,
             self.config.yaw_max_cmd,
         )
 
-        # Speed hold around a cruise trim throttle.
         throttle_cmd = np.clip(
             self.config.throttle_base
             + self.config.throttle_speed_gain * (self.target_speed_fps - speed_fps)
-            + self.config.throttle_climb_penalty * np.clip(-ahead_clearance_error_ft, 0.0, None),
+            + self.config.throttle_climb_penalty * np.clip(altitude_error_ft, 0.0, None),
             0.0,
             self.config.throttle_max,
         )
@@ -452,12 +474,8 @@ class SimpleCanyonController:
             **guidance,
             "lateral_norm": float(lateral_norm),
             "lateral_error_rate_fps": float(lateral_error_rate_fps),
-            "altitude_error_ft": float(state_dict["h"] - self.target_altitude_ft),
-            "terrain_clearance_ft": float(terrain_clearance_ft),
-            "clearance_error_ft": float(clearance_error_ft),
-            "ahead_min_clearance_ft": float(min_ahead_clearance_ft),
-            "ahead_clearance_error_ft": float(ahead_clearance_error_ft),
-            "clearance_rate_fps": float(clearance_rate_fps),
+            "altitude_error_ft": float(altitude_error_ft),
+            "altitude_error_rate_fps": float(altitude_error_rate_fps),
             "speed_fps": float(speed_fps),
             "heading_error_deg": float(np.degrees(heading_error_rad)),
             "roll_des_deg": float(np.degrees(roll_des_rad)),
@@ -468,21 +486,147 @@ class SimpleCanyonController:
             "throttle_cmd": float(throttle_cmd),
         }
 
-        self._step_count += 1
         return np.array([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd], dtype=np.float32)
+
+
+class SimpleCanyonController:
+    """Compatibility adapter that applies SimpleTrajectoryController to canyon centerlines."""
+
+    def __init__(
+        self,
+        env,
+        config: SimpleCanyonControllerConfig = None,
+    ):
+        self.env = env.unwrapped
+        self.canyon = self.env.canyon
+        self.config = config if config is not None else SimpleCanyonControllerConfig()
+        self.use_dem_centerline = bool(self.config.use_dem_centerline)
+
+        self.wall_margin_ft = float(getattr(self.env, "wall_margin_ft", 0.0))
+        self.target_altitude_ft = float(getattr(self.env, "target_altitude_ft", 0.0))
+        self.dem_start_elev_ft = float(getattr(self.env, "dem_start_elev_ft", 0.0))
+
+        self._center_east_ft = None
+        self._reference_heading_rad = None
+        self.last_guidance = {}
+
+        self._dem_reference = self._build_dem_reference_trajectory()
+        self._core = SimpleTrajectoryController(
+            config=self.config,
+            target_altitude_ft=self.target_altitude_ft,
+            wall_margin_ft=self.wall_margin_ft,
+            altitude_reference_offset_ft=self.dem_start_elev_ft,
+            reference_trajectory=self._dem_reference,
+        )
+
+    def _has_dem_centerline(self):
+        return (
+            hasattr(self.canyon, "get_local_from_latlon")
+            and hasattr(self.canyon, "centerline_heading_samples_rad")
+            and hasattr(self.canyon, "north_samples_ft")
+            and hasattr(self.canyon, "center_east_samples_ft")
+            and hasattr(self.canyon, "width_samples_ft")
+        )
+
+    def _build_dem_reference_trajectory(self):
+        if not self.use_dem_centerline or not self._has_dem_centerline():
+            return None
+        return build_reference_trajectory(
+            north_ft=np.asarray(self.canyon.north_samples_ft, dtype=np.float32),
+            east_ft=np.asarray(self.canyon.center_east_samples_ft, dtype=np.float32),
+            heading_rad=np.asarray(self.canyon.centerline_heading_samples_rad, dtype=np.float32),
+            width_ft=np.asarray(self.canyon.width_samples_ft, dtype=np.float32),
+            closed_loop=False,
+        )
+
+    def _build_fallback_reference_trajectory(self, state_dict):
+        sample_count = 512
+        step_ft = 60.0
+        center_east_ft = float(
+            getattr(self.env, "canyon_center_east_ft", state_dict["p_E"])
+        )
+        ref_heading_rad = float(state_dict["psi"])
+
+        n_start_ft = float(state_dict["p_N"]) - 64.0 * step_ft
+        north_samples_ft = n_start_ft + step_ft * np.arange(sample_count, dtype=np.float32)
+        east_samples_ft = np.full(sample_count, center_east_ft, dtype=np.float32)
+        heading_samples_rad = np.full(sample_count, ref_heading_rad, dtype=np.float32)
+        width_samples_ft = np.full(
+            sample_count,
+            float(state_dict.get("canyon_width", 600.0)),
+            dtype=np.float32,
+        )
+
+        return build_reference_trajectory(
+            north_ft=north_samples_ft,
+            east_ft=east_samples_ft,
+            heading_rad=heading_samples_rad,
+            width_ft=width_samples_ft,
+            closed_loop=False,
+        )
+
+    def _current_local_position(self, state_dict):
+        if hasattr(self.canyon, "get_local_from_latlon"):
+            try:
+                lat_deg = float(self.env.simulation.get_property_value("position/lat-gc-deg"))
+                lon_deg = float(self.env.simulation.get_property_value("position/long-gc-deg"))
+                local_north_ft, local_east_ft = self.canyon.get_local_from_latlon(lat_deg, lon_deg)
+                return float(local_north_ft), float(local_east_ft)
+            except Exception:
+                pass
+        return float(state_dict["p_N"]), float(state_dict["p_E"])
+
+    def reset(self, state_dict):
+        self._center_east_ft = float(
+            getattr(self.env, "canyon_center_east_ft", state_dict["p_E"])
+        )
+        self._reference_heading_rad = float(state_dict["psi"])
+
+        if self._dem_reference is not None:
+            self._core.set_reference_trajectory(self._dem_reference)
+        else:
+            self._core.set_reference_trajectory(self._build_fallback_reference_trajectory(state_dict))
+
+        self._core.reset(
+            state_dict=state_dict,
+            target_altitude_ft=self.target_altitude_ft,
+        )
+        self.last_guidance = {}
+
+    def get_action(self, state_dict):
+        if self._core.reference_trajectory is None:
+            self._core.set_reference_trajectory(self._build_fallback_reference_trajectory(state_dict))
+
+        local_north_ft, local_east_ft = self._current_local_position(state_dict)
+        action = self._core.get_action(
+            state_dict=state_dict,
+            position_override={"p_N": local_north_ft, "p_E": local_east_ft},
+        )
+        self.last_guidance = dict(self._core.last_guidance)
+        return action
+
     def get_canyon_width_ft(self, p_N):
-        width, _ = self.canyon.get_geometry(p_N)
-        return float(width)
+        if hasattr(self.canyon, "get_geometry"):
+            width, _ = self.canyon.get_geometry(p_N)
+            return float(width)
+        if self.last_guidance:
+            return float(self.last_guidance.get("canyon_width_ft", 600.0))
+        return 600.0
 
     def get_lateral_error_ft(self, p_N, p_E):
-        lat_deg = float(self.env.simulation.get_property_value("position/lat-gc-deg"))
-        lon_deg = float(self.env.simulation.get_property_value("position/long-gc-deg"))
-        local_north_ft, local_east_ft = self.canyon.get_local_from_latlon(lat_deg, lon_deg)
-        center_east_ft = float(
-            np.interp(
-                local_north_ft,
-                self.canyon.north_samples_ft,
-                self.canyon.center_east_samples_ft,
+        if self.last_guidance:
+            return float(self.last_guidance.get("lateral_error_ft", 0.0))
+
+        if hasattr(self.canyon, "get_local_from_latlon") and hasattr(self.canyon, "center_east_samples_ft"):
+            lat_deg = float(self.env.simulation.get_property_value("position/lat-gc-deg"))
+            lon_deg = float(self.env.simulation.get_property_value("position/long-gc-deg"))
+            local_north_ft, local_east_ft = self.canyon.get_local_from_latlon(lat_deg, lon_deg)
+            center_east_ft = float(
+                np.interp(
+                    local_north_ft,
+                    self.canyon.north_samples_ft,
+                    self.canyon.center_east_samples_ft,
+                )
             )
-        )
-        return float(local_east_ft - center_east_ft)
+            return float(local_east_ft - center_east_ft)
+        return float(p_E - getattr(self.env, "canyon_center_east_ft", 0.0))

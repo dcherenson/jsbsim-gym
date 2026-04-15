@@ -1,8 +1,7 @@
 {
-  "base_config": {
+  "best_params": {
     "dt": 0.03333333333333333,
-    "lookahead_rows": 40,
-    "pitch_ahead_gain": -0.0014,
+    "lookahead_rows": 10.0,
     "pitch_clearance_gain": -0.005,
     "pitch_integral_gain": -2e-05,
     "pitch_max_rad": 0.55,
@@ -16,59 +15,16 @@
     "roll_p_gain": 2.8,
     "roll_rate_damping": -0.35,
     "roll_rate_gain": -0.0005,
-    "target_clearance_ft": 100.0,
-    "target_speed_fps": 759.5145,
-    "terrain_lookahead_ft": [
-      600.0,
-      1200.0,
-      1800.0,
-      2400.0
-    ],
     "throttle_base": 0.26,
     "throttle_climb_penalty": -0.0007,
     "throttle_max": 0.8,
     "throttle_speed_gain": 0.0014,
-    "use_dem_centerline": true,
-    "use_terrain_following": true,
     "yaw_beta_gain": -0.1,
     "yaw_max_cmd": 0.35,
     "yaw_rate_damping": -0.28,
     "yaw_roll_trim": 0.08
   },
-  "best_params": {
-    "pitch_ahead_gain": 0.00206035338303744,
-    "pitch_clearance_gain": 0.02391764288177539,
-    "pitch_integral_gain": 5.030974035476951e-06,
-    "pitch_q_gain": 2.855422908364288,
-    "pitch_rate_damping": 1.6941217329606009,
-    "pitch_rate_gain": 0.0015293767591899434,
-    "roll_heading_gain": 1.9076638066599798,
-    "roll_lateral_gain": 0.0011574370600674147,
-    "roll_p_gain": 3.807948319402063,
-    "roll_rate_damping": 0.09251193339068926,
-    "roll_rate_gain": 0.00011963485221027834,
-    "throttle_base": 0.749963783498677,
-    "throttle_climb_penalty_mag": 0.002661153681170989,
-    "throttle_speed_gain": 0.0015706092310030179,
-    "yaw_beta_gain": 0.042840887701117186,
-    "yaw_rate_damping": 1.1065348883456094,
-    "yaw_roll_trim": -0.1781946618270719
-  },
-  "best_trial_number": 492,
-  "best_value": -990.7395859218022,
-  "evaluation": {
-    "max_steps": 1200,
-    "robustness_weight": 0.2,
-    "seeds": [
-      3,
-      7,
-      42
-    ],
-    "target_clearance_ft": 100.0,
-    "target_speed_kts": 450.0,
-    "terrain_following": true,
-    "wind_sigma": 0.6
-  },
-  "storage": "sqlite:///simple_controller_tuning.db",
-  "study_name": "simple_controller_gain_tuning"
+  "source": "output/simple_controller/circle_tracking/circle_tracking_summary.json",
+  "source_gain_key": "controller.gains",
+  "notes": "Shared simple-controller gain file for canyon and circle scenarios. Scenario-specific settings such as target_speed_fps and use_dem_centerline are intentionally excluded."
 }

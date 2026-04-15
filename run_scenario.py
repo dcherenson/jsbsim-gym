@@ -11,6 +11,7 @@ import numpy as np
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
+from jsbsim_gym.canyon_env import OBS_ALTITUDE_ERROR_FT, OBS_PHI, OBS_P, OBS_Q, OBS_R, OBS_THETA
 from jsbsim_gym.canyon_artifacts import CanyonRunRecorder
 from jsbsim_gym.mppi_jax import (
     JaxMPPIConfig,
@@ -27,10 +28,9 @@ from jsbsim_gym.simple_controller import (
 DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)
 DEM_START_PIXEL = (1400, 950)
-OUTPUT_DIR = Path("output/canyon_mppi")
 REPO_ROOT = Path(__file__).resolve().parent
 DEM_PATH = REPO_ROOT / DEM_PATH
-OUTPUT_DIR = REPO_ROOT / OUTPUT_DIR
+OUTPUT_ROOT = REPO_ROOT / "output"
 
 
 def render_state(lateral_error_ft, width_ft):
@@ -42,6 +42,10 @@ def render_state(lateral_error_ft, width_ft):
         viz += "X" if i == pos else " "
     viz += "| Wall"
     return viz
+
+
+def _wrap_heading_deg(angle_rad):
+    return float(np.mod(np.degrees(float(angle_rad)), 360.0))
 
 
 def to_mppi_state(env, state, altitude_ref_ft):
@@ -75,13 +79,46 @@ def to_mppi_state(env, state, altitude_ref_ft):
     }
 
 
+class AltitudeHoldController:
+    """Straight-flight + altitude-hold controller for visualization/debug runs."""
+
+    def __init__(self):
+        self.altitude_error_integral = 0.0
+
+    def get_action(self, obs):
+        altitude_error_ft = float(obs[OBS_ALTITUDE_ERROR_FT])
+        roll_angle = float(obs[OBS_PHI])
+        roll_rate = float(obs[OBS_P])
+        pitch_rate = float(obs[OBS_Q])
+        yaw_rate = float(obs[OBS_R])
+        pitch_angle = float(obs[OBS_THETA])
+
+        self.altitude_error_integral += altitude_error_ft * (1.0 / 30.0)
+        self.altitude_error_integral = np.clip(self.altitude_error_integral, -2000.0, 2000.0)
+
+        roll_cmd = np.clip(-1.6 * roll_angle - 0.45 * roll_rate, -0.35, 0.35)
+        yaw_cmd = np.clip(-0.25 * yaw_rate, -0.15, 0.15)
+
+        pitch_cmd = np.clip(
+            0.0022 * altitude_error_ft
+            + 0.70 * pitch_angle
+            - 0.30 * pitch_rate
+            + 0.00006 * self.altitude_error_integral,
+            -0.50,
+            0.50,
+        )
+
+        throttle_cmd = np.clip(0.64 - 0.00008 * altitude_error_ft, 0.50, 0.95)
+        return np.array([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd], dtype=np.float32)
+
+
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run the MPPI canyon controller.")
+    parser = argparse.ArgumentParser(description="Run canyon scenarios across available controllers.")
     parser.add_argument(
         "--controller",
-        choices=["mppi", "smooth_mppi", "simple"],
+        choices=["mppi", "smooth_mppi", "simple", "altitude_hold"],
         default="mppi",
         help="Controller variant to run.",
     )
@@ -91,22 +128,22 @@ def parse_args():
         help="Enable interactive rendering window (default is headless).",
     )
     parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=OUTPUT_ROOT,
+        help="Root directory for run artifacts. The final subdirectory is controller-specific.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
-        default=OUTPUT_DIR,
-        help="Directory for saved run artifacts (video and trajectory plot).",
+        default=None,
+        help="Optional explicit output directory override.",
     )
     parser.add_argument(
         "--max-steps",
         type=int,
         default=1200,
         help="Maximum control steps to run.",
-    )
-    parser.add_argument(
-        "--simple-terrain",
-        action="store_true",
-        default=False,
-        help="Enable terrain following for the simple controller (default is False/Altitude Hold).",
     )
     parser.add_argument(
         "--target-speed-kts",
@@ -128,7 +165,15 @@ def parse_args():
 
 def main():
     args = parse_args()
+    output_subdirs = {
+        "mppi": "canyon_mppi",
+        "smooth_mppi": "canyon_smooth_mppi",
+        "simple": "canyon_simple",
+        "altitude_hold": "canyon_altitude_hold",
+    }
     output_dir = args.output_dir
+    if output_dir is None:
+        output_dir = Path(args.output_root) / output_subdirs[args.controller]
     output_dir.mkdir(parents=True, exist_ok=True)
 
     mode_tag = "render" if args.render else "headless"
@@ -164,8 +209,7 @@ def main():
         canyon_segment_spacing_ft=12.0,
     )
 
-    obs, info = env.reset(seed=3)
-    del obs, info
+    obs, _ = env.reset(seed=3)
 
     state = env.unwrapped.get_full_state_dict()
 
@@ -215,7 +259,7 @@ def main():
 
     config_base_kwargs = dict(
         horizon=30,
-        num_samples=1000,
+        num_samples=4000,
         optimization_steps=3,
         lambda_=optuna_params.get("lambda_", 2.0),
         progress_gain=optuna_params.get("progress_gain", 0.60),
@@ -249,7 +293,6 @@ def main():
     if controller_tag == "simple":
         simple_config = SimpleCanyonControllerConfig(
             target_speed_fps=args.target_speed_kts * 1.68781,
-            use_terrain_following=args.simple_terrain,
         )
         simple_config, simple_tuning_source, simple_tuned_keys = with_default_simple_controller_optuna_gains(simple_config)
         if simple_tuned_keys:
@@ -263,6 +306,9 @@ def main():
             env=env,
             config=simple_config,
         )
+        controller.reset(initial_controller_state)
+    elif controller_tag == "altitude_hold":
+        controller = AltitudeHoldController()
     else:
         if controller_tag == "smooth_mppi":
             drb = optuna_params.get("delta_roll_bound", 0.14)
@@ -311,9 +357,10 @@ def main():
     termination_reason = "running"
 
     print(f"Initializing {controller_tag} canyon controller...")
-    print("Compiling JAX JIT... (this takes a moment)")
-    _ = controller.get_action(initial_controller_state)
-    print("JIT compilation finished.")
+    if controller_tag in {"mppi", "smooth_mppi"}:
+        print("Compiling JAX JIT... (this takes a moment)")
+        _ = controller.get_action(initial_controller_state)
+        print("JIT compilation finished.")
 
     print("\nStarting Canyon Flight...")
     print(
@@ -327,7 +374,10 @@ def main():
             controller_state = to_mppi_state(env, state, altitude_ref_ft)
 
             t0 = time.time()
-            action = controller.get_action(controller_state)
+            if controller_tag == "altitude_hold":
+                action = controller.get_action(obs)
+            else:
+                action = controller.get_action(controller_state)
             plan_ms = (time.time() - t0) * 1000.0
 
             planner_debug = None
@@ -354,17 +404,64 @@ def main():
                         ).copy(),
                     }
 
-            width_ft = float(controller.get_canyon_width_ft(controller_state["p_N"]))
-            lateral_ft = float(controller.get_lateral_error_ft(controller_state["p_N"], controller_state["p_E"]))
+            if controller_tag == "simple":
+                guidance = dict(getattr(controller, "last_guidance", {}) or {})
+                lookahead_north_ft = float(guidance.get("lookahead_north_ft", controller_state["p_N"]))
+                lookahead_center_east_ft = float(guidance.get("lookahead_center_east_ft", controller_state["p_E"]))
+
+                if planner_debug is None:
+                    planner_debug = {
+                        "candidate_xy": np.zeros((0, 0, 2), dtype=np.float32),
+                        "candidate_h_ft": np.zeros((0, 0), dtype=np.float32),
+                        "final_xy": np.zeros((0, 2), dtype=np.float32),
+                        "final_h_ft": np.zeros((0,), dtype=np.float32),
+                    }
+
+                planner_debug["lookahead_xy"] = np.asarray(
+                    [[lookahead_north_ft, lookahead_center_east_ft]],
+                    dtype=np.float32,
+                )
+                planner_debug["lookahead_h_ft"] = np.asarray(
+                    # Match the centerline overlay reference height so the marker
+                    # visually sits on the blue centerline ribbon.
+                    [0.0],
+                    dtype=np.float32,
+                )
+
+            heading_deg = _wrap_heading_deg(controller_state["psi"])
+            heading_cmd_deg = heading_deg
+            if controller_tag == "simple":
+                simple_guidance = dict(getattr(controller, "last_guidance", {}) or {})
+                heading_cmd_deg = float(simple_guidance.get("centerline_heading_deg", heading_deg))
+            else:
+                get_hdg_cmd = getattr(controller, "get_centerline_heading_rad", None)
+                if callable(get_hdg_cmd):
+                    try:
+                        heading_cmd_deg = _wrap_heading_deg(get_hdg_cmd(controller_state["p_N"]))
+                    except Exception:
+                        heading_cmd_deg = heading_deg
+
+            hud_debug = {
+                "heading_deg": float(heading_deg),
+                "heading_cmd_deg": float(heading_cmd_deg),
+                "action_cmd": np.asarray(action, dtype=np.float32).copy(),
+            }
 
             if np.isnan(action).any() or np.isinf(action).any():
                 print(f"Invalid action at step {step}: {action}")
                 break
 
-            _, _, terminated, truncated, info = env.step(action)
+            set_hud_commands = getattr(env.unwrapped, "set_hud_commands", None)
+            if callable(set_hud_commands):
+                set_hud_commands(heading_cmd_deg=heading_cmd_deg)
+
+            obs, _, terminated, truncated, info = env.step(action)
             termination_reason = info.get("termination_reason", "running")
             state = env.unwrapped.get_full_state_dict()
-            recorder.record_step(planner_debug=planner_debug)
+            recorder.record_step(planner_debug=planner_debug, hud_debug=hud_debug)
+
+            width_ft = float(info.get("canyon_width_ft", np.nan))
+            lateral_ft = float(info.get("lateral_error_ft", np.nan))
 
             if step % 5 == 0:
                 speed_fps = float(
@@ -374,7 +471,7 @@ def main():
                 )
                 rel_north_ft = float(controller_state["p_N"] - start_path_north_ft)
                 rel_alt_ft = float(controller_state["h"])
-                viz = render_state(lateral_ft, width_ft)
+                viz = render_state(lateral_ft, width_ft) if np.isfinite(lateral_ft) and np.isfinite(width_ft) else "Wall |                               | Wall"
                 print(
                     f"{step:<5} | {rel_north_ft:<8.0f} | {lateral_ft:<8.0f} | {rel_alt_ft:<8.0f} | "
                     f"{speed_fps:<6.0f} | {width_ft:<6.0f} | {plan_ms:<8.1f} | {viz}"

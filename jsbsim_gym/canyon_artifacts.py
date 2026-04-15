@@ -275,8 +275,10 @@ class CanyonRunRecorder:
             planner_debug.get("final_xy", np.zeros((0, 2), dtype=np.float32)),
             dtype=np.float32,
         )
-        if candidate_xy.size == 0 and final_xy.size == 0:
-            return frame
+        lookahead_xy = np.asarray(
+            planner_debug.get("lookahead_xy", np.zeros((0, 2), dtype=np.float32)),
+            dtype=np.float32,
+        )
 
         candidate_h = np.asarray(
             planner_debug.get("candidate_h_ft", np.zeros((0, 0), dtype=np.float32)),
@@ -286,6 +288,13 @@ class CanyonRunRecorder:
             planner_debug.get("final_h_ft", np.zeros((0,), dtype=np.float32)),
             dtype=np.float32,
         )
+        lookahead_h = np.asarray(
+            planner_debug.get("lookahead_h_ft", np.zeros((0,), dtype=np.float32)),
+            dtype=np.float32,
+        )
+
+        if candidate_xy.size == 0 and final_xy.size == 0 and lookahead_xy.size == 0:
+            return frame
 
         height, width = frame.shape[0], frame.shape[1]
         view = np.asarray(viewer.transform.inv_matrix, dtype=np.float32)
@@ -311,6 +320,15 @@ class CanyonRunRecorder:
             if len(pixels) >= 2:
                 draw.line([tuple(point) for point in pixels], fill=(255, 184, 44, 255), width=4)
                 draw.line([tuple(point) for point in pixels], fill=(255, 236, 180, 176), width=2)
+
+        if len(lookahead_xy) >= 1:
+            world_points = self._trajectory_world_points(lookahead_xy, lookahead_h)
+            pixels = self._project_world_points(world_points, view, projection, width, height)
+            pixels = pixels[np.all(np.isfinite(pixels), axis=1)]
+            for x_pix, y_pix in pixels:
+                draw.ellipse((x_pix - 7, y_pix - 7, x_pix + 7, y_pix + 7), fill=(28, 32, 18, 220))
+                draw.ellipse((x_pix - 5, y_pix - 5, x_pix + 5, y_pix + 5), fill=(160, 255, 74, 255))
+                draw.ellipse((x_pix - 2, y_pix - 2, x_pix + 2, y_pix + 2), fill=(250, 255, 230, 255))
 
         return np.asarray(image.convert("RGB"), dtype=np.uint8)
 
@@ -379,6 +397,130 @@ class CanyonRunRecorder:
         draw.line([tuple(p) for p in pixels_valid], fill=(0, 255, 255, 200), width=3)
         return np.asarray(image.convert("RGB"), dtype=np.uint8)
 
+    def _overlay_flight_hud(self, frame, hud_debug):
+        if hud_debug is None:
+            return frame
+
+        action_cmd = np.asarray(hud_debug.get("action_cmd", np.zeros((4,), dtype=np.float32)), dtype=np.float32).reshape(-1)
+
+        if action_cmd.size < 4:
+            padded = np.zeros((4,), dtype=np.float32)
+            padded[: action_cmd.size] = action_cmd
+            action_cmd = padded
+
+        aileron_cmd = float(action_cmd[0])
+        elevator_cmd = float(action_cmd[1])
+        rudder_cmd = float(action_cmd[2])
+        throttle_cmd = float(action_cmd[3])
+
+        image = Image.fromarray(frame.astype(np.uint8), mode="RGB").convert("RGBA")
+        draw = ImageDraw.Draw(image, "RGBA")
+
+        frame_h, frame_w = frame.shape[0], frame.shape[1]
+
+        panel_w = int(min(410, max(300, frame_w * 0.34)))
+        panel_h = 168
+        panel_x0 = 16
+        panel_y0 = int(min(max(112, 16), max(16, frame_h - panel_h - 8)))
+        panel_x1 = min(frame_w - 8, panel_x0 + panel_w)
+        panel_y1 = min(frame_h - 8, panel_y0 + panel_h)
+        panel_w = panel_x1 - panel_x0
+        panel_h = panel_y1 - panel_y0
+
+        draw.rounded_rectangle(
+            (panel_x0, panel_y0, panel_x1, panel_y1),
+            radius=14,
+            fill=(8, 12, 18, 172),
+            outline=(180, 210, 235, 190),
+            width=2,
+        )
+
+        draw.text((panel_x0 + 12, panel_y0 + 8), "Control Cmd", fill=(208, 230, 246, 245))
+
+        # Horizontal command bars: aileron and rudder in [-1, 1].
+        h_label_x = panel_x0 + 14
+        h_bar_x0 = panel_x0 + 52
+        h_bar_x1 = panel_x0 + panel_w - 116
+        if h_bar_x1 < h_bar_x0 + 120:
+            h_bar_x1 = h_bar_x0 + 120
+
+        h_rows = [
+            ("AIL", aileron_cmd, (114, 203, 255, 220), panel_y0 + 48),
+            ("RUD", rudder_cmd, (247, 187, 119, 230), panel_y0 + 94),
+        ]
+        h_bar_h = 16
+        for label, value, color, cy in h_rows:
+            by0 = cy - h_bar_h // 2
+            by1 = cy + h_bar_h // 2
+            draw.text((h_label_x, cy - 12), label, fill=(218, 230, 242, 245))
+            draw.rounded_rectangle(
+                (h_bar_x0, by0, h_bar_x1, by1),
+                radius=5,
+                fill=(22, 28, 36, 190),
+                outline=(122, 142, 162, 180),
+                width=1,
+            )
+
+            center_x = 0.5 * (h_bar_x0 + h_bar_x1)
+            draw.line((center_x, by0 - 1, center_x, by1 + 1), fill=(180, 192, 205, 210), width=1)
+
+            value_clamped = float(np.clip(value, -1.0, 1.0))
+            x_val = center_x + value_clamped * (0.5 * (h_bar_x1 - h_bar_x0))
+            if x_val >= center_x:
+                draw.rectangle((center_x, by0 + 2, x_val, by1 - 2), fill=color)
+            else:
+                draw.rectangle((x_val, by0 + 2, center_x, by1 - 2), fill=color)
+            draw.text((h_bar_x1 + 6, cy - 10), f"{value_clamped:+.2f}", fill=(218, 230, 242, 245))
+
+        # Vertical command meters: elevator in [-1, 1], throttle in [0, 1].
+        meter_top = panel_y0 + 34
+        meter_bot = panel_y0 + panel_h - 16
+        meter_w = 22
+
+        ele_x0 = panel_x0 + panel_w - 86
+        ele_x1 = ele_x0 + meter_w
+        thr_x0 = panel_x0 + panel_w - 50
+        thr_x1 = thr_x0 + meter_w
+
+        draw.text((ele_x0 - 2, panel_y0 + 14), "ELE", fill=(208, 230, 246, 245))
+        draw.text((thr_x0 - 2, panel_y0 + 14), "THR", fill=(245, 226, 170, 245))
+
+        draw.rounded_rectangle(
+            (ele_x0, meter_top, ele_x1, meter_bot),
+            radius=6,
+            fill=(22, 28, 36, 190),
+            outline=(122, 142, 162, 180),
+            width=1,
+        )
+        draw.rounded_rectangle(
+            (thr_x0, meter_top, thr_x1, meter_bot),
+            radius=6,
+            fill=(22, 28, 36, 190),
+            outline=(122, 142, 162, 180),
+            width=1,
+        )
+
+        # Elevator: symmetric scale [-1, +1] with center line.
+        ele_center_y = 0.5 * (meter_top + meter_bot)
+        draw.line((ele_x0 - 1, ele_center_y, ele_x1 + 1, ele_center_y), fill=(180, 192, 205, 210), width=1)
+        elevator_clamped = float(np.clip(elevator_cmd, -1.0, 1.0))
+        ele_half = max(1.0, 0.5 * (meter_bot - meter_top - 4))
+        ele_y = ele_center_y - elevator_clamped * ele_half
+        if ele_y <= ele_center_y:
+            draw.rectangle((ele_x0 + 2, ele_y, ele_x1 - 2, ele_center_y), fill=(129, 233, 164, 225))
+        else:
+            draw.rectangle((ele_x0 + 2, ele_center_y, ele_x1 - 2, ele_y), fill=(129, 233, 164, 225))
+        draw.text((ele_x0 - 8, meter_bot + 2), f"{elevator_clamped:+.2f}", fill=(218, 230, 242, 245))
+
+        # Throttle: unilateral scale [0, 1] from bottom to top.
+        throttle_clamped = float(np.clip(throttle_cmd, 0.0, 1.0))
+        fill_h = (meter_bot - meter_top - 4) * throttle_clamped
+        thr_fill_y = meter_bot - 2 - fill_h
+        draw.rectangle((thr_x0 + 2, thr_fill_y, thr_x1 - 2, meter_bot - 2), fill=(255, 205, 86, 235))
+        draw.text((thr_x0 - 2, meter_bot + 2), f"{throttle_clamped:.2f}", fill=(245, 226, 170, 245))
+
+        return np.asarray(image.convert("RGB"), dtype=np.uint8)
+
     def _sample_position(self):
         south, north, west, east = self.dem_bbox
         lat_deg = float(self._sim.get_property_value("position/lat-gc-deg"))
@@ -395,11 +537,12 @@ class CanyonRunRecorder:
             self._writer.append_data(frame)
         self._sample_position()
 
-    def record_step(self, planner_debug=None):
+    def record_step(self, planner_debug=None, hud_debug=None):
         frame = capture_frame(self.env)
         if frame is not None:
             frame = self._overlay_centerline(frame)
             frame = self._overlay_planner_debug(frame, planner_debug)
+            frame = self._overlay_flight_hud(frame, hud_debug)
             self._writer.append_data(frame)
         self._sample_position()
 

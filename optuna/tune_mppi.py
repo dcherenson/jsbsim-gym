@@ -22,7 +22,7 @@ from jsbsim_gym.mppi_jax import (
     JaxSmoothMPPIConfig,
     JaxSmoothMPPIController,
 )
-from run_mppi import to_mppi_state
+from run_scenario import to_mppi_state
 
 DEM_PATH = REPO_ROOT / "data/dem/black-canyon-gunnison_USGS10m.tif"
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)

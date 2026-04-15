@@ -25,12 +25,12 @@ width changes as a function of downrange position.
 
 - Env id: `JSBSimCanyon-v0`
 - Environment file: `jsbsim_gym/canyon_env.py`
-- Demo runner: `run_canyon_render.py`
+- Unified runner: `run_scenario.py`
 
 Run the rendering demo:
 
 ```
-uv run python run_canyon_render.py
+uv run python run_scenario.py --controller altitude_hold --render
 ```
 
 For RL training later, use the same environment id via Gymnasium:
@@ -60,10 +60,10 @@ uv run python download_canyon_dem.py --preset black-canyon-gunnison
 uv run python plot_downloaded_dem.py
 ```
 
-3. Run the canyon renderer (currently configured for the Black Canyon DEM):
+3. Run a canyon scenario (currently configured for the Black Canyon DEM):
 
 ```
-uv run python run_canyon_render.py
+uv run python run_scenario.py --controller altitude_hold --render
 ```
 
 ### Map Download and Setup Details
@@ -117,25 +117,26 @@ Preview images are written under:
 data/dem/plots/
 ```
 
-6. Run the DEM canyon renderer (uses the downloaded map):
+6. Run the DEM canyon scenario (uses the downloaded map):
 
 ```
-uv run python run_canyon_render.py
+uv run python run_scenario.py --controller altitude_hold --render
 ```
 
-The renderer is configured to use:
+The scenario runner is configured to use:
 - DEM path: `data/dem/black-canyon-gunnison_USGS10m.tif`
 - BBox: `(38.52, 38.62, -107.78, -107.65)`
 - Start pixel: `(1400, 950)`
 
-These are defined in `run_canyon_render.py` as `DEM_PATH`, `DEM_BBOX`, and
+These are defined in `run_scenario.py` as `DEM_PATH`, `DEM_BBOX`, and
 `DEM_START_PIXEL`.
 
 7. Permanent trajectory overlay output:
-	- Each render run writes a persistent overlay image at:
+	- Each run writes persistent artifacts under a controller-specific directory,
+	  e.g. for `--controller altitude_hold`:
 
 ```
-data/dem/plots/black_canyon_trajectory_overlay.png
+output/canyon_altitude_hold/
 ```
 
 ## Important Files
