@@ -6,6 +6,8 @@ from pathlib import Path
 import gymnasium as gym
 import numpy as np
 
+os.environ["JAX_PLATFORM_NAME"] = "cpu"  # Force CPU for deterministic timing and to avoid OOM issues on GPU
+
 import jax.numpy as jnp
 
 from drs_gatekeeper import DRSGatekeeper, GatekeeperParams, TrackBoundsEstimate
@@ -152,11 +154,11 @@ def build_jsbsim_gatekeeper(
     altitude_ref_ft = float(getattr(env.unwrapped, "dem_start_elev_ft", 0.0))
     terrain_floor_rel_ft = terrain_floor_msl_ft - altitude_ref_ft
     canyon_top_rel_ft = terrain_floor_rel_ft + wall_height_samples_ft
-    backup_peek_ft = 25.0
-    pcis_centerline_tol_ft = 100.0
-    pcis_altitude_tol_ft = 100.0
-    backup_target_speed_fps = 250.0 * KTS_TO_FPS
-    pcis_speed_limit_fps = 300.0 * KTS_TO_FPS
+    backup_peek_ft =00.0
+    pcis_centerline_tol_ft = 500.0
+    pcis_altitude_tol_ft = 500.0
+    backup_target_speed_fps = 350.0 * KTS_TO_FPS
+    pcis_speed_limit_fps = 400.0 * KTS_TO_FPS
     backup_target_altitude_ft = float(np.nanmax(canyon_top_rel_ft) + backup_peek_ft)
 
     backup_reference = build_reference_trajectory(
@@ -280,7 +282,7 @@ def build_jsbsim_gatekeeper(
 
     params = GatekeeperParams(
         M=10,
-        T=20,
+        T=100,
         N=64,
         delta=0.5,
         epsilon=0.10,
@@ -393,8 +395,20 @@ def parse_args():
     parser.add_argument(
         "--target-speed-kts",
         type=float,
-        default=450.0,
+        default=650.0,
         help="Target flight speed in knots (kts).",
+    )
+    parser.add_argument(
+        "--initial-speed-kts",
+        type=float,
+        default=300,
+        help="Initial entry speed in knots (kts). Defaults to --target-speed-kts.",
+    )
+    parser.add_argument(
+        "--initial-altitude-ft",
+        type=float,
+        default=1000.0,
+        help="Initial entry altitude in feet, relative to the DEM start elevation in canyon DEM mode.",
     )
     parser.add_argument(
         "--study-name",
@@ -422,6 +436,8 @@ def main():
     args = parse_args()
     if args.gatekeeper and args.controller not in {"mppi", "smooth_mppi"}:
         raise ValueError("--gatekeeper currently requires --controller mppi or --controller smooth_mppi.")
+    initial_speed_kts = float(args.target_speed_kts if args.initial_speed_kts is None else args.initial_speed_kts)
+    initial_altitude_ft = float(args.initial_altitude_ft)
 
     output_subdirs = {
         "mppi": "canyon_mppi",
@@ -459,12 +475,12 @@ def main():
         wall_radius_ft=8.0,
         wall_height_ft=500.0,
         target_altitude_ft=250.0,
-        entry_altitude_ft=250.0,
+        entry_altitude_ft=initial_altitude_ft,
         min_altitude_ft=-500.0,
         max_altitude_ft=3000.0,
         max_episode_steps=1200,
         terrain_collision_buffer_ft=10.0,
-        entry_speed_kts=args.target_speed_kts,
+        entry_speed_kts=initial_speed_kts,
         wind_sigma=1.0,
         canyon_span_ft=9000.0,
         canyon_segment_spacing_ft=12.0,
@@ -641,6 +657,10 @@ def main():
 
     print("\nStarting Canyon Flight...")
     print(
+        f"Initial conditions: {initial_speed_kts:.1f} kts entry speed, "
+        f"{initial_altitude_ft:.1f} ft entry altitude."
+    )
+    print(
         f"{'Step':<5} | {'p_N_rel':<8} | {'LatErr':<8} | {'h_rel':<8} | "
         f"{'V':<6} | {'W_c':<6} | {'Plan(ms)':<8} |  {'gk(ms)':<8}"
     )
@@ -808,7 +828,20 @@ def main():
 
             set_hud_commands = getattr(env.unwrapped, "set_hud_commands", None)
             if callable(set_hud_commands):
-                set_hud_commands(heading_cmd_deg=heading_cmd_deg)
+                controller_mode_label = {
+                    "mppi": "MPPI",
+                    "smooth_mppi": "SMPPI",
+                    "simple": "SIMPLE",
+                    "altitude_hold": "HOLD",
+                }.get(controller_tag, str(controller_tag).upper())
+                gate_label = "TRACK"
+                if gatekeeper_state is not None:
+                    gate_label = "BACKUP" if gatekeeper_state.using_backup else "NOMINAL"
+                guidance_label = f"HDG {int(round(heading_cmd_deg)) % 360:03d}"
+                set_hud_commands(
+                    heading_cmd_deg=heading_cmd_deg,
+                    mode_labels=(controller_mode_label, gate_label, guidance_label),
+                )
 
             obs, _, terminated, truncated, info = env.step(action)
             termination_reason = info.get("termination_reason", "running")

@@ -518,10 +518,10 @@ class CanyonRunRecorder:
                 font=font,
             )
 
-        panel_w = int(min(410, max(300, frame_w * 0.34)))
-        panel_h = 168
-        panel_x0 = 16
-        panel_y0 = int(min(max(112, 16), max(16, frame_h - panel_h - 8)))
+        panel_w = int(min(300, max(240, frame_w * 0.24)))
+        panel_h = 136
+        panel_x0 = int(max(16, frame_w - panel_w - 16))
+        panel_y0 = int(max(16, frame_h - panel_h - 12))
         panel_x1 = min(frame_w - 8, panel_x0 + panel_w)
         panel_y1 = min(frame_h - 8, panel_y0 + panel_h)
         panel_w = panel_x1 - panel_x0
@@ -539,16 +539,16 @@ class CanyonRunRecorder:
 
         # Horizontal command bars: aileron and rudder in [-1, 1].
         h_label_x = panel_x0 + 14
-        h_bar_x0 = panel_x0 + 52
-        h_bar_x1 = panel_x0 + panel_w - 116
-        if h_bar_x1 < h_bar_x0 + 120:
-            h_bar_x1 = h_bar_x0 + 120
+        h_bar_x0 = panel_x0 + 46
+        h_bar_x1 = panel_x0 + panel_w - 88
+        if h_bar_x1 < h_bar_x0 + 96:
+            h_bar_x1 = h_bar_x0 + 96
 
         h_rows = [
-            ("AIL", aileron_cmd, (114, 203, 255, 220), panel_y0 + 48),
-            ("RUD", rudder_cmd, (247, 187, 119, 230), panel_y0 + 94),
+            ("AIL", aileron_cmd, (114, 203, 255, 220), panel_y0 + 40),
+            ("RUD", rudder_cmd, (247, 187, 119, 230), panel_y0 + 74),
         ]
-        h_bar_h = 16
+        h_bar_h = 14
         for label, value, color, cy in h_rows:
             by0 = cy - h_bar_h // 2
             by1 = cy + h_bar_h // 2
@@ -573,17 +573,17 @@ class CanyonRunRecorder:
             draw.text((h_bar_x1 + 6, cy - 10), f"{value_clamped:+.2f}", fill=(218, 230, 242, 245))
 
         # Vertical command meters: elevator in [-1, 1], throttle in [0, 1].
-        meter_top = panel_y0 + 34
-        meter_bot = panel_y0 + panel_h - 16
-        meter_w = 22
+        meter_top = panel_y0 + 28
+        meter_bot = panel_y0 + panel_h - 18
+        meter_w = 18
 
-        ele_x0 = panel_x0 + panel_w - 86
+        ele_x0 = panel_x0 + panel_w - 62
         ele_x1 = ele_x0 + meter_w
-        thr_x0 = panel_x0 + panel_w - 50
+        thr_x0 = panel_x0 + panel_w - 36
         thr_x1 = thr_x0 + meter_w
 
-        draw.text((ele_x0 - 2, panel_y0 + 14), "ELE", fill=(208, 230, 246, 245))
-        draw.text((thr_x0 - 2, panel_y0 + 14), "THR", fill=(245, 226, 170, 245))
+        draw.text((ele_x0 - 2, panel_y0 + 10), "ELE", fill=(208, 230, 246, 245))
+        draw.text((thr_x0 - 2, panel_y0 + 10), "THR", fill=(245, 226, 170, 245))
 
         draw.rounded_rectangle(
             (ele_x0, meter_top, ele_x1, meter_bot),

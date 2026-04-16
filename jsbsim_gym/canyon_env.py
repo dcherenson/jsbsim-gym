@@ -189,6 +189,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         self.hud_font = None
         self.hud_small_font = None
         self.hud_heading_cmd_deg = None
+        self.hud_mode_labels = ("AUTO", "TRACK", "CMD")
 
         self.observation_space = gym.spaces.Box(
             low=np.full((18,), -np.inf, dtype=np.float32),
@@ -269,6 +270,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         self.camera_pos = None
         self.camera_look_at = None
         self.hud_heading_cmd_deg = None
+        self.hud_mode_labels = ("AUTO", "TRACK", "CMD")
 
         state = self.get_full_state_dict()
         self.last_p_n_ft = state["p_N"]
@@ -581,11 +583,17 @@ class CanyonFlightEnv(DataCollectionEnv):
         self.hud_font = pg.font.Font(None, 30)
         self.hud_small_font = pg.font.Font(None, 22)
 
-    def set_hud_commands(self, heading_cmd_deg=None):
+    def set_hud_commands(self, heading_cmd_deg=None, mode_labels=None):
         if heading_cmd_deg is None or not np.isfinite(heading_cmd_deg):
             self.hud_heading_cmd_deg = None
         else:
             self.hud_heading_cmd_deg = float(heading_cmd_deg) % 360.0
+        if mode_labels is not None:
+            labels = [str(label).upper()[:12] for label in mode_labels if str(label).strip()]
+            if labels:
+                while len(labels) < 3:
+                    labels.append("")
+                self.hud_mode_labels = tuple(labels[:3])
 
     def _draw_hud(self, frame):
         if frame is None:
@@ -596,15 +604,50 @@ class CanyonFlightEnv(DataCollectionEnv):
         surface = pg.surfarray.make_surface(np.transpose(frame, (1, 0, 2)))
         width, height = surface.get_size()
 
-        heading_deg = (float(np.degrees(self.state[11])) + 360.0) % 360.0
+        state_dict = self.get_full_state_dict()
+        heading_deg = (float(np.degrees(state_dict["psi"])) + 360.0) % 360.0
         heading_cmd_deg = self.hud_heading_cmd_deg
-        vt_fps = float(self.simulation.get_property_value("velocities/vt-fps"))
+        vt_fps = float(state_dict["V"])
         airspeed_kt = vt_fps / 1.687809857
+        altitude_ref_ft = self.dem_start_elev_ft if self.canyon_mode == "dem" else 0.0
+        altitude_ft = float(state_dict["h"] - altitude_ref_ft)
+
+        u = float(state_dict["u"])
+        v = float(state_dict["v"])
+        w = float(state_dict["w"])
+        phi = float(state_dict["phi"])
+        theta = float(state_dict["theta"])
+        vertical_fps = u * np.sin(theta) - v * np.sin(phi) * np.cos(theta) - w * np.cos(phi) * np.cos(theta)
+        vertical_fpm = vertical_fps * 60.0
+
+        # Primary flight display style mode annunciator.
+        fma_labels = tuple(self.hud_mode_labels[:3]) if self.hud_mode_labels is not None else ("AUTO", "TRACK", "CMD")
+        fma_w, fma_h = 420, 34
+        fma_x = width // 2 - fma_w // 2
+        fma_y = 10
+        fma_panel = pg.Surface((fma_w, fma_h), pg.SRCALPHA)
+        fma_panel.fill((14, 16, 22, 170))
+        surface.blit(fma_panel, (fma_x, fma_y))
+        pg.draw.rect(surface, (178, 190, 205), (fma_x, fma_y, fma_w, fma_h), 2, border_radius=6)
+        seg_w = fma_w // 3
+        for idx, label in enumerate(fma_labels):
+            if idx > 0:
+                x_div = fma_x + idx * seg_w
+                pg.draw.line(surface, (210, 220, 230), (x_div, fma_y + 3), (x_div, fma_y + fma_h - 3), 1)
+            text_color = (76, 255, 98)
+            if "BACKUP" in label:
+                text_color = (255, 196, 84)
+            elif "NOMINAL" in label:
+                text_color = (120, 255, 150)
+            fma_txt = self.hud_font.render(label, True, text_color)
+            x_txt = fma_x + idx * seg_w + (seg_w - fma_txt.get_width()) // 2
+            y_txt = fma_y + (fma_h - fma_txt.get_height()) // 2 - 1
+            surface.blit(fma_txt, (x_txt, y_txt))
 
         # Compass ribbon at top-center.
         panel_w, panel_h = 470, 86
         panel_x = width // 2 - panel_w // 2
-        panel_y = 14
+        panel_y = 50
         panel = pg.Surface((panel_w, panel_h), pg.SRCALPHA)
         panel.fill((8, 12, 16, 145))
         surface.blit(panel, (panel_x, panel_y))
@@ -667,8 +710,86 @@ class CanyonFlightEnv(DataCollectionEnv):
         hdg_txt = self.hud_font.render(f"HDG {heading_deg:05.1f}", True, (250, 250, 250))
         surface.blit(hdg_txt, (center_x - hdg_txt.get_width() // 2, panel_y + 34))
 
-        # Airspeed indicator tape at upper-right.
-        speed_x, speed_y = width - 182, 120
+        # Altitude tape and vertical-speed indicator at upper-right.
+        alt_w, alt_h = 166, 278
+        alt_x, alt_y = width - alt_w - 36, 120
+        alt_panel = pg.Surface((alt_w, alt_h), pg.SRCALPHA)
+        alt_panel.fill((8, 12, 16, 145))
+        surface.blit(alt_panel, (alt_x, alt_y))
+        pg.draw.rect(surface, (178, 190, 205), (alt_x, alt_y, alt_w, alt_h), 2, border_radius=8)
+
+        tape_x = alt_x + 18
+        tape_y = alt_y + 44
+        tape_w = 34
+        tape_h = alt_h - 62
+        pg.draw.rect(surface, (28, 34, 41), (tape_x, tape_y, tape_w, tape_h))
+        pg.draw.rect(surface, (210, 220, 230), (tape_x, tape_y, tape_w, tape_h), 1)
+
+        min_alt_ft = float(self.min_altitude_ft - altitude_ref_ft)
+        max_alt_ft = float(self.max_altitude_ft - altitude_ref_ft)
+        if max_alt_ft <= min_alt_ft + 1.0:
+            max_alt_ft = min_alt_ft + 1.0
+        alt_frac = float(np.clip((altitude_ft - min_alt_ft) / (max_alt_ft - min_alt_ft), 0.0, 1.0))
+        alt_fill_h = int(alt_frac * tape_h)
+        if alt_fill_h > 0:
+            pg.draw.rect(surface, (129, 233, 164), (tape_x + 2, tape_y + tape_h - alt_fill_h, tape_w - 4, alt_fill_h))
+
+        alt_range_ft = max_alt_ft - min_alt_ft
+        mark_step_ft = 250 if alt_range_ft <= 2000.0 else 500
+        alt_mark_start = int(np.ceil(min_alt_ft / mark_step_ft) * mark_step_ft)
+        alt_mark_stop = int(np.floor(max_alt_ft / mark_step_ft) * mark_step_ft)
+        for mark in range(alt_mark_start, alt_mark_stop + 1, mark_step_ft):
+            mark_frac = (mark - min_alt_ft) / (max_alt_ft - min_alt_ft)
+            y_mark = int(tape_y + tape_h - mark_frac * tape_h)
+            pg.draw.line(surface, (210, 220, 230), (tape_x + tape_w + 4, y_mark), (tape_x + tape_w + 12, y_mark), 1)
+            mark_txt = self.hud_small_font.render(str(mark), True, (235, 242, 248))
+            surface.blit(mark_txt, (tape_x + tape_w + 14, y_mark - mark_txt.get_height() // 2))
+
+        alt_txt = self.hud_font.render(f"ALT {altitude_ft:5.0f} ft", True, (250, 250, 250))
+        surface.blit(alt_txt, (alt_x + 10, alt_y + 10))
+
+        alt_tag_w, alt_tag_h = 70, 26
+        alt_tag_x = tape_x + tape_w + 8
+        alt_tag_y = int(tape_y + tape_h - alt_frac * tape_h - 0.5 * alt_tag_h)
+        alt_tag_y = max(tape_y, min(alt_tag_y, tape_y + tape_h - alt_tag_h))
+        pg.draw.rect(surface, (129, 233, 164), (alt_tag_x, alt_tag_y, alt_tag_w, alt_tag_h), border_radius=4)
+        pg.draw.rect(surface, (24, 24, 24), (alt_tag_x, alt_tag_y, alt_tag_w, alt_tag_h), 1, border_radius=4)
+        alt_tag_txt = self.hud_small_font.render(f"{altitude_ft:4.0f}", True, (10, 10, 10))
+        surface.blit(
+            alt_tag_txt,
+            (alt_tag_x + (alt_tag_w - alt_tag_txt.get_width()) // 2, alt_tag_y + (alt_tag_h - alt_tag_txt.get_height()) // 2),
+        )
+
+        vs_x = alt_x + alt_w - 36
+        vs_y = tape_y
+        vs_w = 14
+        vs_h = tape_h
+        pg.draw.rect(surface, (28, 34, 41), (vs_x, vs_y, vs_w, vs_h))
+        pg.draw.rect(surface, (210, 220, 230), (vs_x, vs_y, vs_w, vs_h), 1)
+        vs_center_y = vs_y + vs_h // 2
+        pg.draw.line(surface, (180, 192, 205), (vs_x - 2, vs_center_y), (vs_x + vs_w + 2, vs_center_y), 1)
+
+        vs_limit_fpm = 6000.0
+        vs_clamped = float(np.clip(vertical_fpm, -vs_limit_fpm, vs_limit_fpm))
+        vs_half_h = 0.5 * (vs_h - 4)
+        vs_fill_y = int(vs_center_y - (vs_clamped / vs_limit_fpm) * vs_half_h)
+        if vs_fill_y <= vs_center_y:
+            pg.draw.rect(surface, (255, 205, 86), (vs_x + 2, vs_fill_y, vs_w - 4, vs_center_y - vs_fill_y))
+        else:
+            pg.draw.rect(surface, (255, 205, 86), (vs_x + 2, vs_center_y, vs_w - 4, vs_fill_y - vs_center_y))
+
+        for label, frac in ((6, 0.0), (3, 0.25), (0, 0.5), (-3, 0.75), (-6, 1.0)):
+            y_mark = int(vs_y + frac * vs_h)
+            pg.draw.line(surface, (210, 220, 230), (vs_x - 8, y_mark), (vs_x - 2, y_mark), 1)
+            if label != 0:
+                vs_mark_txt = self.hud_small_font.render(str(label), True, (235, 242, 248))
+                surface.blit(vs_mark_txt, (vs_x - 10 - vs_mark_txt.get_width(), y_mark - vs_mark_txt.get_height() // 2))
+
+        vs_txt = self.hud_small_font.render(f"VS {vertical_fpm:+5.0f} fpm", True, (250, 250, 250))
+        surface.blit(vs_txt, (alt_x + 10, alt_y + alt_h - vs_txt.get_height() - 8))
+
+        # Airspeed indicator tape at upper-left.
+        speed_x, speed_y = 36, 120
         speed_w, speed_h = 146, 278
         speed_panel = pg.Surface((speed_w, speed_h), pg.SRCALPHA)
         speed_panel.fill((8, 12, 16, 145))
