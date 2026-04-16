@@ -26,35 +26,35 @@ class SimpleCanyonControllerConfig:
     use_dem_centerline: bool = True
 
     # Lookahead guidance -> desired track-normal acceleration.
-    track_accel_lateral_gain: float = -0.09850032355946046
-    track_accel_heading_gain: float = -0.9644787825008925
-    track_accel_lateral_rate_gain: float = -0.01948905209200466
-    track_accel_max_fps2: float = 290.044307694915
+    track_accel_lateral_gain: float = -1.0
+    track_accel_heading_gain: float = -1.0
+    track_accel_lateral_rate_gain: float = -1.0
+    track_accel_max_fps2: float = 300.0
 
     # Roll alignment loop.
-    roll_p_gain: float = 4.433283185003266
-    roll_rate_damping: float = -0.020215299750720214
+    roll_p_gain: float = 2.8
+    roll_rate_damping: float = -0.06
     roll_max_rad: float = 100.0
 
     # Pitch / normal-acceleration control.
-    pitch_nz_gain: float = -0.34054249300335954
+    pitch_nz_gain: float = -0.4
     # Positive elevator command pitches the airframe down, so q damping is positive.
-    pitch_q_damping: float = 1.8981038253607778
-    nz_altitude_gain: float = 0.0034980977894353282
-    nz_vrate_gain: float = 0.002
-    nz_altitude_max_bias: float = 1.3763138089938012
+    pitch_q_damping: float = 3.0
+    nz_altitude_gain: float = 0.05
+    nz_vrate_gain: float = 0.2
+    nz_altitude_max_bias: float = 4.0
     nz_min_cmd: float = -1000.0
     nz_max_cmd: float = 1000.0
 
     # Yaw / sideslip coordination.
     # Positive rudder command drives Ny and r negative, so both feedback gains are positive.
-    yaw_ny_gain: float = 0.23025036625288484
-    yaw_rate_damping: float = 0.0655463313714547
+    yaw_ny_gain: float = 0.4
+    yaw_rate_damping: float = 0.25
     yaw_max_cmd: float = 100.0
 
     # Throttle / speed hold.
-    throttle_base: float = 0.42584375471835306
-    throttle_speed_gain: float = 0.006791701936145756
+    throttle_base: float = 0.1
+    throttle_speed_gain: float = 0.1
     throttle_max: float = 1.0
 
 

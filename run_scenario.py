@@ -238,12 +238,28 @@ def build_jsbsim_gatekeeper(
     north_samples_ft, width_samples_ft, center_east_samples_ft, heading_samples_rad = get_active_canyon_reference(env)
     width_grad_samples_ft = np.gradient(width_samples_ft, north_samples_ft).astype(np.float32)
 
+    canyon_north_full_ft = np.asarray(
+        getattr(canyon, "north_samples_ft", north_samples_ft),
+        dtype=np.float32,
+    )
     if hasattr(canyon, "ordered_dem_msl_m"):
-        terrain_floor_msl_ft = np.nanmin(np.asarray(canyon.ordered_dem_msl_m, dtype=np.float32), axis=1) * M_TO_FT
+        terrain_floor_full_msl_ft = (
+            np.nanmin(np.asarray(canyon.ordered_dem_msl_m, dtype=np.float32), axis=1) * M_TO_FT
+        ).astype(np.float32)
+        terrain_floor_msl_ft = np.interp(
+            north_samples_ft,
+            canyon_north_full_ft,
+            terrain_floor_full_msl_ft,
+        ).astype(np.float32)
     else:
         terrain_floor_msl_ft = np.zeros_like(north_samples_ft, dtype=np.float32)
     if hasattr(canyon, "wall_height_samples_ft"):
-        wall_height_samples_ft = np.asarray(canyon.wall_height_samples_ft, dtype=np.float32)
+        wall_height_full_ft = np.asarray(canyon.wall_height_samples_ft, dtype=np.float32)
+        wall_height_samples_ft = np.interp(
+            north_samples_ft,
+            canyon_north_full_ft,
+            wall_height_full_ft,
+        ).astype(np.float32)
     else:
         wall_height_samples_ft = np.zeros_like(north_samples_ft, dtype=np.float32)
 

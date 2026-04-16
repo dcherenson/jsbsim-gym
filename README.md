@@ -42,6 +42,53 @@ import jsbsim_gym.canyon_env  # registers JSBSimCanyon-v0
 env = gym.make("JSBSimCanyon-v0")
 ```
 
+### MPPI and Gatekeeper Setup
+
+Before using `run_scenario.py` with `--controller mppi`, `--controller smooth_mppi`,
+or `--gatekeeper`, generate the offline dynamics artifacts first.
+
+1. Generate the F-16 dataset used for nominal-model fitting and uncertainty calibration:
+
+```
+uv run python -m jsbsim_gym.dataset
+```
+
+This writes:
+
+```
+f16_dataset.parquet
+output/f16_dataset_coverage.json
+```
+
+2. Fit the nominal dynamics weights and uncertainty artifact from that dataset:
+
+```
+uv run python -m jsbsim_gym.calibration
+```
+
+This writes:
+
+```
+jsbsim_gym/nominal_coeff_weights.npz
+f16_uncertainty_model.pkl
+```
+
+After those two steps:
+
+```
+uv run python run_scenario.py --controller mppi
+uv run python run_scenario.py --controller mppi --gatekeeper
+```
+
+If you regenerate `f16_dataset.parquet`, rerun `jsbsim_gym.calibration` so MPPI
+and the gatekeeper use artifacts fit from the current dataset.
+
+Test the simple controller by running:
+
+```
+uv run python run_scenario.py --controller simple
+```
+
 ### Real Canyon DEM Workflow (Black Canyon of the Gunnison)
 
 The canyon environment also supports DEM-backed geometry extracted from real
