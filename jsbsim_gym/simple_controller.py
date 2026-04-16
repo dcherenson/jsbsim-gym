@@ -21,7 +21,7 @@ SIMPLE_TUNING_STORAGE_FALLBACKS = (
 @dataclass
 class SimpleCanyonControllerConfig:
     target_speed_fps: float = 450.0 * 1.68781
-    lookahead_rows: int = 47
+    lookahead_rows: int = 20
     dt: float = 1.0 / 30.0
     use_dem_centerline: bool = True
 
@@ -41,6 +41,7 @@ class SimpleCanyonControllerConfig:
     # Positive elevator command pitches the airframe down, so q damping is positive.
     pitch_q_damping: float = 1.8981038253607778
     nz_altitude_gain: float = 0.0034980977894353282
+    nz_vrate_gain: float = 0.002
     nz_altitude_max_bias: float = 1.3763138089938012
     nz_min_cmd: float = -1000.0
     nz_max_cmd: float = 1000.0
@@ -267,11 +268,12 @@ def build_simple_trajectory_policy_jax(
 
         ontrack_north_ft = north_samples[ontrack_idx]
         ontrack_center_east_ft = east_samples[ontrack_idx]
+        track_heading_rad = heading_samples[ontrack_idx]
         desired_heading_rad = heading_samples[look_idx]
 
         dn = p_n_ft - ontrack_north_ft
         de = p_e_ft - ontrack_center_east_ft
-        lateral_error_ft = dn * (-jnp.sin(desired_heading_rad)) + de * jnp.cos(desired_heading_rad)
+        lateral_error_ft = dn * (-jnp.sin(track_heading_rad)) + de * jnp.cos(track_heading_rad)
         heading_error_rad = _wrap_angle_rad(psi - desired_heading_rad)
 
         width_ft = width_samples[ontrack_idx]
@@ -280,8 +282,9 @@ def build_simple_trajectory_policy_jax(
         usable_half_ft = jnp.maximum(half_width_ft - wall_margin_ft, 80.0)
         del usable_half_ft
 
-        p_n_dot, p_e_dot, _ = _position_rates(state_flat)
-        lateral_error_rate_fps = p_n_dot * (-jnp.sin(desired_heading_rad)) + p_e_dot * jnp.cos(desired_heading_rad)
+        p_n_dot, p_e_dot, h_dot = _position_rates(state_flat)
+        lateral_error_rate_fps = p_n_dot * (-jnp.sin(track_heading_rad)) + p_e_dot * jnp.cos(track_heading_rad)
+        altitude_error_rate_fps = h_dot
 
         altitude_error_raw_ft = h_ft - target_altitude_ft
         altitude_error_offset_ft = (h_ft + altitude_reference_offset_ft) - target_altitude_ft
@@ -300,26 +303,33 @@ def build_simple_trajectory_policy_jax(
             config.track_accel_max_fps2,
         )
 
+        nz_altitude_bias = jnp.clip(
+            -config.nz_altitude_gain * altitude_error_ft
+            -config.nz_vrate_gain * altitude_error_rate_fps,
+            -config.nz_altitude_max_bias,
+            config.nz_altitude_max_bias,
+        )
+        vertical_load_target = 1.0 + nz_altitude_bias
+        lateral_load_target = track_accel_cmd_fps2 / G_FTPS2
+        nz_vector_mag = jnp.sqrt(vertical_load_target ** 2 + lateral_load_target ** 2)
         roll_des_rad = jnp.clip(
-            jnp.arctan2(track_accel_cmd_fps2, G_FTPS2),
+            jnp.arctan2(lateral_load_target, vertical_load_target),
             -config.roll_max_rad,
             config.roll_max_rad,
+        )
+        # Roll toward the desired acceleration vector first, then let pitch/Nz
+        # build the full load demand as bank aligns. This avoids turning a
+        # large lateral command into an immediate pull-up while nearly level.
+        roll_alignment = jnp.maximum(0.0, jnp.cos(roll_des_rad - phi)) ** 2
+        nz_des = jnp.clip(
+            vertical_load_target + roll_alignment * (nz_vector_mag - vertical_load_target),
+            config.nz_min_cmd,
+            config.nz_max_cmd,
         )
         roll_cmd = jnp.clip(
             config.roll_p_gain * (roll_des_rad - phi) + config.roll_rate_damping * p_rate,
             -1.0,
             1.0,
-        )
-
-        nz_altitude_bias = jnp.clip(
-            -config.nz_altitude_gain * altitude_error_ft,
-            -config.nz_altitude_max_bias,
-            config.nz_altitude_max_bias,
-        )
-        nz_des = jnp.clip(
-            jnp.sqrt(1.0 + (track_accel_cmd_fps2 / G_FTPS2) ** 2) + nz_altitude_bias,
-            config.nz_min_cmd,
-            config.nz_max_cmd,
         )
         pitch_cmd = jnp.clip(config.pitch_nz_gain * (nz_des - nz_current) + config.pitch_q_damping * q_rate, -1.0, 1.0)
 
@@ -489,12 +499,13 @@ class SimpleTrajectoryController:
         lookahead_north_ft = float(north_samples_ft[look_idx])
         lookahead_center_east_ft = float(east_samples_ft[look_idx])
 
+        track_heading_rad = float(heading_samples_rad[ontrack_idx])
         desired_heading_rad = float(heading_samples_rad[look_idx])
 
         dn = float(local_north_ft - ontrack_north_ft)
         de = float(local_east_ft - ontrack_center_east_ft)
         lateral_error_ft = float(
-            dn * (-np.sin(desired_heading_rad)) + de * np.cos(desired_heading_rad)
+            dn * (-np.sin(track_heading_rad)) + de * np.cos(track_heading_rad)
         )
         heading_error_rad = self._wrap_angle_rad(float(state_dict["psi"]) - desired_heading_rad)
 
@@ -579,26 +590,33 @@ class SimpleTrajectoryController:
             self.config.track_accel_max_fps2,
         )
 
+        nz_altitude_bias = np.clip(
+            -self.config.nz_altitude_gain * altitude_error_ft
+            -self.config.nz_vrate_gain * altitude_error_rate_fps,
+            -self.config.nz_altitude_max_bias,
+            self.config.nz_altitude_max_bias,
+        )
+        vertical_load_target = 1.0 + nz_altitude_bias
+        lateral_load_target = track_accel_cmd_fps2 / G_FTPS2
+        nz_vector_mag = np.sqrt(vertical_load_target ** 2 + lateral_load_target ** 2)
         roll_des_rad = np.clip(
-            np.arctan2(track_accel_cmd_fps2, G_FTPS2),
+            np.arctan2(lateral_load_target, vertical_load_target),
             -self.config.roll_max_rad,
             self.config.roll_max_rad,
+        )
+        # Roll toward the desired acceleration vector first, then let pitch/Nz
+        # build the full load demand as bank aligns. This avoids turning a
+        # large lateral command into an immediate pull-up while nearly level.
+        roll_alignment = max(0.0, np.cos(roll_des_rad - phi)) ** 2
+        nz_des = np.clip(
+            vertical_load_target + roll_alignment * (nz_vector_mag - vertical_load_target),
+            self.config.nz_min_cmd,
+            self.config.nz_max_cmd,
         )
         roll_cmd = np.clip(
             self.config.roll_p_gain * (roll_des_rad - phi) + self.config.roll_rate_damping * p_rate,
             -1.0,
             1.0,
-        )
-
-        nz_altitude_bias = np.clip(
-            -self.config.nz_altitude_gain * altitude_error_ft,
-            -self.config.nz_altitude_max_bias,
-            self.config.nz_altitude_max_bias,
-        )
-        nz_des = np.clip(
-            np.sqrt(1.0 + (track_accel_cmd_fps2 / G_FTPS2) ** 2) + nz_altitude_bias,
-            self.config.nz_min_cmd,
-            self.config.nz_max_cmd,
         )
 
         pitch_cmd = np.clip(
@@ -633,7 +651,11 @@ class SimpleTrajectoryController:
             "track_accel_cmd_fps2": float(track_accel_cmd_fps2),
             "heading_error_deg": float(np.degrees(heading_error_rad)),
             "roll_des_deg": float(np.degrees(roll_des_rad)),
+            "nz_vector_mag": float(nz_vector_mag),
             "nz_des": float(nz_des),
+            "vertical_load_target": float(vertical_load_target),
+            "lateral_load_target": float(lateral_load_target),
+            "roll_alignment": float(roll_alignment),
             "nz_current": float(nz_current),
             "ny_current": float(ny_current),
             "margin_to_wall_ft": float(margin_ft),

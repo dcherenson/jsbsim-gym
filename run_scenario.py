@@ -1,9 +1,11 @@
 import argparse
+import csv
 import os
 import time
 from pathlib import Path
 
 import gymnasium as gym
+import matplotlib.pyplot as plt
 import numpy as np
 
 os.environ["JAX_PLATFORM_NAME"] = "cpu"  # Force CPU for deterministic timing and to avoid OOM issues on GPU
@@ -57,6 +59,62 @@ def _wrap_angle_rad(angle_rad):
     return float(np.arctan2(np.sin(float(angle_rad)), np.cos(float(angle_rad))))
 
 
+def save_simple_controller_diagnostics(output_dir, file_stem, rows, termination_reason):
+    if not rows:
+        return None, None
+
+    output_dir = Path(output_dir)
+    csv_path = output_dir / f"{file_stem}_diagnostics.csv"
+    plot_path = output_dir / f"{file_stem}_diagnostics.png"
+
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
+    xtrack_ft = np.asarray([row["lateral_error_ft"] for row in rows], dtype=np.float64)
+    xtrack_norm = np.asarray([row["lateral_error_norm"] for row in rows], dtype=np.float64)
+    heading_error_deg = np.asarray([row["heading_error_deg"] for row in rows], dtype=np.float64)
+    roll_cmd = np.asarray([row["roll_cmd"] for row in rows], dtype=np.float64)
+    roll_des_deg = np.asarray([row["roll_des_deg"] for row in rows], dtype=np.float64)
+    phi_deg = np.asarray([row["phi_deg"] for row in rows], dtype=np.float64)
+    track_accel_cmd_fps2 = np.asarray([row["track_accel_cmd_fps2"] for row in rows], dtype=np.float64)
+
+    fig, axs = plt.subplots(4, 1, figsize=(12, 11), sharex=True, constrained_layout=True)
+
+    axs[0].plot(time_s, xtrack_ft, color="tab:red", linewidth=2.0)
+    axs[0].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
+    axs[0].set_ylabel("Xtrack (ft)")
+    axs[0].set_title(f"Simple Controller Diagnostics | end={termination_reason} | steps={len(rows)}")
+    axs[0].grid(True, alpha=0.25)
+
+    axs[1].plot(time_s, xtrack_norm, color="tab:orange", linewidth=2.0, label="xtrack norm")
+    axs[1].axhline(1.0, color="black", linewidth=1.0, alpha=0.4, linestyle="--")
+    axs[1].axhline(-1.0, color="black", linewidth=1.0, alpha=0.4, linestyle="--")
+    axs[1].plot(time_s, heading_error_deg, color="tab:blue", linewidth=1.5, label="heading error (deg)")
+    axs[1].set_ylabel("Norm / Deg")
+    axs[1].legend(loc="best")
+    axs[1].grid(True, alpha=0.25)
+
+    axs[2].plot(time_s, roll_des_deg, color="tab:purple", linewidth=2.0, label="roll des (deg)")
+    axs[2].plot(time_s, phi_deg, color="tab:green", linewidth=1.5, label="phi (deg)")
+    axs[2].set_ylabel("Bank (deg)")
+    axs[2].legend(loc="best")
+    axs[2].grid(True, alpha=0.25)
+
+    axs[3].plot(time_s, roll_cmd, color="tab:brown", linewidth=2.0, label="roll cmd")
+    axs[3].plot(time_s, track_accel_cmd_fps2, color="tab:gray", linewidth=1.5, label="track accel (fps^2)")
+    axs[3].set_ylabel("Cmd / Accel")
+    axs[3].set_xlabel("Time (s)")
+    axs[3].legend(loc="best")
+    axs[3].grid(True, alpha=0.25)
+
+    fig.savefig(plot_path, dpi=150)
+    plt.close(fig)
+    return csv_path, plot_path
+
+
 def to_mppi_state(env, state, altitude_ref_ft):
     p_n_ft = float(state["p_N"])
     p_e_ft = float(state["p_E"])
@@ -89,6 +147,47 @@ def to_mppi_state(env, state, altitude_ref_ft):
         "ny": float(state.get("ny", 0.0)),
         "nz": float(state.get("nz", 1.0)),
     }
+
+
+def get_active_canyon_reference(env, pad_back_ft=500.0, pad_front_ft=1500.0):
+    canyon = env.unwrapped.canyon
+    if not (
+        hasattr(canyon, "north_samples_ft")
+        and hasattr(canyon, "width_samples_ft")
+        and hasattr(canyon, "center_east_samples_ft")
+    ):
+        north_samples_ft = np.linspace(0.0, 24000.0, 256, dtype=np.float32)
+        width_samples_ft = np.ones(256, dtype=np.float32) * 1000.0
+        center_east_samples_ft = np.zeros(256, dtype=np.float32)
+        centerline_heading_samples_rad = np.zeros(256, dtype=np.float32)
+        return north_samples_ft, width_samples_ft, center_east_samples_ft, centerline_heading_samples_rad
+
+    north_samples_ft = np.asarray(canyon.north_samples_ft, dtype=np.float32)
+    width_samples_ft = np.asarray(canyon.width_samples_ft, dtype=np.float32)
+    center_east_samples_ft = np.asarray(canyon.center_east_samples_ft, dtype=np.float32)
+    centerline_heading_samples_rad = np.asarray(
+        getattr(canyon, "centerline_heading_samples_rad", np.zeros_like(center_east_samples_ft)),
+        dtype=np.float32,
+    )
+
+    start_info = getattr(env.unwrapped, "dem_start_info", None)
+    canyon_span_ft = float(getattr(env.unwrapped, "canyon_span_ft", 0.0))
+    if start_info is None or canyon_span_ft <= 0.0 or north_samples_ft.size < 2:
+        return north_samples_ft, width_samples_ft, center_east_samples_ft, centerline_heading_samples_rad
+
+    start_north_ft = float(start_info["local_north_ft"])
+    min_north_ft = max(float(north_samples_ft[0]), start_north_ft - float(pad_back_ft))
+    max_north_ft = min(float(north_samples_ft[-1]), start_north_ft + canyon_span_ft + float(pad_front_ft))
+    mask = (north_samples_ft >= min_north_ft) & (north_samples_ft <= max_north_ft)
+    if int(np.count_nonzero(mask)) < 2:
+        return north_samples_ft, width_samples_ft, center_east_samples_ft, centerline_heading_samples_rad
+
+    return (
+        north_samples_ft[mask],
+        width_samples_ft[mask],
+        center_east_samples_ft[mask],
+        centerline_heading_samples_rad[mask],
+    )
 
 
 def controller_state_to_gatekeeper_flat(state_dict):
@@ -136,10 +235,7 @@ def build_jsbsim_gatekeeper(
 ):
     canyon = env.unwrapped.canyon
 
-    north_samples_ft = np.asarray(canyon.north_samples_ft, dtype=np.float32)
-    center_east_samples_ft = np.asarray(canyon.center_east_samples_ft, dtype=np.float32)
-    width_samples_ft = np.asarray(canyon.width_samples_ft, dtype=np.float32)
-    heading_samples_rad = np.asarray(canyon.centerline_heading_samples_rad, dtype=np.float32)
+    north_samples_ft, width_samples_ft, center_east_samples_ft, heading_samples_rad = get_active_canyon_reference(env)
     width_grad_samples_ft = np.gradient(width_samples_ft, north_samples_ft).astype(np.float32)
 
     if hasattr(canyon, "ordered_dem_msl_m"):
@@ -395,13 +491,13 @@ def parse_args():
     parser.add_argument(
         "--target-speed-kts",
         type=float,
-        default=650.0,
+        default=450.0,
         help="Target flight speed in knots (kts).",
     )
     parser.add_argument(
         "--initial-speed-kts",
         type=float,
-        default=300,
+        default=450,
         help="Initial entry speed in knots (kts). Defaults to --target-speed-kts.",
     )
     parser.add_argument(
@@ -409,6 +505,36 @@ def parse_args():
         type=float,
         default=1000.0,
         help="Initial entry altitude in feet, relative to the DEM start elevation in canyon DEM mode.",
+    )
+    parser.add_argument(
+        "--initial-roll-deg",
+        type=float,
+        default=None,
+        help="Optional initial roll attitude in degrees.",
+    )
+    parser.add_argument(
+        "--initial-pitch-deg",
+        type=float,
+        default=None,
+        help="Optional initial pitch attitude in degrees.",
+    )
+    parser.add_argument(
+        "--initial-heading-deg",
+        type=float,
+        default=None,
+        help="Optional initial true heading in degrees. Defaults to the DEM follow-canyon heading.",
+    )
+    parser.add_argument(
+        "--initial-alpha-deg",
+        type=float,
+        default=None,
+        help="Optional initial angle of attack in degrees.",
+    )
+    parser.add_argument(
+        "--initial-beta-deg",
+        type=float,
+        default=None,
+        help="Optional initial sideslip angle in degrees.",
     )
     parser.add_argument(
         "--study-name",
@@ -468,19 +594,24 @@ def main():
         dem_max_width_ft=2200.0,
         dem_start_pixel=DEM_START_PIXEL,
         dem_start_heading_mode="follow_canyon",
+        dem_start_heading_deg=args.initial_heading_deg,
         dem_render_mesh=True,
         dem_use_proxy_canyon_bounds=False,
         wall_margin_ft=30.0,
         wall_visual_offset_ft=40.0,
         wall_radius_ft=8.0,
         wall_height_ft=500.0,
-        target_altitude_ft=250.0,
+        target_altitude_ft=500.0,
         entry_altitude_ft=initial_altitude_ft,
         min_altitude_ft=-500.0,
         max_altitude_ft=3000.0,
         max_episode_steps=1200,
         terrain_collision_buffer_ft=10.0,
         entry_speed_kts=initial_speed_kts,
+        entry_roll_deg=args.initial_roll_deg,
+        entry_pitch_deg=args.initial_pitch_deg,
+        entry_alpha_deg=args.initial_alpha_deg,
+        entry_beta_deg=args.initial_beta_deg,
         wind_sigma=1.0,
         canyon_span_ft=9000.0,
         canyon_segment_spacing_ft=12.0,
@@ -489,6 +620,7 @@ def main():
     obs, _ = env.reset(seed=3)
 
     state = env.unwrapped.get_full_state_dict()
+    actual_dem_start_pixel = tuple(getattr(env.unwrapped, "dem_start_pixel", DEM_START_PIXEL))
 
     altitude_ref_ft = float(getattr(env.unwrapped, "dem_start_elev_ft", 0.0))
     initial_controller_state = to_mppi_state(env, state, altitude_ref_ft)
@@ -499,17 +631,7 @@ def main():
     max_altitude_ft = float(env.unwrapped.max_altitude_ft - altitude_ref_ft)
 
     canyon = env.unwrapped.canyon
-    if hasattr(canyon, "north_samples_ft") and hasattr(canyon, "width_samples_ft"):
-        north_samples_ft = canyon.north_samples_ft
-        width_samples_ft = canyon.width_samples_ft
-        center_east_samples_ft = canyon.center_east_samples_ft
-        centerline_heading_samples_rad = getattr(canyon, "centerline_heading_samples_rad", np.zeros_like(center_east_samples_ft))
-    else:
-        # Fallback for procedural or other types if they don't have these attributes
-        north_samples_ft = np.linspace(0.0, 24000.0, 256, dtype=np.float32)
-        width_samples_ft = np.ones(256, dtype=np.float32) * 1000.0
-        center_east_samples_ft = np.zeros(256, dtype=np.float32)
-        centerline_heading_samples_rad = np.zeros(256, dtype=np.float32)
+    north_samples_ft, width_samples_ft, center_east_samples_ft, centerline_heading_samples_rad = get_active_canyon_reference(env)
 
     mppi_target_altitude_ft = target_altitude_ft
 
@@ -623,7 +745,7 @@ def main():
         env=env,
         dem_path=DEM_PATH,
         dem_bbox=DEM_BBOX,
-        dem_start_pixel=DEM_START_PIXEL,
+        dem_start_pixel=actual_dem_start_pixel,
         output_dir=output_dir,
         file_stem=f"canyon_{controller_tag}_{mode_tag}",
         title_prefix=f"{controller_tag.upper()} Trajectory Overlay",
@@ -632,6 +754,7 @@ def main():
     recorder.initialize()
     recorder.set_centerline_profile(north_samples_ft, center_east_samples_ft)
     termination_reason = "running"
+    simple_diagnostic_rows = []
 
     gatekeeper_bundle = None
     gatekeeper_prev_using_backup = False
@@ -658,7 +781,13 @@ def main():
     print("\nStarting Canyon Flight...")
     print(
         f"Initial conditions: {initial_speed_kts:.1f} kts entry speed, "
-        f"{initial_altitude_ft:.1f} ft entry altitude."
+        f"{initial_altitude_ft:.1f} ft entry altitude, "
+        f"start_px={actual_dem_start_pixel}, "
+        f"phi={np.degrees(float(initial_controller_state['phi'])):.1f} deg, "
+        f"theta={np.degrees(float(initial_controller_state['theta'])):.1f} deg, "
+        f"psi={_wrap_heading_deg(initial_controller_state['psi']):.1f} deg, "
+        f"alpha={np.degrees(float(state['alpha'])):.1f} deg, "
+        f"beta={np.degrees(float(state.get('beta', 0.0))):.1f} deg."
     )
     print(
         f"{'Step':<5} | {'p_N_rel':<8} | {'LatErr':<8} | {'h_rel':<8} | "
@@ -850,6 +979,31 @@ def main():
 
             width_ft = float(info.get("canyon_width_ft", np.nan))
             lateral_ft = float(info.get("lateral_error_ft", np.nan))
+            if controller_tag == "simple":
+                simple_guidance = dict(getattr(controller, "last_guidance", {}) or {})
+                speed_fps = float(
+                    np.sqrt(
+                        float(state["u"]) ** 2 + float(state["v"]) ** 2 + float(state["w"]) ** 2
+                    )
+                )
+                simple_diagnostic_rows.append(
+                    {
+                        "step": int(step),
+                        "time_s": float(step / 30.0),
+                        "lateral_error_ft": float(info.get("lateral_error_ft", np.nan)),
+                        "lateral_error_norm": float(info.get("lateral_error_norm", np.nan)),
+                        "heading_error_deg": float(simple_guidance.get("heading_error_deg", np.nan)),
+                        "roll_cmd": float(simple_guidance.get("roll_cmd", np.nan)),
+                        "roll_des_deg": float(simple_guidance.get("roll_des_deg", np.nan)),
+                        "phi_deg": float(np.degrees(float(controller_state["phi"]))),
+                        "track_accel_cmd_fps2": float(simple_guidance.get("track_accel_cmd_fps2", np.nan)),
+                        "nz_des": float(simple_guidance.get("nz_des", np.nan)),
+                        "pitch_cmd": float(simple_guidance.get("pitch_cmd", np.nan)),
+                        "speed_fps": float(speed_fps),
+                        "altitude_error_ft": float(info.get("altitude_error_ft", np.nan)),
+                        "terrain_clearance_ft": float(info.get("terrain_clearance_ft", np.nan)),
+                    }
+                )
 
             if step % 5 == 0:
                 speed_fps = float(
@@ -877,6 +1031,16 @@ def main():
     print(f"Saved video: {artifacts['video_path']}")
     print(f"Saved trajectory overlay: {artifacts['overlay_path']}")
     print(f"Saved trajectory CSV: {artifacts['trajectory_csv_path']}")
+    if controller_tag == "simple":
+        diag_csv_path, diag_plot_path = save_simple_controller_diagnostics(
+            output_dir=output_dir,
+            file_stem=f"canyon_{controller_tag}_{mode_tag}",
+            rows=simple_diagnostic_rows,
+            termination_reason=termination_reason,
+        )
+        if diag_csv_path is not None and diag_plot_path is not None:
+            print(f"Saved diagnostics CSV: {diag_csv_path}")
+            print(f"Saved diagnostics plot: {diag_plot_path}")
 
 
 if __name__ == "__main__":

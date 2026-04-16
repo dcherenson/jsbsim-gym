@@ -232,6 +232,15 @@ class DEMCanyon:
             "elevation_msl_ft": elev_msl_m * M_TO_FT,
         }
 
+    def get_centerline_pixel_info(self, pixel_x, pixel_y):
+        base_info = self.get_pixel_info(pixel_x, pixel_y)
+        row_ordered = int(base_info["row_ordered"])
+        center_east_ft = float(self.center_east_samples_ft[row_ordered])
+        center_pixel_x = float(
+            np.interp(center_east_ft, self.east_samples_ft, np.arange(self.cols, dtype=np.float32))
+        )
+        return self.get_pixel_info(center_pixel_x, base_info["pixel_y"])
+
     def _compute_centerline(self, dem_start_pixel, smoothing_window):
         """Traces the canyon floor using a constrained BFS flood-fill."""
         # Use a cache to avoid recomputing if this DEM and start_pixel have been processed
@@ -305,6 +314,24 @@ class DEMCanyon:
             smooth_win = max(9, smooth_win)
             kernel = np.ones(smooth_win, dtype=np.float32) / float(smooth_win)
             center_east = np.convolve(center_east, kernel, mode="same").astype(np.float32)
+
+            east_min_ft = float(self.east_samples_ft[0])
+            east_max_ft = float(self.east_samples_ft[-1])
+            edge_margin_ft = 2.0 * float(self.col_spacing_ft)
+            half_width_ft = 0.5 * np.asarray(self.width_samples_ft, dtype=np.float32)
+            idx = np.arange(center_east.size, dtype=np.float32)
+            for _ in range(8):
+                invalid = (
+                    (~np.isfinite(center_east))
+                    | ((center_east - half_width_ft) <= (east_min_ft + edge_margin_ft))
+                    | ((center_east + half_width_ft) >= (east_max_ft - edge_margin_ft))
+                )
+                if not np.any(invalid):
+                    break
+                valid = ~invalid
+                if np.count_nonzero(valid) < 2:
+                    break
+                center_east = np.interp(idx, idx[valid], center_east[valid]).astype(np.float32)
 
             lookahead = min(45, max(12, center_east.size // 18))
             for i in range(center_east.size):

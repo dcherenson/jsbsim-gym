@@ -73,6 +73,10 @@ class CanyonFlightEnv(DataCollectionEnv):
         canyon_span_ft=14000.0,
         canyon_segment_spacing_ft=120.0,
         entry_speed_kts=450.0,
+        entry_roll_deg=None,
+        entry_pitch_deg=None,
+        entry_alpha_deg=None,
+        entry_beta_deg=None,
     ):
         super().__init__(render_mode=render_mode)
 
@@ -111,6 +115,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         self.wall_visual_offset_ft = wall_visual_offset_ft
         self.wall_radius_ft = wall_radius_ft
         self.wall_height_ft = wall_height_ft
+        self.requested_dem_start_pixel = dem_start_pixel
         self.dem_start_pixel = dem_start_pixel
         self.dem_start_heading_mode = dem_start_heading_mode
         self.dem_start_heading_deg = dem_start_heading_deg
@@ -132,7 +137,14 @@ class CanyonFlightEnv(DataCollectionEnv):
                 else:
                     px = self.canyon.cols - 1
                     py = self.canyon.rows - 1 if dem_fly_direction == "south_to_north" else 0
-                self.dem_start_info = self.canyon.get_pixel_info(px, py)
+                if hasattr(self.canyon, "get_centerline_pixel_info"):
+                    self.dem_start_info = self.canyon.get_centerline_pixel_info(px, py)
+                else:
+                    self.dem_start_info = self.canyon.get_pixel_info(px, py)
+                self.dem_start_pixel = (
+                    int(self.dem_start_info["pixel_x"]),
+                    int(self.dem_start_info["pixel_y"]),
+                )
                 self.dem_start_elev_ft = float(self.dem_start_info["elevation_msl_ft"])
 
                 if self.dem_start_heading_deg is None:
@@ -147,7 +159,12 @@ class CanyonFlightEnv(DataCollectionEnv):
                         else:
                             self.dem_start_heading_deg = 0.0
                     elif heading_mode == "follow_canyon" and hasattr(self.canyon, "get_heading_for_pixel"):
-                        self.dem_start_heading_deg = float(self.canyon.get_heading_for_pixel(px, py))
+                        self.dem_start_heading_deg = float(
+                            self.canyon.get_heading_for_pixel(
+                                self.dem_start_pixel[0],
+                                self.dem_start_pixel[1],
+                            )
+                        )
 
         altitude_ref_ft = self.dem_start_elev_ft if canyon_mode == "dem" else 0.0
         self.target_altitude_ft = altitude_ref_ft + target_altitude_ft
@@ -167,6 +184,10 @@ class CanyonFlightEnv(DataCollectionEnv):
             self.canyon_span_ft = canyon_span_ft
         self.canyon_segment_spacing_ft = canyon_segment_spacing_ft
         self.entry_speed_fps = entry_speed_kts * 1.68781
+        self.entry_roll_deg = None if entry_roll_deg is None else float(entry_roll_deg)
+        self.entry_pitch_deg = None if entry_pitch_deg is None else float(entry_pitch_deg)
+        self.entry_alpha_deg = None if entry_alpha_deg is None else float(entry_alpha_deg)
+        self.entry_beta_deg = None if entry_beta_deg is None else float(entry_beta_deg)
         self.canyon_segment_count = max(int(self.canyon_span_ft / canyon_segment_spacing_ft) + 1, 8)
 
         self.step_count = 0
@@ -200,7 +221,7 @@ class CanyonFlightEnv(DataCollectionEnv):
     def _build_obs(self, state_dict):
         half_width_ft = 0.5 * state_dict["canyon_width"]
         usable_half_ft = max(half_width_ft - self.wall_margin_ft, 1.0)
-        lateral_error_ft = state_dict["p_E"] - (self.canyon_center_east_ft or 0.0)
+        lateral_error_ft = self._get_lateral_error_ft(state_dict)
         lateral_norm = lateral_error_ft / usable_half_ft
         altitude_error_ft = state_dict["h"] - self.target_altitude_ft
 
@@ -231,7 +252,7 @@ class CanyonFlightEnv(DataCollectionEnv):
     def _build_info(self, state_dict):
         half_width_ft = 0.5 * state_dict["canyon_width"]
         usable_half_ft = max(half_width_ft - self.wall_margin_ft, 1.0)
-        lateral_error_ft = state_dict["p_E"] - (self.canyon_center_east_ft or 0.0)
+        lateral_error_ft = self._get_lateral_error_ft(state_dict)
         lateral_norm = lateral_error_ft / usable_half_ft
         terrain_elevation_msl_ft, terrain_clearance_ft = self._get_terrain_elevation_ft_and_clearance(state_dict)
 
@@ -256,6 +277,25 @@ class CanyonFlightEnv(DataCollectionEnv):
         terrain_clearance_ft = float(state_dict["h"] - terrain_elevation_msl_ft)
         return terrain_elevation_msl_ft, terrain_clearance_ft
 
+    def _get_lateral_error_ft(self, state_dict):
+        if (
+            self.canyon_mode == "dem"
+            and hasattr(self.canyon, "get_local_from_latlon")
+            and hasattr(self.canyon, "north_samples_ft")
+            and hasattr(self.canyon, "center_east_samples_ft")
+        ):
+            try:
+                lat_deg = float(self.simulation.get_property_value("position/lat-gc-deg"))
+                lon_deg = float(self.simulation.get_property_value("position/long-gc-deg"))
+                local_north_ft, local_east_ft = self.canyon.get_local_from_latlon(lat_deg, lon_deg)
+                center_east_ft = float(
+                    np.interp(local_north_ft, self.canyon.north_samples_ft, self.canyon.center_east_samples_ft)
+                )
+                return float(local_east_ft - center_east_ft)
+            except Exception:
+                pass
+        return float(state_dict["p_E"] - (self.canyon_center_east_ft or 0.0))
+
     def reset(self, seed=None, options=None):
         # Match JSBSim initial conditions to this canyon scenario.
         if self.canyon_mode == "dem" and self.dem_start_info is not None:
@@ -263,6 +303,14 @@ class CanyonFlightEnv(DataCollectionEnv):
             self.simulation.set_property_value('ic/long-gc-deg', float(self.dem_start_info["lon_deg"]))
             if self.dem_start_heading_deg is not None:
                 self.simulation.set_property_value('ic/psi-true-deg', float(self.dem_start_heading_deg))
+        if self.entry_roll_deg is not None:
+            self.simulation.set_property_value('ic/phi-deg', float(self.entry_roll_deg))
+        if self.entry_pitch_deg is not None:
+            self.simulation.set_property_value('ic/theta-deg', float(self.entry_pitch_deg))
+        if self.entry_alpha_deg is not None:
+            self.simulation.set_property_value('ic/alpha-deg', float(self.entry_alpha_deg))
+        if self.entry_beta_deg is not None:
+            self.simulation.set_property_value('ic/beta-deg', float(self.entry_beta_deg))
         self.simulation.set_property_value('ic/h-sl-ft', float(self.entry_altitude_ft))
         self.simulation.set_property_value('ic/vt-fps', float(self.entry_speed_fps))
         super().reset(seed=seed, options=options)
@@ -303,7 +351,7 @@ class CanyonFlightEnv(DataCollectionEnv):
 
         half_width_ft = 0.5 * state_next["canyon_width"]
         usable_half_ft = max(half_width_ft - self.wall_margin_ft, 1.0)
-        lateral_error_ft = state_next["p_E"] - (self.canyon_center_east_ft or 0.0)
+        lateral_error_ft = self._get_lateral_error_ft(state_next)
         _, terrain_clearance_ft = self._get_terrain_elevation_ft_and_clearance(state_next)
 
         out_of_canyon = np.abs(lateral_error_ft) > usable_half_ft
