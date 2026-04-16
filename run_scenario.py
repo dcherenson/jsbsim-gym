@@ -8,8 +8,6 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 
-os.environ["JAX_PLATFORM_NAME"] = "cpu"  # Force CPU for deterministic timing and to avoid OOM issues on GPU
-
 import jax.numpy as jnp
 
 from drs_gatekeeper import DRSGatekeeper, GatekeeperParams, TrackBoundsEstimate

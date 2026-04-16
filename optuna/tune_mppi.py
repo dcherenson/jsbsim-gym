@@ -8,9 +8,6 @@ import gymnasium as gym
 import numpy as np
 import optuna
 
-# Ensure jax uses CPU for parallel tuning to avoid GPU memory OOM and fast JIT overhead.
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
