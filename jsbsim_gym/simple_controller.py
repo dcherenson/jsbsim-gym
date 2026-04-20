@@ -26,10 +26,14 @@ class SimpleCanyonControllerConfig:
     use_dem_centerline: bool = True
 
     # Lookahead guidance -> desired track-normal acceleration.
-    track_accel_lateral_gain: float = -1.0
-    track_accel_heading_gain: float = -1.0
-    track_accel_lateral_rate_gain: float = -1.0
     track_accel_max_fps2: float = 300.0
+    lateral_lookahead_time_s: float = 0.8035431855440126
+    lateral_lookahead_min_ft: float = 129.4750465504835
+    lateral_lookahead_max_ft: float = 575.0745073229889
+    lateral_lookahead_width_gain: float = 0.843479842675627
+    lateral_nonlinear_cross_track_gain: float = 1.2517554023858457
+    lateral_damping_gain: float = 1.1735493463270827
+    lateral_curvature_ff_gain: float = 1.8377939094938947
 
     # Roll alignment loop.
     roll_p_gain: float = 2.8
@@ -229,6 +233,18 @@ def build_simple_trajectory_policy_jax(
     def _wrap_angle_rad(angle_rad):
         return jnp.arctan2(jnp.sin(angle_rad), jnp.cos(angle_rad))
 
+    def _estimate_curvature(ontrack_idx):
+        prev_idx = jnp.mod(ontrack_idx - 1, sample_count)
+        next_idx = jnp.mod(ontrack_idx + 1, sample_count)
+        prev_idx = jnp.where(closed_loop, prev_idx, jnp.maximum(ontrack_idx - 1, 0))
+        next_idx = jnp.where(closed_loop, next_idx, jnp.minimum(ontrack_idx + 1, sample_count - 1))
+
+        d_heading = _wrap_angle_rad(heading_samples[next_idx] - heading_samples[prev_idx])
+        d_n = north_samples[next_idx] - north_samples[prev_idx]
+        d_e = east_samples[next_idx] - east_samples[prev_idx]
+        ds = jnp.maximum(jnp.sqrt(d_n * d_n + d_e * d_e), 1.0)
+        return d_heading / ds
+
     def _position_rates(state_flat):
         u, v, w = state_flat[3], state_flat[4], state_flat[5]
         phi, theta, psi = state_flat[9], state_flat[10], state_flat[11]
@@ -280,11 +296,44 @@ def build_simple_trajectory_policy_jax(
         width_ft = jnp.where(jnp.logical_or(~jnp.isfinite(width_ft), width_ft <= 1.0), 600.0, width_ft)
         half_width_ft = 0.5 * width_ft
         usable_half_ft = jnp.maximum(half_width_ft - wall_margin_ft, 80.0)
-        del usable_half_ft
+        lookahead_ft = jnp.clip(
+            config.lateral_lookahead_time_s * speed_fps + config.lateral_lookahead_width_gain * usable_half_ft,
+            config.lateral_lookahead_min_ft,
+            config.lateral_lookahead_max_ft,
+        )
+
+        if closed_loop:
+            approx_spacing_ft = jnp.maximum((north_samples[-1] - north_samples[0]) / jnp.maximum(sample_count - 1, 1), 1.0)
+        else:
+            spacing_prev = jnp.where(ontrack_idx > 0, north_samples[ontrack_idx] - north_samples[ontrack_idx - 1], 0.0)
+            spacing_next = jnp.where(ontrack_idx < sample_count - 1, north_samples[ontrack_idx + 1] - north_samples[ontrack_idx], 0.0)
+            approx_spacing_ft = jnp.maximum(jnp.maximum(jnp.abs(spacing_prev), jnp.abs(spacing_next)), 1.0)
+
+        dynamic_look_rows = jnp.int32(jnp.maximum(jnp.round(lookahead_ft / approx_spacing_ft), 1.0))
+        if closed_loop:
+            look_idx = jnp.mod(ontrack_idx + dynamic_look_rows, sample_count)
+        else:
+            look_idx = jnp.clip(ontrack_idx + dynamic_look_rows, 0, sample_count - 1)
+        desired_heading_rad = heading_samples[look_idx]
+        heading_error_rad = _wrap_angle_rad(psi - desired_heading_rad)
 
         p_n_dot, p_e_dot, h_dot = _position_rates(state_flat)
         lateral_error_rate_fps = p_n_dot * (-jnp.sin(track_heading_rad)) + p_e_dot * jnp.cos(track_heading_rad)
         altitude_error_rate_fps = h_dot
+
+        curvature_1_per_ft = _estimate_curvature(ontrack_idx)
+        l1_ft = jnp.maximum(lookahead_ft, 10.0)
+        eta = heading_error_rad + jnp.arctan(
+            config.lateral_nonlinear_cross_track_gain * lateral_error_ft / l1_ft
+        )
+        track_accel_fb_fps2 = -(2.0 * speed_fps * speed_fps / l1_ft) * jnp.sin(eta)
+        track_accel_ff_fps2 = config.lateral_curvature_ff_gain * speed_fps * speed_fps * curvature_1_per_ft
+        track_accel_damp_fps2 = -config.lateral_damping_gain * lateral_error_rate_fps
+        track_accel_cmd_fps2 = jnp.clip(
+            track_accel_fb_fps2 + track_accel_ff_fps2 + track_accel_damp_fps2,
+            -config.track_accel_max_fps2,
+            config.track_accel_max_fps2,
+        )
 
         altitude_error_raw_ft = h_ft - target_altitude_ft
         altitude_error_offset_ft = (h_ft + altitude_reference_offset_ft) - target_altitude_ft
@@ -295,13 +344,6 @@ def build_simple_trajectory_policy_jax(
         )
 
         speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
-        track_accel_cmd_fps2 = jnp.clip(
-            config.track_accel_lateral_gain * lateral_error_ft
-            + config.track_accel_lateral_rate_gain * lateral_error_rate_fps
-            + config.track_accel_heading_gain * speed_fps * jnp.sin(heading_error_rad),
-            -config.track_accel_max_fps2,
-            config.track_accel_max_fps2,
-        )
 
         nz_altitude_bias = jnp.clip(
             -config.nz_altitude_gain * altitude_error_ft
@@ -389,6 +431,27 @@ class SimpleTrajectoryController:
         return float(np.arctan2(np.sin(angle_rad), np.cos(angle_rad)))
 
     @staticmethod
+    def _position_rates(state_dict):
+        u = float(state_dict["u"])
+        v = float(state_dict["v"])
+        w = float(state_dict["w"])
+        phi = float(state_dict["phi"])
+        theta = float(state_dict["theta"])
+        psi = float(state_dict["psi"])
+
+        c_psi = np.cos(psi)
+        s_psi = np.sin(psi)
+        c_theta = np.cos(theta)
+        s_theta = np.sin(theta)
+        c_phi = np.cos(phi)
+        s_phi = np.sin(phi)
+
+        p_n_dot = u * (c_theta * c_psi) + v * (s_phi * s_theta * c_psi - c_phi * s_psi) + w * (c_phi * s_theta * c_psi + s_phi * s_psi)
+        p_e_dot = u * (c_theta * s_psi) + v * (s_phi * s_theta * s_psi + c_phi * c_psi) + w * (c_phi * s_theta * s_psi - s_phi * c_psi)
+        h_dot = u * s_theta - v * s_phi * c_theta - w * c_phi * c_theta
+        return float(p_n_dot), float(p_e_dot), float(h_dot)
+
+    @staticmethod
     def _normalize_reference_trajectory(reference_trajectory):
         if reference_trajectory is None:
             return None
@@ -469,7 +532,7 @@ class SimpleTrajectoryController:
         self._ontrack_idx = ontrack_idx
         return ontrack_idx
 
-    def _compute_guidance(self, state_dict, reference, position_override=None):
+    def _compute_guidance(self, state_dict, reference, position_override=None, speed_fps=None):
         if position_override is None:
             local_north_ft = float(state_dict["p_N"])
             local_east_ft = float(state_dict["p_E"])
@@ -489,10 +552,39 @@ class SimpleTrajectoryController:
             reference=reference,
         )
 
+        width_ft = float(width_samples_ft[ontrack_idx])
+        if (not np.isfinite(width_ft)) or width_ft <= 1.0:
+            width_ft = 600.0
+        usable_half_ft = max(0.5 * width_ft - self.wall_margin_ft, 80.0)
+
+        if speed_fps is None:
+            speed_fps = float(
+                np.sqrt(
+                    float(state_dict["u"]) ** 2
+                    + float(state_dict["v"]) ** 2
+                    + float(state_dict["w"]) ** 2
+                )
+            )
+
+        lookahead_ft = np.clip(
+            self.config.lateral_lookahead_time_s * speed_fps
+            + self.config.lateral_lookahead_width_gain * usable_half_ft,
+            self.config.lateral_lookahead_min_ft,
+            self.config.lateral_lookahead_max_ft,
+        )
+
         if reference["closed_loop"]:
-            look_idx = int((ontrack_idx + self.lookahead_rows) % sample_count)
+            approx_spacing_ft = max(float((north_samples_ft[-1] - north_samples_ft[0]) / max(sample_count - 1, 1)), 1.0)
         else:
-            look_idx = int(np.clip(ontrack_idx + self.lookahead_rows, 0, sample_count - 1))
+            spacing_prev = float(north_samples_ft[ontrack_idx] - north_samples_ft[max(ontrack_idx - 1, 0)])
+            spacing_next = float(north_samples_ft[min(ontrack_idx + 1, sample_count - 1)] - north_samples_ft[ontrack_idx])
+            approx_spacing_ft = max(abs(spacing_prev), abs(spacing_next), 1.0)
+        dynamic_lookahead_rows = int(np.clip(np.round(lookahead_ft / approx_spacing_ft), 1, sample_count - 1))
+
+        if reference["closed_loop"]:
+            look_idx = int((ontrack_idx + dynamic_lookahead_rows) % sample_count)
+        else:
+            look_idx = int(np.clip(ontrack_idx + dynamic_lookahead_rows, 0, sample_count - 1))
 
         ontrack_north_ft = float(north_samples_ft[ontrack_idx])
         ontrack_center_east_ft = float(east_samples_ft[ontrack_idx])
@@ -509,20 +601,27 @@ class SimpleTrajectoryController:
         )
         heading_error_rad = self._wrap_angle_rad(float(state_dict["psi"]) - desired_heading_rad)
 
-        width_ft = float(width_samples_ft[ontrack_idx])
-        if (not np.isfinite(width_ft)) or width_ft <= 1.0:
-            width_ft = 600.0
+        prev_idx = int((ontrack_idx - 1) % sample_count) if reference["closed_loop"] else max(ontrack_idx - 1, 0)
+        next_idx = int((ontrack_idx + 1) % sample_count) if reference["closed_loop"] else min(ontrack_idx + 1, sample_count - 1)
+        d_heading_rad = self._wrap_angle_rad(float(heading_samples_rad[next_idx]) - float(heading_samples_rad[prev_idx]))
+        d_n_ft = float(north_samples_ft[next_idx] - north_samples_ft[prev_idx])
+        d_e_ft = float(east_samples_ft[next_idx] - east_samples_ft[prev_idx])
+        ds_ft = max(float(np.hypot(d_n_ft, d_e_ft)), 1.0)
+        curvature_1_per_ft = float(d_heading_rad / ds_ft)
 
         return {
             "lateral_error_ft": lateral_error_ft,
             "heading_error_rad": heading_error_rad,
             "centerline_heading_deg": float(np.rad2deg(desired_heading_rad)),
             "canyon_width_ft": width_ft,
+            "usable_half_ft": float(usable_half_ft),
+            "lookahead_ft": float(lookahead_ft),
+            "curvature_1_per_ft": float(curvature_1_per_ft),
             "local_north_ft": float(local_north_ft),
             "ontrack_idx": int(ontrack_idx),
             "ontrack_north_ft": float(ontrack_north_ft),
             "ontrack_center_east_ft": float(ontrack_center_east_ft),
-            "lookahead_rows": int(self.lookahead_rows),
+            "lookahead_rows": int(dynamic_lookahead_rows),
             "lookahead_north_ft": float(lookahead_north_ft),
             "lookahead_center_east_ft": float(lookahead_center_east_ft),
         }
@@ -546,14 +645,25 @@ class SimpleTrajectoryController:
         if reference is None:
             raise ValueError("No reference trajectory provided to SimpleTrajectoryController.")
 
+        speed_fps = float(
+            np.sqrt(
+                float(state_dict["u"]) ** 2
+                + float(state_dict["v"]) ** 2
+                + float(state_dict["w"]) ** 2
+            )
+        )
+
         guidance = self._compute_guidance(
             state_dict=state_dict,
             reference=reference,
             position_override=position_override,
+            speed_fps=speed_fps,
         )
 
         lateral_error_ft = float(guidance["lateral_error_ft"])
-        lateral_error_rate_fps = (lateral_error_ft - self._prev_lateral_error_ft) / self.dt
+        track_heading_rad = float(np.deg2rad(guidance["centerline_heading_deg"]))
+        p_n_dot, p_e_dot, _ = self._position_rates(state_dict)
+        lateral_error_rate_fps = float(p_n_dot * (-np.sin(track_heading_rad)) + p_e_dot * np.cos(track_heading_rad))
         self._prev_lateral_error_ft = lateral_error_ft
 
         heading_error_rad = float(guidance["heading_error_rad"])
@@ -562,6 +672,8 @@ class SimpleTrajectoryController:
         half_width_ft = 0.5 * canyon_width_ft
         usable_half_ft = max(half_width_ft - self.wall_margin_ft, 80.0)
         lateral_norm = np.clip(lateral_error_ft / usable_half_ft, -2.5, 2.5)
+        lookahead_ft = float(guidance.get("lookahead_ft", max(self.config.lateral_lookahead_min_ft, 10.0)))
+        curvature_1_per_ft = float(guidance.get("curvature_1_per_ft", 0.0))
 
         phi = float(state_dict["phi"])
         p_rate = float(state_dict["p"])
@@ -574,18 +686,15 @@ class SimpleTrajectoryController:
         altitude_error_rate_fps = (altitude_error_ft - self._prev_altitude_error_ft) / self.dt
         self._prev_altitude_error_ft = altitude_error_ft
 
-        speed_fps = float(
-            np.sqrt(
-                float(state_dict["u"]) ** 2
-                + float(state_dict["v"]) ** 2
-                + float(state_dict["w"]) ** 2
-            )
+        l1_ft = max(lookahead_ft, 10.0)
+        eta = self._wrap_angle_rad(
+            heading_error_rad + np.arctan(self.config.lateral_nonlinear_cross_track_gain * lateral_error_ft / l1_ft)
         )
-
+        track_accel_fb_fps2 = -(2.0 * speed_fps * speed_fps / l1_ft) * np.sin(eta)
+        track_accel_ff_fps2 = self.config.lateral_curvature_ff_gain * speed_fps * speed_fps * curvature_1_per_ft
+        track_accel_damp_fps2 = -self.config.lateral_damping_gain * lateral_error_rate_fps
         track_accel_cmd_fps2 = np.clip(
-            self.config.track_accel_lateral_gain * lateral_error_ft
-            + self.config.track_accel_lateral_rate_gain * lateral_error_rate_fps
-            + self.config.track_accel_heading_gain * speed_fps * np.sin(heading_error_rad),
+            track_accel_fb_fps2 + track_accel_ff_fps2 + track_accel_damp_fps2,
             -self.config.track_accel_max_fps2,
             self.config.track_accel_max_fps2,
         )
@@ -645,6 +754,11 @@ class SimpleTrajectoryController:
             **guidance,
             "lateral_norm": float(lateral_norm),
             "lateral_error_rate_fps": float(lateral_error_rate_fps),
+            "l1_lookahead_ft": float(l1_ft),
+            "curvature_1_per_ft": float(curvature_1_per_ft),
+            "track_accel_fb_fps2": float(track_accel_fb_fps2),
+            "track_accel_ff_fps2": float(track_accel_ff_fps2),
+            "track_accel_damp_fps2": float(track_accel_damp_fps2),
             "altitude_error_ft": float(altitude_error_ft),
             "altitude_error_rate_fps": float(altitude_error_rate_fps),
             "speed_fps": float(speed_fps),

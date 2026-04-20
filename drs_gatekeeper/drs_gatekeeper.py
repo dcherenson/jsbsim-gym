@@ -165,16 +165,13 @@ def rollout_single(
         
         # Policy-based (PPO) or open-loop nominal (MPPI)
         if nominal_trajectory is not None:
-             action_nominal = nominal_trajectory[step_idx]
+            action_nominal = nominal_trajectory[step_idx]
         else:
-             # This is where PPO's policy_fn is called during the rollout
-             action_nominal = nominal_policy_fn(state)
+            # This is where PPO's policy_fn is called during the rollout
+            action_nominal = nominal_policy_fn(state)
 
-        action = jax.tree.map(
-            lambda n, b: jnp.where(use_nominal, n, b),
-            action_nominal,
-            backup_policy_fn(state),
-        )
+        action_backup = backup_policy_fn(state)
+        action = jnp.where(use_nominal, action_nominal, action_backup)
         next_state = dynamics_fn(state, action, noise_step)
         h_val = safety_fn(next_state, env_param_step)
         # Return state for trajectory visualization
@@ -211,25 +208,21 @@ def rollout_single_empirical(
     """
     Rollout with ONLINE empirical sampling.
     """
-    def step_fn(carry, _):
-        state, step_idx, key, prev_action = carry
+    def step_fn(carry, subkey):
+        state, step_idx, prev_action = carry
         use_nominal = step_idx < switching_offset
         
         # Policy-based (PPO) or open-loop nominal (MPPI)
         if nominal_trajectory is not None:
-             action_nominal = nominal_trajectory[step_idx]
+            action_nominal = nominal_trajectory[step_idx]
         else:
-             # This is where PPO's policy_fn is called during the empirical rollout
-             action_nominal = nominal_policy_fn(state)
+            # This is where PPO's policy_fn is called during the empirical rollout
+            action_nominal = nominal_policy_fn(state)
 
-        action = jax.tree.map(
-            lambda n, b: jnp.where(use_nominal, n, b),
-            action_nominal,
-            backup_policy_fn(state),
-        )
+        action_backup = backup_policy_fn(state)
+        action = jnp.where(use_nominal, action_nominal, action_backup)
         
         # Sample noise online (autoregressive)
-        key, subkey = jax.random.split(key)
         feat = empirical_feature_fn(state, action, prev_action, step_idx)
         noise_step = empirical_sampler_fn(feat, gate_id, subkey, uncertainty_data)
 
@@ -237,17 +230,18 @@ def rollout_single_empirical(
         h_val = safety_fn(next_state, env_params)
         # Return state for trajectory visualization
         xy = jnp.stack([state[0], state[1]], axis=0)
-        return (next_state, step_idx + 1, key, action), (h_val, noise_step, xy)
+        return (next_state, step_idx + 1, action), (h_val, noise_step, xy)
 
     if nominal_trajectory is not None:
         initial_prev_action = nominal_trajectory[0]
     else:
         initial_prev_action = nominal_policy_fn(x0)
 
+    keys = jax.random.split(rng_key, T)
     final_carry, (h_values, noise_traj, xy_traj) = lax.scan(
         step_fn,
-        (x0, 0, rng_key, initial_prev_action),
-        None,
+        (x0, 0, initial_prev_action),
+        keys,
         length=T,
     )
     final_xy = jnp.stack([final_carry[0][0], final_carry[0][1]], axis=0)
@@ -255,6 +249,68 @@ def rollout_single_empirical(
 
     h_c_terminal = pcis_fn(final_carry[0])
     return jnp.minimum(h_c_terminal, jnp.min(h_values)), noise_traj, xy_traj
+
+
+def rollout_single_empirical_value(
+    x0: Array,
+    switching_offset: Array,
+    rng_key: Array,
+    env_params: Array,
+    uncertainty_data: JAXEmpiricalData,
+    gate_id: int,
+    dynamics_fn: Callable,
+    nominal_policy_fn: Callable,
+    backup_policy_fn: Callable,
+    safety_fn: Callable,
+    pcis_fn: Callable,
+    T: int,
+    empirical_feature_fn: Callable,
+    empirical_sampler_fn: Callable,
+    nominal_trajectory: Optional[Array] = None,
+) -> Tuple[Array, Array]:
+    """
+    Empirical rollout optimized for value-only evaluation.
+
+    Unlike ``rollout_single_empirical``, this path does not store the sampled
+    noise trajectory, which reduces memory traffic when ``compute_grad=False``.
+    """
+    def step_fn(carry, subkey):
+        state, step_idx, prev_action = carry
+        use_nominal = step_idx < switching_offset
+
+        if nominal_trajectory is not None:
+            action_nominal = nominal_trajectory[step_idx]
+        else:
+            action_nominal = nominal_policy_fn(state)
+
+        action_backup = backup_policy_fn(state)
+        action = jnp.where(use_nominal, action_nominal, action_backup)
+
+        feat = empirical_feature_fn(state, action, prev_action, step_idx)
+        noise_step = empirical_sampler_fn(feat, gate_id, subkey, uncertainty_data)
+
+        next_state = dynamics_fn(state, action, noise_step)
+        h_val = safety_fn(next_state, env_params)
+        xy = jnp.stack([state[0], state[1]], axis=0)
+        return (next_state, step_idx + 1, action), (h_val, xy)
+
+    if nominal_trajectory is not None:
+        initial_prev_action = nominal_trajectory[0]
+    else:
+        initial_prev_action = nominal_policy_fn(x0)
+
+    keys = jax.random.split(rng_key, T)
+    final_carry, (h_values, xy_traj) = lax.scan(
+        step_fn,
+        (x0, 0, initial_prev_action),
+        keys,
+        length=T,
+    )
+    final_xy = jnp.stack([final_carry[0][0], final_carry[0][1]], axis=0)
+    xy_traj = jnp.concatenate([xy_traj, final_xy[None, :]], axis=0)
+
+    h_c_terminal = pcis_fn(final_carry[0])
+    return jnp.minimum(h_c_terminal, jnp.min(h_values)), xy_traj
 
 
 def rollout_with_grad(
@@ -369,9 +425,23 @@ def build_rollout_all_empirical(
         compute_grad: bool = False,
         nominal_trajectory: Optional[Array] = None,
     ) -> Tuple[Array, Optional[Array], Array]:
-        
-        # 1. Autoregressive Sampling Pass
-        # We run the rollout and collect the realized noise trajectory [M, N, T, 3]
+        if not compute_grad:
+            # Fast value-only path: avoid materializing sampled_noise_batch.
+            def _single_val(m, key, th):
+                return rollout_single_empirical_value(
+                    x0, m, key, th, uncertainty_data, gate_id,
+                    dynamics_fn, nominal_policy_fn, backup_policy_fn,
+                    safety_fn, pcis_fn, T,
+                    empirical_feature_fn, empirical_sampler_fn,
+                    nominal_trajectory=nominal_trajectory,
+                )
+
+            v_val = jax.vmap(_single_val, in_axes=(None, 0, 0))
+            all_MN_val = jax.vmap(v_val, in_axes=(0, 0, 0))
+            H_matrix, X_all = all_MN_val(switching_offsets, rng_matrix, env_params_batch)
+            return H_matrix, None, X_all
+
+        # Gradient-enabled path: we need realized sampled_noise_batch.
         def _single_sample(m, key, th):
             return rollout_single_empirical(
                 x0, m, key, th, uncertainty_data, gate_id,
@@ -384,11 +454,8 @@ def build_rollout_all_empirical(
         v_sample = jax.vmap(_single_sample, in_axes=(None, 0, 0))
         all_MN_sample = jax.vmap(v_sample, in_axes=(0, 0, 0))
         
-        # [M, N], [M, N, T, 3] and [M, N, T+1, 2]
+        # [M, N], [M, N, T, noise_dim], and [M, N, T+1, 2]
         H_matrix, sampled_noise_batch, X_all = all_MN_sample(switching_offsets, rng_matrix, env_params_batch)
-
-        if not compute_grad:
-            return H_matrix, None, X_all
 
         # 2. Gradient Pass (Conditional)
         # Use the realized noise as if it were fixed input for the differentiable core
@@ -607,17 +674,13 @@ def run_gatekeeper(
         The Lipschitz constant used (either fixed or estimated).
     """
     # --- Step 1+3: JAX stage — rollouts + failure counting ---
-    timings = {
-        "jax_rollout": 0.0,
-        "lipschitz_failure_counting": 0.0,
-        "cpu_selection": 0.0,
-    }
+    timings = {}
     compute_grad = (params.lipschitz_mode == "autodiff")
     
     L_H_fixed = float(params.lipschitz_constant)
     dr_buffer_init = L_H_fixed * (float(params.beta) ** (1.0 / float(params.p)))
 
-    # t0 = time.perf_counter()
+    t0 = time.perf_counter() if params.debug_timing else None
     if uncertainty_data is not None and rollout_all_empirical_fn is not None and rng_key is not None:
         # Step 1: Rollout with ONLINE empirical sampling
         # Split key for vmap: [M, N, 2]
@@ -633,15 +696,16 @@ def run_gatekeeper(
             compute_grad, nominal_trajectory
         )
     
-    # Ensure JAX operations are finished for accurate timing
-    # H_matrix.block_until_ready()
-    # if Grad_matrix is not None:
-    #     Grad_matrix.block_until_ready()
-    # X_all.block_until_ready()
-    # timings["jax_rollout"] = time.perf_counter() - t0
+    # Ensure JAX operations are finished for accurate timing when debugging.
+    if params.debug_timing:
+        H_matrix.block_until_ready()
+        if Grad_matrix is not None:
+            Grad_matrix.block_until_ready()
+        X_all.block_until_ready()
+        timings["jax_rollout"] = time.perf_counter() - t0
 
     # failure counting
-    # t1 = time.perf_counter()
+    t1 = time.perf_counter() if params.debug_timing else None
     failure_mask_init = H_matrix <= jnp.float32(dr_buffer_init)
     k_vec_jax = jnp.sum(failure_mask_init, axis=1).astype(jnp.int32)
     
@@ -661,10 +725,11 @@ def run_gatekeeper(
         L_H = L_H_fixed
 
     k_vec = np.array(k_vec_jax)  # to CPU: [M] int32
-    # timings["lipschitz_failure_counting"] = time.perf_counter() - t1
+    if params.debug_timing:
+        timings["lipschitz_failure_counting"] = time.perf_counter() - t1
 
     # --- Step 4: CPU stage — Clopper-Pearson bounds ---
-    # t2 = time.perf_counter()
+    t2 = time.perf_counter() if params.debug_timing else None
     rho = 1.0 - (1.0 - params.delta) ** (1.0 / params.M)
     q_bars = compute_q_bar_vec(k_vec, params.N, rho)
 
@@ -689,7 +754,8 @@ def run_gatekeeper(
     m_star = int(switching_offsets[m_idx_star])
     q_bar_star = float(q_bars[m_idx_star])
 
-    # timings["cpu_selection"] = time.perf_counter() - t2
+    if params.debug_timing:
+        timings["cpu_selection"] = time.perf_counter() - t2
 
     return s_t, I_valid, q_bars, L_H, trajectories, mask, m_star, q_bar_star, timings
 
@@ -1010,13 +1076,13 @@ class DRSGatekeeper:
 
         # 1. Sample environment parameters (and process noise if not in empirical mode)
         # We always call this to get the latest env_batch from self._track_bounds
-        t_sample_start = time.perf_counter()
+        t_sample_start = time.perf_counter() if self.params.debug_timing else None
         noise_batch, env_batch = self._sample_noise(
             self._track_bounds,
             x_flat=x_flat,
             nominal_trajectory=nominal_trajectory,
         )
-        t_sample = time.perf_counter() - t_sample_start
+        t_sample = (time.perf_counter() - t_sample_start) if self.params.debug_timing else 0.0
 
         # Prepare sampling arguments for JAX
         noise_batch_jax = None

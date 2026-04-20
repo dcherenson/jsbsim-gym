@@ -14,9 +14,14 @@ class JAXEmpiricalData(NamedTuple):
     feature_std: jax.Array
     alpha_values: jax.Array
     canyon_width_values: jax.Array
+    sorted_features_scaled: jax.Array
+    sorted_residuals: jax.Array
+    sorted_alpha_values: jax.Array
+    sorted_canyon_width_values: jax.Array
     alpha_feature_index: int
     canyon_width_feature_index: int
     neighbor_count: int
+    max_pool_size: int
     epsilon_w: float
     alpha_threshold: float
 
@@ -32,16 +37,42 @@ def sample_empirical_jax(
     normalized_q = (feature_vector - data.feature_mean) / data.feature_std
     query_width = feature_vector[data.canyon_width_feature_index]
 
-    width_mask = jnp.abs(data.canyon_width_values - query_width) <= jnp.float32(data.epsilon_w)
-    regime_mask = jnp.abs(data.alpha_values) < jnp.float32(data.alpha_threshold)
-    mask = jnp.logical_and(width_mask, regime_mask)
-    has_mask = jnp.any(mask)
+    total_samples = data.sorted_canyon_width_values.shape[0]
+    lower = query_width - jnp.float32(data.epsilon_w)
+    upper = query_width + jnp.float32(data.epsilon_w)
 
-    diffs = data.features_scaled - normalized_q
+    lo = jnp.searchsorted(data.sorted_canyon_width_values, lower, side="left")
+    hi = jnp.searchsorted(data.sorted_canyon_width_values, upper, side="right")
+    width_count = hi - lo
+
+    # If width-gated window is empty, fallback to a centered local pool.
+    center = jnp.searchsorted(data.sorted_canyon_width_values, query_width, side="left")
+    half_pool = jnp.int32(data.max_pool_size // 2)
+    fallback_lo = jnp.clip(center - half_pool, 0, jnp.maximum(total_samples - data.max_pool_size, 0))
+    fallback_count = jnp.minimum(jnp.int32(data.max_pool_size), total_samples - fallback_lo)
+
+    pool_start = jnp.where(width_count > 0, lo, fallback_lo)
+    pool_count = jnp.where(width_count > 0, width_count, fallback_count)
+    pool_count = jnp.minimum(pool_count, jnp.int32(data.max_pool_size))
+
+    offsets = jnp.arange(data.max_pool_size, dtype=jnp.int32)
+    pool_indices = pool_start + offsets
+    pool_indices_clipped = jnp.clip(pool_indices, 0, total_samples - 1)
+    valid_mask = offsets < pool_count
+
+    pool_features = data.sorted_features_scaled[pool_indices_clipped]
+    pool_alpha = data.sorted_alpha_values[pool_indices_clipped]
+    diffs = pool_features - normalized_q
     dists_sq = jnp.sum(jnp.square(diffs), axis=-1)
-    penalized_dists = jnp.where(mask, dists_sq, jnp.where(has_mask, 1.0e12, dists_sq))
 
-    vals, indices = jax.lax.top_k(-penalized_dists, data.neighbor_count)
+    regime_mask = jnp.abs(pool_alpha) < jnp.float32(data.alpha_threshold)
+    valid_regime_mask = jnp.logical_and(valid_mask, regime_mask)
+    has_valid_regime = jnp.any(valid_regime_mask)
+    active_mask = jnp.where(has_valid_regime, valid_regime_mask, valid_mask)
+
+    penalized_dists = jnp.where(active_mask, dists_sq, 1.0e12)
+    vals, local_indices = jax.lax.top_k(-penalized_dists, data.neighbor_count)
+    indices = pool_indices_clipped[local_indices]
     distances = -vals
 
     scale = jnp.mean(distances) + 1.0e-6
@@ -86,6 +117,7 @@ class RuntimeUncertaintySampler:
     def to_jax(
         self,
         neighbor_count: int = 20,
+        max_pool_size: int = 512,
         epsilon_w: float = 200.0,
         alpha_threshold: float = 0.8,
     ) -> JAXEmpiricalData:
@@ -102,7 +134,15 @@ class RuntimeUncertaintySampler:
         alpha_values = self.dataset["alpha"].to_numpy(dtype=np.float32, copy=True)
         canyon_width_values = self.dataset["canyon_width"].to_numpy(dtype=np.float32, copy=True)
 
-        max_neighbors = max(1, min(int(neighbor_count), int(features_scaled.shape[0])))
+        order = np.argsort(canyon_width_values, kind="stable")
+        sorted_features_scaled = features_scaled[order]
+        sorted_residual_values = residual_values[order]
+        sorted_alpha_values = alpha_values[order]
+        sorted_canyon_width_values = canyon_width_values[order]
+
+        total_samples = int(features_scaled.shape[0])
+        max_neighbors = max(1, min(int(neighbor_count), total_samples))
+        max_pool = max(max_neighbors, min(int(max_pool_size), total_samples))
         return JAXEmpiricalData(
             features_scaled=jnp.asarray(features_scaled, dtype=jnp.float32),
             residuals=jnp.asarray(residual_values, dtype=jnp.float32),
@@ -110,9 +150,14 @@ class RuntimeUncertaintySampler:
             feature_std=jnp.asarray(feature_std, dtype=jnp.float32),
             alpha_values=jnp.asarray(alpha_values, dtype=jnp.float32),
             canyon_width_values=jnp.asarray(canyon_width_values, dtype=jnp.float32),
+            sorted_features_scaled=jnp.asarray(sorted_features_scaled, dtype=jnp.float32),
+            sorted_residuals=jnp.asarray(sorted_residual_values, dtype=jnp.float32),
+            sorted_alpha_values=jnp.asarray(sorted_alpha_values, dtype=jnp.float32),
+            sorted_canyon_width_values=jnp.asarray(sorted_canyon_width_values, dtype=jnp.float32),
             alpha_feature_index=alpha_feature_index,
             canyon_width_feature_index=canyon_width_feature_index,
             neighbor_count=max_neighbors,
+            max_pool_size=max_pool,
             epsilon_w=float(epsilon_w),
             alpha_threshold=float(alpha_threshold),
         )

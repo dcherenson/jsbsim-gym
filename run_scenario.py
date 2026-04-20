@@ -391,9 +391,9 @@ def build_jsbsim_gatekeeper(
         )
 
     params = GatekeeperParams(
-        M=10,
-        T=100,
-        N=64,
+        M=20,
+        T=50,
+        N=256,
         delta=0.5,
         epsilon=0.10,
         beta=0.00,
@@ -791,6 +791,20 @@ def main():
                 f"Initialized gatekeeper with backup simple controller at {gatekeeper_bundle['backup_target_speed_fps'] / KTS_TO_FPS:.0f} kts and "
                 f"target altitude {gatekeeper_bundle['backup_target_altitude_ft']:.0f} ft above DEM origin."
             )
+            print("Compiling Gatekeeper JAX JIT... (this takes a moment)", flush=True)
+            gatekeeper = gatekeeper_bundle["gatekeeper"]
+            latest_nominal = gatekeeper_bundle["latest_nominal"]
+            latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
+            warmup_nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
+            _ = gatekeeper.update(
+                controller_state_to_gatekeeper_flat(initial_controller_state),
+                track_bounds=None,
+                nominal_trajectory=jnp.asarray(warmup_nominal_trajectory, dtype=jnp.float32),
+                max_steps=int(args.max_steps),
+            )
+            gatekeeper.reset(controller_state_to_gatekeeper_flat(initial_controller_state), t=0)
+            gatekeeper_prev_using_backup = False
+            print("Gatekeeper JIT compilation finished.", flush=True)
 
     print("\nStarting Canyon Flight...")
     print(
