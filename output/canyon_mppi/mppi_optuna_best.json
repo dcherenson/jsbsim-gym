@@ -16,7 +16,7 @@
     "lambda_": 1.4828940655772733,
     "low_altitude_gain": 5.288428990725201,
     "offcenter_penalty_gain": 4.744473721309144,
-    "progress_gain": 0.0,
+    "progress_gain": 6.351041770657247,
     "speed_gain": 1.719647707011502,
     "terrain_crash_penalty": 556.1111198385959
   },

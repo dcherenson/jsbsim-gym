@@ -671,12 +671,15 @@ def main():
 
     config_base_kwargs = dict(
         horizon=40,
-        num_samples=4000,
+        num_samples=000,
         optimization_steps=3,
         lambda_=optuna_params.get("lambda_", 10.0),
-        progress_gain=optuna_params.get("progress_gain", 10.20),
+        gamma_=optuna_params.get("gamma_", 0.015),
+        progress_gain=0.0*optuna_params.get("progress_gain", 10.20),
         speed_gain=optuna_params.get("speed_gain", 1.00),
         low_altitude_gain=optuna_params.get("low_altitude_gain", 1.40),
+        centerline_gain=optuna_params.get("centerline_gain", 0.60),
+        offcenter_penalty_gain=0.0*optuna_params.get("offcenter_penalty_gain", 0.30),
         target_speed_fps=args.target_speed_kts * 1.68781,
         target_altitude_ft=mppi_target_altitude_ft,
         min_altitude_ft=min_altitude_ft,
@@ -687,10 +690,6 @@ def main():
         early_termination_penalty_gain=0.0,
         max_step_reward_abs=0.0,
     )
-
-    smooth_kwargs = {}
-    if "gamma_" in optuna_params:
-        smooth_kwargs["gamma_"] = optuna_params["gamma_"]
 
     if controller_tag == "simple":
         simple_config = SimpleCanyonControllerConfig(
@@ -712,14 +711,14 @@ def main():
     elif controller_tag == "altitude_hold":
         controller = AltitudeHoldController()
     else:
+        action_noise_std_roll = optuna_params.get("action_noise_std_roll", optuna_params.get("delta_roll_bound", 0.14))
+        action_noise_std_pitch = optuna_params.get("action_noise_std_pitch", optuna_params.get("delta_pitch_bound", 0.22))
+        action_noise_std_yaw = optuna_params.get("action_noise_std_yaw", 0.12)
+        action_noise_std_throttle = optuna_params.get("action_noise_std_throttle", 0.10)
+
         if controller_tag == "smooth_mppi":
-            action_noise_std_roll = optuna_params.get("action_noise_std_roll", optuna_params.get("delta_roll_bound", 0.14))
-            action_noise_std_pitch = optuna_params.get("action_noise_std_pitch", optuna_params.get("delta_pitch_bound", 0.22))
-            action_noise_std_yaw = optuna_params.get("action_noise_std_yaw", 0.12)
-            action_noise_std_throttle = optuna_params.get("action_noise_std_throttle", 0.10)
             config = JaxSmoothMPPIConfig(
                 **config_base_kwargs,
-                **smooth_kwargs,
                 action_noise_std=(
                     action_noise_std_roll,
                     action_noise_std_pitch,
@@ -747,7 +746,12 @@ def main():
         else:
             config = JaxMPPIConfig(
                 **config_base_kwargs,
-                action_noise_std=(0.7, 0.7, 0.7, 0.80),
+                action_noise_std=(
+                    action_noise_std_roll,
+                    action_noise_std_pitch,
+                    action_noise_std_yaw,
+                    action_noise_std_throttle,
+                ),
                 action_diff_weight=optuna_params.get("action_diff_weight", 0.6),
                 action_l2_weight=optuna_params.get("action_l2_weight", 0.1),
             )
