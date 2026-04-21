@@ -8,17 +8,13 @@ import pandas as pd
 
 
 class JAXEmpiricalData(NamedTuple):
-    features_scaled: jax.Array
-    residuals: jax.Array
     feature_mean: jax.Array
     feature_std: jax.Array
-    alpha_values: jax.Array
-    canyon_width_values: jax.Array
+    active_feature_indices: jax.Array
     sorted_features_scaled: jax.Array
     sorted_residuals: jax.Array
     sorted_alpha_values: jax.Array
     sorted_canyon_width_values: jax.Array
-    alpha_feature_index: int
     canyon_width_feature_index: int
     neighbor_count: int
     max_pool_size: int
@@ -34,6 +30,7 @@ def sample_empirical_jax(
 ) -> jax.Array:
     del gate_id
 
+    feature_vector = feature_vector[data.active_feature_indices]
     normalized_q = (feature_vector - data.feature_mean) / data.feature_std
     query_width = feature_vector[data.canyon_width_feature_index]
 
@@ -72,14 +69,12 @@ def sample_empirical_jax(
 
     penalized_dists = jnp.where(active_mask, dists_sq, 1.0e12)
     vals, local_indices = jax.lax.top_k(-penalized_dists, data.neighbor_count)
-    indices = pool_indices_clipped[local_indices]
     distances = -vals
 
     scale = jnp.mean(distances) + 1.0e-6
     logits = -distances / scale
-    weights = jax.nn.softmax(logits)
-    choice_idx = jax.random.choice(rng_key, indices, p=weights)
-    return data.residuals[choice_idx]
+    choice_local = jax.random.categorical(rng_key, logits)
+    return data.sorted_residuals[pool_indices_clipped[local_indices[choice_local]]]
 
 class RuntimeUncertaintySampler:
     def __init__(self, artifact_path='f16_uncertainty_model.pkl'):
@@ -106,6 +101,7 @@ class RuntimeUncertaintySampler:
                 "Regenerate with python -m jsbsim_gym.calibration."
             )
         self.residual_columns = [str(column) for column in artifact_residual_columns]
+        self._active_feature_names = None
 
         missing_columns = [column for column in self.residual_columns if column not in self.dataset.columns]
         if missing_columns:
@@ -114,6 +110,25 @@ class RuntimeUncertaintySampler:
                 f"{missing_columns}. Regenerate with python -m jsbsim_gym.calibration."
             )
 
+    def configure_active_features(
+        self,
+        drop_feature_names=("alpha_dot", "wind_u", "wind_v", "wind_w"),
+        drop_constant_features: bool = True,
+    ):
+        active_feature_names = [name for name in self.aug_features if name not in set(drop_feature_names)]
+        if drop_constant_features:
+            std_by_feature = self.dataset[active_feature_names].std(ddof=0).to_numpy(dtype=np.float32, copy=True)
+            keep_mask = np.abs(std_by_feature) > 1.0e-6
+            active_feature_names = [
+                name for name, keep in zip(active_feature_names, keep_mask.tolist()) if keep
+            ]
+
+        if "canyon_width" not in active_feature_names:
+            active_feature_names.append("canyon_width")
+
+        self._active_feature_names = list(active_feature_names)
+        return list(self._active_feature_names)
+
     def to_jax(
         self,
         neighbor_count: int = 20,
@@ -121,16 +136,32 @@ class RuntimeUncertaintySampler:
         epsilon_w: float = 200.0,
         alpha_threshold: float = 0.8,
     ) -> JAXEmpiricalData:
-        feature_values = self.dataset[self.aug_features].to_numpy(dtype=np.float32, copy=True)
-        features_scaled = self.knn_scaler.transform(feature_values).astype(np.float32, copy=False)
+        if self._active_feature_names is None:
+            self.configure_active_features()
+
+        active_feature_names = list(self._active_feature_names)
+        active_feature_indices = np.asarray(
+            [self.aug_features.index(name) for name in active_feature_names],
+            dtype=np.int32,
+        )
+
+        feature_values = self.dataset[active_feature_names].to_numpy(dtype=np.float32, copy=True)
         residual_values = self.dataset[self.residual_columns].to_numpy(dtype=np.float32, copy=True)
 
-        feature_mean = np.asarray(getattr(self.knn_scaler, "mean_", np.zeros(feature_values.shape[1])), dtype=np.float32)
-        feature_std = np.asarray(getattr(self.knn_scaler, "scale_", np.ones(feature_values.shape[1])), dtype=np.float32)
+        full_feature_mean = np.asarray(
+            getattr(self.knn_scaler, "mean_", np.zeros(len(self.aug_features))),
+            dtype=np.float32,
+        )
+        full_feature_std = np.asarray(
+            getattr(self.knn_scaler, "scale_", np.ones(len(self.aug_features))),
+            dtype=np.float32,
+        )
+        feature_mean = full_feature_mean[active_feature_indices]
+        feature_std = full_feature_std[active_feature_indices]
         feature_std[np.abs(feature_std) < 1.0e-6] = 1.0
+        features_scaled = ((feature_values - feature_mean) / feature_std).astype(np.float32, copy=False)
 
-        alpha_feature_index = int(self.aug_features.index("alpha"))
-        canyon_width_feature_index = int(self.aug_features.index("canyon_width"))
+        canyon_width_feature_index = int(active_feature_names.index("canyon_width"))
         alpha_values = self.dataset["alpha"].to_numpy(dtype=np.float32, copy=True)
         canyon_width_values = self.dataset["canyon_width"].to_numpy(dtype=np.float32, copy=True)
 
@@ -144,17 +175,13 @@ class RuntimeUncertaintySampler:
         max_neighbors = max(1, min(int(neighbor_count), total_samples))
         max_pool = max(max_neighbors, min(int(max_pool_size), total_samples))
         return JAXEmpiricalData(
-            features_scaled=jnp.asarray(features_scaled, dtype=jnp.float32),
-            residuals=jnp.asarray(residual_values, dtype=jnp.float32),
             feature_mean=jnp.asarray(feature_mean, dtype=jnp.float32),
             feature_std=jnp.asarray(feature_std, dtype=jnp.float32),
-            alpha_values=jnp.asarray(alpha_values, dtype=jnp.float32),
-            canyon_width_values=jnp.asarray(canyon_width_values, dtype=jnp.float32),
+            active_feature_indices=jnp.asarray(active_feature_indices, dtype=jnp.int32),
             sorted_features_scaled=jnp.asarray(sorted_features_scaled, dtype=jnp.float32),
             sorted_residuals=jnp.asarray(sorted_residual_values, dtype=jnp.float32),
             sorted_alpha_values=jnp.asarray(sorted_alpha_values, dtype=jnp.float32),
             sorted_canyon_width_values=jnp.asarray(sorted_canyon_width_values, dtype=jnp.float32),
-            alpha_feature_index=alpha_feature_index,
             canyon_width_feature_index=canyon_width_feature_index,
             neighbor_count=max_neighbors,
             max_pool_size=max_pool,

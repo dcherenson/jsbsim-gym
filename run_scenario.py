@@ -312,6 +312,8 @@ def build_jsbsim_gatekeeper(
         "action": jnp.zeros((4,), dtype=jnp.float32),
     }
     uncertainty_sampler = RuntimeUncertaintySampler(str(UNCERTAINTY_ARTIFACT_PATH))
+    active_empirical_features = uncertainty_sampler.configure_active_features()
+    active_empirical_feature_set = set(active_empirical_features)
 
     def _interp(profile, p_n_ft):
         return jnp.interp(p_n_ft, north_samples_jax, profile)
@@ -349,50 +351,47 @@ def build_jsbsim_gatekeeper(
         u = state_flat[3]
         v = state_flat[4]
         w = state_flat[5]
-        p_rate = state_flat[6]
-        q_rate = state_flat[7]
-        r_rate = state_flat[8]
         p_n_ft = state_flat[0]
 
-        v_sq = u * u + v * v + w * w
-        v_total = jnp.sqrt(jnp.maximum(v_sq, 1.0))
-        alpha = jnp.arctan2(w, jnp.maximum(u, 1.0))
-        beta = jnp.arcsin(jnp.clip(v / v_total, -1.0, 1.0))
-        mach = v_total / 1116.45
-        qbar = jnp.maximum(0.5 * 0.0023769 * v_sq, 1.0)
-        canyon_width = _interp(width_samples_jax, p_n_ft)
-        canyon_width_grad = _interp(width_grad_jax, p_n_ft)
+        need_speed_terms = bool(active_empirical_feature_set & {"beta", "mach", "qbar"})
+        need_alpha = "alpha" in active_empirical_feature_set
+        need_width = "canyon_width" in active_empirical_feature_set
+        need_width_grad = "canyon_width_grad" in active_empirical_feature_set
 
-        return jnp.asarray(
-            [
-                alpha,
-                beta,
-                mach,
-                p_rate,
-                q_rate,
-                r_rate,
-                action[3],
-                action[1],
-                action[0],
-                action[2],
-                prev_action[3],
-                prev_action[1],
-                prev_action[0],
-                prev_action[2],
-                qbar,
-                jnp.float32(0.0),
-                jnp.float32(0.0),
-                jnp.float32(0.0),
-                jnp.float32(0.0),
-                canyon_width,
-                canyon_width_grad,
-            ],
-            dtype=jnp.float32,
-        )
+        v_sq = u * u + v * v + w * w if need_speed_terms else None
+        v_total = jnp.sqrt(jnp.maximum(v_sq, 1.0)) if need_speed_terms else None
+
+        feature_map = {
+            "p": state_flat[6],
+            "q": state_flat[7],
+            "r": state_flat[8],
+            "delta_t": action[3],
+            "delta_e": action[1],
+            "delta_a": action[0],
+            "delta_r": action[2],
+            "prev_delta_t": prev_action[3],
+            "prev_delta_e": prev_action[1],
+            "prev_delta_a": prev_action[0],
+            "prev_delta_r": prev_action[2],
+        }
+        if need_alpha:
+            feature_map["alpha"] = jnp.arctan2(w, jnp.maximum(u, 1.0))
+        if "beta" in active_empirical_feature_set:
+            feature_map["beta"] = jnp.arcsin(jnp.clip(v / v_total, -1.0, 1.0))
+        if "mach" in active_empirical_feature_set:
+            feature_map["mach"] = v_total / 1116.45
+        if "qbar" in active_empirical_feature_set:
+            feature_map["qbar"] = jnp.maximum(0.5 * 0.0023769 * v_sq, 1.0)
+        if need_width:
+            feature_map["canyon_width"] = _interp(width_samples_jax, p_n_ft)
+        if need_width_grad:
+            feature_map["canyon_width_grad"] = _interp(width_grad_jax, p_n_ft)
+
+        return jnp.asarray([feature_map[name] for name in active_empirical_features], dtype=jnp.float32)
 
     params = GatekeeperParams(
         M=20,
-        T=50,
+        T=40,
         N=256,
         delta=0.5,
         epsilon=0.10,
@@ -671,32 +670,22 @@ def main():
             print(f"Note: Could not load tuning DB {tuning_db_path} ({e})")
 
     config_base_kwargs = dict(
-        horizon=30,
+        horizon=40,
         num_samples=4000,
         optimization_steps=3,
-        lambda_=optuna_params.get("lambda_", 2.0),
-        progress_gain=optuna_params.get("progress_gain", 0.60),
-        speed_gain=optuna_params.get("speed_gain", 0.20),
-        low_altitude_gain=optuna_params.get("low_altitude_gain", 2.50),
-        centerline_gain=optuna_params.get("centerline_gain", 2.50),
-        offcenter_penalty_gain=optuna_params.get("offcenter_penalty_gain", 4.00),
-        heading_alignment_gain=optuna_params.get("heading_alignment_gain", 0.90),
-        heading_alignment_scale_rad=optuna_params.get("heading_alignment_scale_rad", 0.80),
-        alive_bonus=optuna_params.get("alive_bonus", 0.15),
+        lambda_=optuna_params.get("lambda_", 10.0),
+        progress_gain=optuna_params.get("progress_gain", 10.20),
+        speed_gain=optuna_params.get("speed_gain", 1.00),
+        low_altitude_gain=optuna_params.get("low_altitude_gain", 1.40),
         target_speed_fps=args.target_speed_kts * 1.68781,
         target_altitude_ft=mppi_target_altitude_ft,
         min_altitude_ft=min_altitude_ft,
         max_altitude_ft=max_altitude_ft,
         terrain_collision_height_ft=max(min_altitude_ft + 40.0, 160.0),
         wall_margin_ft=float(env.unwrapped.wall_margin_ft),
-        terrain_crash_penalty=optuna_params.get("terrain_crash_penalty", 45.0),
-        wall_crash_penalty=optuna_params.get("wall_crash_penalty", 32.0),
-        altitude_violation_penalty=8.0,
-        early_termination_penalty_gain=120.0,
-        time_limit_bonus=35.0,
-        max_step_reward_abs=15.0,
-        angular_rate_penalty_gain=optuna_params.get("angular_rate_penalty_gain", 0.0),
-        angular_rate_threshold_deg_s=0.0,
+        terrain_crash_penalty=max(float(optuna_params.get("terrain_crash_penalty", 250.0)), 250.0),
+        early_termination_penalty_gain=0.0,
+        max_step_reward_abs=0.0,
     )
 
     smooth_kwargs = {}
@@ -724,14 +713,31 @@ def main():
         controller = AltitudeHoldController()
     else:
         if controller_tag == "smooth_mppi":
-            drb = optuna_params.get("delta_roll_bound", 0.14)
-            dpb = optuna_params.get("delta_pitch_bound", 0.22)
+            action_noise_std_roll = optuna_params.get("action_noise_std_roll", optuna_params.get("delta_roll_bound", 0.14))
+            action_noise_std_pitch = optuna_params.get("action_noise_std_pitch", optuna_params.get("delta_pitch_bound", 0.22))
+            action_noise_std_yaw = optuna_params.get("action_noise_std_yaw", 0.12)
+            action_noise_std_throttle = optuna_params.get("action_noise_std_throttle", 0.10)
             config = JaxSmoothMPPIConfig(
                 **config_base_kwargs,
                 **smooth_kwargs,
-                action_noise_std=(drb, dpb, 0.12, 0.10),
-                delta_noise_std=(drb * 0.6, dpb * 0.6, 0.08, 0.06),
-                delta_action_bounds=(drb, dpb, 0.14, 0.10),
+                action_noise_std=(
+                    action_noise_std_roll,
+                    action_noise_std_pitch,
+                    action_noise_std_yaw,
+                    action_noise_std_throttle,
+                ),
+                delta_noise_std=(
+                    action_noise_std_roll * 0.6,
+                    action_noise_std_pitch * 0.6,
+                    action_noise_std_yaw * 0.6,
+                    action_noise_std_throttle * 0.6,
+                ),
+                delta_action_bounds=(
+                    action_noise_std_roll,
+                    action_noise_std_pitch,
+                    action_noise_std_yaw,
+                    action_noise_std_throttle,
+                ),
                 noise_smoothing_kernel=(0.10, 0.20, 0.40, 0.20, 0.10),
                 smoothness_penalty_weight=optuna_params.get("smoothness_penalty_weight", 0.35),
                 action_diff_weight=optuna_params.get("action_diff_weight", 0.8),
@@ -741,7 +747,7 @@ def main():
         else:
             config = JaxMPPIConfig(
                 **config_base_kwargs,
-                action_noise_std=(0.14, 0.22, 0.12, 0.10),
+                action_noise_std=(0.7, 0.7, 0.7, 0.80),
                 action_diff_weight=optuna_params.get("action_diff_weight", 0.6),
                 action_l2_weight=optuna_params.get("action_l2_weight", 0.1),
             )
@@ -794,8 +800,16 @@ def main():
             print("Compiling Gatekeeper JAX JIT... (this takes a moment)", flush=True)
             gatekeeper = gatekeeper_bundle["gatekeeper"]
             latest_nominal = gatekeeper_bundle["latest_nominal"]
+            nominal_action = controller.get_action(initial_controller_state)
             latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
-            warmup_nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
+            warm_start_getter = getattr(controller, "get_warm_start_plan", None)
+            if callable(warm_start_getter):
+                warmup_nominal_trajectory = np.asarray(
+                    warm_start_getter(initial_controller_state, horizon=gatekeeper.params.T),
+                    dtype=np.float32,
+                )
+            else:
+                warmup_nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
             _ = gatekeeper.update(
                 controller_state_to_gatekeeper_flat(initial_controller_state),
                 track_bounds=None,
@@ -841,7 +855,14 @@ def main():
                 gatekeeper = gatekeeper_bundle["gatekeeper"]
                 latest_nominal = gatekeeper_bundle["latest_nominal"]
                 latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
-                nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
+                warm_start_getter = getattr(controller, "get_warm_start_plan", None)
+                if callable(warm_start_getter):
+                    nominal_trajectory = np.asarray(
+                        warm_start_getter(controller_state, horizon=gatekeeper.params.T),
+                        dtype=np.float32,
+                    )
+                else:
+                    nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
                 track_bounds = None
                 if gatekeeper.theta_dim > 0:
                     current_width_ft = float(state.get("canyon_width", np.nanmean(width_samples_ft)))

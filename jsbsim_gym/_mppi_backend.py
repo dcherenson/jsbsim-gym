@@ -43,6 +43,7 @@ DEFAULT_MASS_SLUGS = DEFAULT_MASS_LBS / 32.174
 STANDARD_SPEED_OF_SOUND_FPS = 1116.45
 AIR_DENSITY_SLUG_FT3 = 0.0023769
 MIN_QBAR_PSF = 1.0
+SPEED_REWARD_SCALE_FPS = 600.0
 
 @dataclass(frozen=True)
 class JaxMPPIConfig:
@@ -70,7 +71,7 @@ class JaxMPPIConfig:
     max_altitude_ft: float = 3000.0
     terrain_collision_height_ft: float = 60.0
     wall_margin_ft: float = 30.0
-    terrain_crash_penalty: float = 25.0
+    terrain_crash_penalty: float = 250.0
     wall_crash_penalty: float = 18.0
     altitude_violation_penalty: float = 8.0
     early_termination_penalty_gain: float = 80.0
@@ -632,14 +633,15 @@ def single_rollout_cost(
         progress_term = config.progress_gain * (0.8 * progress_local + 0.2 * progress_global)
 
         speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
-        # Penalty for deviation from target speed
-        speed_error_norm = (speed_fps - config.target_speed_fps) / 100.0
-        speed_term = -config.speed_gain * (speed_error_norm * speed_error_norm)
-
-        clearance_error = jnp.abs(h - config.target_altitude_ft)
-        low_altitude_term = config.low_altitude_gain * (
-            1.0 - jnp.clip(clearance_error / jnp.maximum(config.target_altitude_ft, 1.0), 0.0, 2.0)
+        speed_term = config.speed_gain * jnp.clip(
+            speed_fps / SPEED_REWARD_SCALE_FPS,
+            0.0,
+            2.5,
         )
+
+        altitude_range_ft = jnp.maximum(config.max_altitude_ft - config.min_altitude_ft, 1.0)
+        altitude_norm = (h - config.min_altitude_ft) / altitude_range_ft
+        low_altitude_term = config.low_altitude_gain * (1.0 - jnp.clip(altitude_norm, 0.0, 1.0))
 
         lateral_error_ft = p_E - effective_center_east_ft
         lateral_norm = jnp.abs(lateral_error_ft) / usable_half_ft
@@ -666,14 +668,11 @@ def single_rollout_cost(
         )
 
         stage_reward = (
-            config.alive_bonus
-            + progress_term
+            progress_term
             + speed_term
             + low_altitude_term
             + centerline_term
             + offcenter_term
-            + heading_term
-            + angular_rate_term
         )
         stage_reward = jnp.clip(stage_reward, -config.max_step_reward_abs, config.max_step_reward_abs)
 
@@ -686,20 +685,11 @@ def single_rollout_cost(
         early_penalty = config.early_termination_penalty_gain * jnp.clip(remaining_frac, 0.0, 1.0)
         termination_penalty = jnp.where(
             terrain_collision,
-            config.terrain_crash_penalty + early_penalty,
-            jnp.where(
-                out_of_canyon,
-                config.wall_crash_penalty + 0.75 * early_penalty,
-                jnp.where(
-                    out_of_altitude,
-                    config.altitude_violation_penalty + 0.5 * early_penalty,
-                    0.0,
-                ),
-            ),
+            config.terrain_crash_penalty + 2.0 * early_penalty,
+            0.0,
         )
 
-        survived_to_end = jnp.logical_and(step_idx == (config.horizon - 1), jnp.logical_not(terminated_now))
-        stage_reward = stage_reward - termination_penalty + jnp.where(survived_to_end, config.time_limit_bonus, 0.0)
+        stage_reward = stage_reward - termination_penalty
 
         action_cost = (
             config.action_l2_weight * jnp.sum(jnp.square(bounded_action))
@@ -803,13 +793,15 @@ def single_rollout_cost_from_states(
     progress_term = config.progress_gain * (0.8 * progress_local + 0.2 * progress_global)
 
     speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
-    speed_error_norm = (speed_fps - config.target_speed_fps) / 100.0
-    speed_term = -config.speed_gain * (speed_error_norm * speed_error_norm)
-
-    clearance_error = jnp.abs(h - config.target_altitude_ft)
-    low_altitude_term = config.low_altitude_gain * (
-        1.0 - jnp.clip(clearance_error / jnp.maximum(config.target_altitude_ft, 1.0), 0.0, 2.0)
+    speed_term = config.speed_gain * jnp.clip(
+        speed_fps / SPEED_REWARD_SCALE_FPS,
+        0.0,
+        2.5,
     )
+
+    altitude_range_ft = jnp.maximum(config.max_altitude_ft - config.min_altitude_ft, 1.0)
+    altitude_norm = (h - config.min_altitude_ft) / altitude_range_ft
+    low_altitude_term = config.low_altitude_gain * (1.0 - jnp.clip(altitude_norm, 0.0, 1.0))
 
     lateral_error_ft = p_E - effective_center_east_ft
     lateral_norm = jnp.abs(lateral_error_ft) / usable_half_ft
@@ -836,14 +828,11 @@ def single_rollout_cost_from_states(
     )
 
     stage_reward = (
-        config.alive_bonus
-        + progress_term
+        progress_term
         + speed_term
         + low_altitude_term
         + centerline_term
         + offcenter_term
-        + heading_term
-        + angular_rate_term
     )
     stage_reward = jnp.clip(stage_reward, -config.max_step_reward_abs, config.max_step_reward_abs)
 
@@ -857,20 +846,11 @@ def single_rollout_cost_from_states(
     early_penalty = config.early_termination_penalty_gain * jnp.clip(remaining_frac, 0.0, 1.0)
     termination_penalty = jnp.where(
         terrain_collision,
-        config.terrain_crash_penalty + early_penalty,
-        jnp.where(
-            out_of_canyon,
-            config.wall_crash_penalty + 0.75 * early_penalty,
-            jnp.where(
-                out_of_altitude,
-                config.altitude_violation_penalty + 0.5 * early_penalty,
-                0.0,
-            ),
-        ),
+        config.terrain_crash_penalty + 2.0 * early_penalty,
+        0.0,
     )
 
-    survived_to_end = jnp.logical_and(step_idx == (config.horizon - 1), jnp.logical_not(terminated_now))
-    stage_reward = stage_reward - termination_penalty + jnp.where(survived_to_end, config.time_limit_bonus, 0.0)
+    stage_reward = stage_reward - termination_penalty
 
     action_cost = (
         config.action_l2_weight * jnp.sum(jnp.square(bounded_actions), axis=1)

@@ -38,23 +38,15 @@ class JaxMPPIConfig:
     low_altitude_gain: float = 0.45
     centerline_gain: float = 0.60
     offcenter_penalty_gain: float = 0.30
-    heading_alignment_gain: float = 0.45
-    heading_alignment_scale_rad: float = 0.70
-    alive_bonus: float = 0.15
     target_speed_fps: float = 800.0
     target_altitude_ft: float = 250.0
     min_altitude_ft: float = -500.0
     max_altitude_ft: float = 3000.0
     terrain_collision_height_ft: float = 60.0
     wall_margin_ft: float = 30.0
-    terrain_crash_penalty: float = 25.0
-    wall_crash_penalty: float = 18.0
-    altitude_violation_penalty: float = 8.0
+    terrain_crash_penalty: float = 250.0
     early_termination_penalty_gain: float = 80.0
-    time_limit_bonus: float = 25.0
     max_step_reward_abs: float = 15.0
-    angular_rate_penalty_gain: float = 0.45
-    angular_rate_threshold_deg_s: float = 45.0
     action_diff_weight: float = 2.5
     action_l2_weight: float = 0.4
     debug_render_plans: bool = True
@@ -97,23 +89,14 @@ class JaxMPPIController:
             low_altitude_gain=self.config.low_altitude_gain,
             centerline_gain=self.config.centerline_gain,
             offcenter_penalty_gain=self.config.offcenter_penalty_gain,
-            heading_alignment_gain=self.config.heading_alignment_gain,
-            heading_alignment_scale_rad=self.config.heading_alignment_scale_rad,
-            alive_bonus=self.config.alive_bonus,
             target_speed_fps=self.config.target_speed_fps,
-            target_altitude_ft=self.config.target_altitude_ft,
             min_altitude_ft=self.config.min_altitude_ft,
             max_altitude_ft=self.config.max_altitude_ft,
             terrain_collision_height_ft=self.config.terrain_collision_height_ft,
             wall_margin_ft=self.config.wall_margin_ft,
             terrain_crash_penalty=self.config.terrain_crash_penalty,
-            wall_crash_penalty=self.config.wall_crash_penalty,
-            altitude_violation_penalty=self.config.altitude_violation_penalty,
             early_termination_penalty_gain=self.config.early_termination_penalty_gain,
-            time_limit_bonus=self.config.time_limit_bonus,
             max_step_reward_abs=self.config.max_step_reward_abs,
-            angular_rate_penalty_gain=self.config.angular_rate_penalty_gain,
-            angular_rate_threshold_deg_s=self.config.angular_rate_threshold_deg_s,
             action_diff_weight=self.config.action_diff_weight,
             action_l2_weight=self.config.action_l2_weight,
         )
@@ -162,6 +145,18 @@ class JaxMPPIController:
         self._last_action = np.asarray(heuristic_plan[0], dtype=np.float32)
         self._cached_action = np.asarray(heuristic_plan[0], dtype=np.float32)
         self._initialized = True
+
+    def get_warm_start_plan(self, state_dict: dict[str, float], horizon: int | None = None) -> np.ndarray:
+        plan_horizon = int(self.config.horizon if horizon is None else max(1, int(horizon)))
+        return np.asarray(
+            rollout_heuristic_plan(
+                state=state_dict,
+                params=self.params,
+                horizon=plan_horizon,
+                driver=self.driver,
+            ),
+            dtype=np.float32,
+        )
 
     def _current_state(self, state_dict: dict[str, float]):
         return jsbsim_state_to_jax(state_dict)

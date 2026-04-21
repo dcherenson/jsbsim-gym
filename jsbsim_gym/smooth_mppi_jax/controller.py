@@ -66,23 +66,14 @@ class JaxSmoothMPPIController:
             low_altitude_gain=self.config.low_altitude_gain,
             centerline_gain=self.config.centerline_gain,
             offcenter_penalty_gain=self.config.offcenter_penalty_gain,
-            heading_alignment_gain=self.config.heading_alignment_gain,
-            heading_alignment_scale_rad=self.config.heading_alignment_scale_rad,
-            alive_bonus=self.config.alive_bonus,
             target_speed_fps=self.config.target_speed_fps,
-            target_altitude_ft=self.config.target_altitude_ft,
             min_altitude_ft=self.config.min_altitude_ft,
             max_altitude_ft=self.config.max_altitude_ft,
             terrain_collision_height_ft=self.config.terrain_collision_height_ft,
             wall_margin_ft=self.config.wall_margin_ft,
             terrain_crash_penalty=self.config.terrain_crash_penalty,
-            wall_crash_penalty=self.config.wall_crash_penalty,
-            altitude_violation_penalty=self.config.altitude_violation_penalty,
             early_termination_penalty_gain=self.config.early_termination_penalty_gain,
-            time_limit_bonus=self.config.time_limit_bonus,
             max_step_reward_abs=self.config.max_step_reward_abs,
-            angular_rate_penalty_gain=self.config.angular_rate_penalty_gain,
-            angular_rate_threshold_deg_s=self.config.angular_rate_threshold_deg_s,
             action_diff_weight=self.config.action_diff_weight,
             action_l2_weight=self.config.action_l2_weight,
         )
@@ -128,6 +119,18 @@ class JaxSmoothMPPIController:
         self.base_plan = self._action_plan
         self._cached_action = np.asarray(heuristic_plan[0], dtype=np.float32)
         self._initialized = True
+
+    def get_warm_start_plan(self, state_dict: dict[str, float], horizon: int | None = None) -> np.ndarray:
+        plan_horizon = int(self.config.horizon if horizon is None else max(1, int(horizon)))
+        return np.asarray(
+            rollout_heuristic_plan(
+                state=state_dict,
+                params=self.params,
+                horizon=plan_horizon,
+                driver=self.driver,
+            ),
+            dtype=np.float32,
+        )
 
     def _current_state(self, state_dict: dict[str, float]):
         return jsbsim_state_to_jax(state_dict)

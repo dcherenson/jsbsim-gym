@@ -1,33 +1,32 @@
 {
   "base_config": {
-    "mppi_controller": "mppi",
-    "target_clearance_ft": 100.0,
-    "target_speed_fps": 759.5145,
-    "terrain_following": true
+    "entry_speed_fps": 1181.467,
+    "low_flight_reference_ft": 100.0,
+    "mppi_controller": "mppi"
   },
   "best_params": {
-    "action_diff_weight": 1.6355214907805578,
-    "action_l2_weight": 1.2847394370357976,
-    "alive_bonus": 0.5296639108741458,
-    "angular_rate_penalty_gain": 0.10106741122215712,
-    "centerline_gain": 9.750512252118357,
-    "delta_pitch_bound": 0.45050824497180086,
-    "delta_roll_bound": 0.42389178126251814,
-    "gamma_": 0.11493630828772247,
-    "heading_alignment_gain": 8.97878804264908,
-    "heading_alignment_scale_rad": 0.21835426077795983,
-    "lambda_": 0.39172441191543705,
-    "low_altitude_gain": 2.85416709032462,
-    "offcenter_penalty_gain": 2.654861858577494,
-    "progress_gain": 4.390542247888195,
-    "speed_gain": 1.6324626215280869,
-    "target_alt_tune_ft": 524.2564614935301,
-    "terrain_crash_penalty": 36.52469974373458,
-    "wall_crash_penalty": 92.80176538007224
+    "action_diff_weight": 3.0563302095797695,
+    "action_l2_weight": 0.14318942726571898,
+    "action_noise_std_pitch": 0.9480222316630628,
+    "action_noise_std_roll": 0.49203683595073455,
+    "action_noise_std_throttle": 0.7509324398400633,
+    "action_noise_std_yaw": 0.33123293769672757,
+    "centerline_gain": 4.889293267205653,
+    "gamma_": 0.09449402287535166,
+    "lambda_": 1.4828940655772733,
+    "low_altitude_gain": 5.288428990725201,
+    "offcenter_penalty_gain": 4.744473721309144,
+    "progress_gain": 0.0,
+    "speed_gain": 1.719647707011502,
+    "terrain_crash_penalty": 556.1111198385959
   },
-  "best_trial_number": 3,
-  "best_value": -408.2269079504243,
+  "best_trial_number": 1782,
+  "best_value": -515.8170947647093,
   "evaluation": {
+    "altitude_error_scale_ft": 150.0,
+    "centerline_error_scale_ft": 200.0,
+    "entry_speed_kts": 700.0,
+    "low_flight_reference_ft": 100.0,
     "max_steps": 1200,
     "mppi_controller": "mppi",
     "robustness_weight": 0.2,
@@ -36,11 +35,8 @@
       7,
       42
     ],
-    "target_clearance_ft": 100.0,
-    "target_speed_kts": 450.0,
-    "terrain_following": true,
     "wind_sigma": 0.6
   },
-  "storage": "sqlite:////Users/dmrc/git/jsbsim-gym/optuna/mppi_tuning.db",
+  "storage": "sqlite:////home/dasc-lab/Github/jsbsim-gym/optuna/mppi_tuning.db",
   "study_name": "mppi_canyon_tuning"
 }

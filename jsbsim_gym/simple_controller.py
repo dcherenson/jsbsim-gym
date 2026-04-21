@@ -273,6 +273,7 @@ def build_simple_trajectory_policy_jax(
         psi = state_flat[11]
         ny_current = state_flat[12]
         nz_current = state_flat[13]
+        speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
 
         dn_all = north_samples - p_n_ft
         de_all = east_samples - p_e_ft
@@ -342,8 +343,6 @@ def build_simple_trajectory_policy_jax(
             altitude_error_raw_ft,
             altitude_error_offset_ft,
         )
-
-        speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
 
         nz_altitude_bias = jnp.clip(
             -config.nz_altitude_gain * altitude_error_ft

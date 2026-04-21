@@ -426,19 +426,88 @@ def build_rollout_all_empirical(
         nominal_trajectory: Optional[Array] = None,
     ) -> Tuple[Array, Optional[Array], Array]:
         if not compute_grad:
-            # Fast value-only path: avoid materializing sampled_noise_batch.
-            def _single_val(m, key, th):
-                return rollout_single_empirical_value(
-                    x0, m, key, th, uncertainty_data, gate_id,
-                    dynamics_fn, nominal_policy_fn, backup_policy_fn,
-                    safety_fn, pcis_fn, T,
-                    empirical_feature_fn, empirical_sampler_fn,
-                    nominal_trajectory=nominal_trajectory,
+            # Fast value-only path: one batched scan over time for all [M, N]
+            # rollouts, which reduces per-rollout scan overhead.
+            M, N = rng_matrix.shape[:2]
+            switching_offsets_b = switching_offsets[:, None]
+            env_params_static = env_params_batch[..., 0, :] if env_params_batch.ndim == 4 else env_params_batch
+
+            batched_feature_fn = jax.vmap(
+                jax.vmap(empirical_feature_fn, in_axes=(0, 0, 0, None)),
+                in_axes=(0, 0, 0, None),
+            )
+            batched_sampler_fn = jax.vmap(
+                jax.vmap(lambda feat, key: empirical_sampler_fn(feat, gate_id, key, uncertainty_data), in_axes=(0, 0)),
+                in_axes=(0, 0),
+            )
+            batched_dynamics_fn = jax.vmap(
+                jax.vmap(dynamics_fn, in_axes=(0, 0, 0)),
+                in_axes=(0, 0, 0),
+            )
+            batched_safety_fn = jax.vmap(
+                jax.vmap(safety_fn, in_axes=(0, 0)),
+                in_axes=(0, 0),
+            )
+            batched_pcis_fn = jax.vmap(
+                jax.vmap(pcis_fn, in_axes=0),
+                in_axes=0,
+            )
+
+            state0 = jnp.broadcast_to(x0, (M, N, x0.shape[0]))
+            if nominal_trajectory is not None:
+                initial_prev_action = jnp.broadcast_to(
+                    nominal_trajectory[0],
+                    (M, N, nominal_trajectory.shape[-1]),
+                )
+            else:
+                initial_action = nominal_policy_fn(x0)
+                initial_prev_action = jnp.broadcast_to(
+                    initial_action,
+                    (M, N, initial_action.shape[0]),
                 )
 
-            v_val = jax.vmap(_single_val, in_axes=(None, 0, 0))
-            all_MN_val = jax.vmap(v_val, in_axes=(0, 0, 0))
-            H_matrix, X_all = all_MN_val(switching_offsets, rng_matrix, env_params_batch)
+            def step_fn(carry, step_idx):
+                state, prev_action, key_batch = carry
+                use_nominal = step_idx < switching_offsets_b
+
+                if nominal_trajectory is not None:
+                    action_nominal = jnp.broadcast_to(
+                        nominal_trajectory[step_idx],
+                        prev_action.shape,
+                    )
+                else:
+                    action_nominal = jax.vmap(jax.vmap(nominal_policy_fn))(state)
+
+                action_backup = jax.vmap(jax.vmap(backup_policy_fn))(state)
+                action = jnp.where(use_nominal[..., None], action_nominal, action_backup)
+
+                split_keys = jax.vmap(jax.vmap(jax.random.split))(key_batch)
+                next_keys = split_keys[..., 0, :]
+                subkeys = split_keys[..., 1, :]
+
+                feat = batched_feature_fn(state, action, prev_action, step_idx)
+                noise_step = batched_sampler_fn(feat, subkeys)
+                next_state = batched_dynamics_fn(state, action, noise_step)
+                h_val = batched_safety_fn(next_state, env_params_static)
+                xy = state[..., :2]
+                return (next_state, action, next_keys), (h_val, xy)
+
+            final_carry, (h_values, xy_steps) = lax.scan(
+                step_fn,
+                (state0, initial_prev_action, rng_matrix),
+                jnp.arange(T, dtype=jnp.int32),
+                length=T,
+            )
+            final_state = final_carry[0]
+            final_xy = final_state[..., :2]
+            X_all = jnp.concatenate(
+                [jnp.moveaxis(xy_steps, 0, 2), final_xy[:, :, None, :]],
+                axis=2,
+            )
+            H_matrix = jnp.minimum(
+                batched_pcis_fn(final_state),
+                jnp.min(h_values, axis=0),
+            )
             return H_matrix, None, X_all
 
         # Gradient-enabled path: we need realized sampled_noise_batch.
@@ -950,7 +1019,8 @@ class DRSGatekeeper:
         track_bounds: Optional["TrackBoundsEstimate"] = None,
         x_flat: Optional[Array] = None,
         nominal_trajectory: Optional[Array] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        sample_process_noise: bool = True,
+    ) -> Tuple[Optional[np.ndarray], np.ndarray]:
         """
         Draw process-noise and environment-parameter batches for one algorithm
         iteration.
@@ -1005,16 +1075,18 @@ class DRSGatekeeper:
             except TypeError:
                 return self.noise_sampler(M, N, T, self._rng)
 
-        # --- Process noise (w^f): i.i.d. Gaussian placeholder ---
-        # TODO: Replace with EmpiricalUncertaintyModel.sample() calls.
-        self._key, subkey_f = jax.random.split(self._key)
-        noise_batch = np.asarray(
-            jax.random.normal(
-                subkey_f,
-                shape=(M, N, T, self.noise_dim),
-                dtype=jnp.float32,
+        noise_batch = None
+        if sample_process_noise:
+            # --- Process noise (w^f): i.i.d. Gaussian placeholder ---
+            # TODO: Replace with EmpiricalUncertaintyModel.sample() calls.
+            self._key, subkey_f = jax.random.split(self._key)
+            noise_batch = np.asarray(
+                jax.random.normal(
+                    subkey_f,
+                    shape=(M, N, T, self.noise_dim),
+                    dtype=jnp.float32,
+                )
             )
-        )
 
         # --- Environment parameters (w^θ): sample from TrackBoundsEstimate ---
         env_batch = bounds.sample_env_params(M, N, T, self._rng)  # [M,N,T,2]
@@ -1081,6 +1153,7 @@ class DRSGatekeeper:
             self._track_bounds,
             x_flat=x_flat,
             nominal_trajectory=nominal_trajectory,
+            sample_process_noise=self.uncertainty_data is None,
         )
         t_sample = (time.perf_counter() - t_sample_start) if self.params.debug_timing else 0.0
 
