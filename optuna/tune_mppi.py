@@ -120,9 +120,9 @@ def _base_mppi_config(args):
 
 
 def _make_env(args, target_speed_kts):
-    target_altitude_ft = 250.0
-    entry_altitude_ft = 250.0
-    max_altitude_ft = 3000.0
+    target_altitude_ft = 500.0
+    entry_altitude_ft = 500.0
+    max_altitude_ft = 1500.0
 
     return gym.make(
         "JSBSimCanyon-v0",
@@ -227,8 +227,8 @@ def _run_episode(args, mppi_params, seed):
             centerline_heading_samples_rad = np.zeros(256, dtype=np.float32)
 
         common_config_kwargs = dict(
-            horizon=30,
-            num_samples=1000,
+            horizon=40,
+            num_samples=4000,
             optimization_steps=3,
             lambda_=mppi_params["lambda_"],
             gamma_=mppi_params["gamma_"],

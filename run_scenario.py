@@ -1,5 +1,6 @@
 import argparse
 import csv
+from dataclasses import fields, is_dataclass
 import json
 import os
 import time
@@ -60,6 +61,17 @@ def _wrap_heading_deg(angle_rad):
 
 def _wrap_angle_rad(angle_rad):
     return float(np.arctan2(np.sin(float(angle_rad)), np.cos(float(angle_rad))))
+
+
+def _print_mppi_config(controller_tag, config):
+    if not is_dataclass(config):
+        print(f"{controller_tag.upper()} config: {config}")
+        return
+
+    print(f"\n{controller_tag.upper()} effective configuration:")
+    for field in fields(config):
+        value = getattr(config, field.name)
+        print(f"  {field.name}: {value}")
 
 
 def save_simple_controller_diagnostics(output_dir, file_stem, rows, termination_reason):
@@ -453,9 +465,9 @@ def build_jsbsim_gatekeeper(
 
     params = GatekeeperParams(
         M=20,
-        T=40,
-        N=256,
-        delta=0.5,
+        T=100,
+        N=250,
+        delta=0.1,
         epsilon=0.10,
         beta=0.00,
         alpha=0.0,
@@ -578,7 +590,7 @@ def parse_args():
     parser.add_argument(
         "--initial-altitude-ft",
         type=float,
-        default=1000.0,
+        default=500.0,
         help="Initial entry altitude in feet, relative to the DEM start elevation in canyon DEM mode.",
     )
     parser.add_argument(
@@ -683,7 +695,7 @@ def main():
         entry_pitch_deg=args.initial_pitch_deg,
         entry_alpha_deg=args.initial_alpha_deg,
         entry_beta_deg=args.initial_beta_deg,
-        wind_sigma=1.0,
+        wind_sigma=0.0,
         canyon_span_ft=9000.0,
         canyon_segment_spacing_ft=12.0,
     )
@@ -725,7 +737,7 @@ def main():
         max_altitude_ft=max_altitude_ft,
         wall_margin_ft=float(env.unwrapped.wall_margin_ft),
         horizon=40,
-        num_samples=4000,
+        num_samples=10000,
         optimization_steps=3,
         terrain_collision_height_ft=max(min_altitude_ft + 40.0, 160.0),
     )
@@ -759,6 +771,7 @@ def main():
             canyon_center_east_samples_ft=center_east_samples_ft,
             canyon_centerline_heading_rad_samples=centerline_heading_samples_rad,
         )
+        _print_mppi_config(controller_tag, config)
 
     recorder = CanyonRunRecorder(
         env=env,
@@ -802,14 +815,7 @@ def main():
             latest_nominal = gatekeeper_bundle["latest_nominal"]
             nominal_action = controller.get_action(initial_controller_state)
             latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
-            warm_start_getter = getattr(controller, "get_warm_start_plan", None)
-            if callable(warm_start_getter):
-                warmup_nominal_trajectory = np.asarray(
-                    warm_start_getter(initial_controller_state, horizon=gatekeeper.params.T),
-                    dtype=np.float32,
-                )
-            else:
-                warmup_nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
+            warmup_nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
             _ = gatekeeper.update(
                 controller_state_to_gatekeeper_flat(initial_controller_state),
                 track_bounds=None,
@@ -833,7 +839,7 @@ def main():
     )
     print(
         f"{'Step':<5} | {'p_N_rel':<8} | {'LatErr':<8} | {'h_rel':<8} | "
-        f"{'V':<6} | {'W_c':<6} | {'Plan(ms)':<8} |  {'gk(ms)':<8}"
+        f"{'V':<6} | {'W_c':<6} | {'Plan(ms)':<8} | {'gk(ms)':<8} | {'gk_ws':<7} | {'gk_upd':<7} | {'gk_bak':<7}"
     )
     print("-" * 110)
 
@@ -851,18 +857,19 @@ def main():
 
             t0 = time.time()
             gatekeeper_state = None
+            gk_nom_prep = 0.0
+            gk_update_ms = 0.0
+            gk_backup_ms = 0.0
             if gatekeeper_bundle is not None:
                 gatekeeper = gatekeeper_bundle["gatekeeper"]
                 latest_nominal = gatekeeper_bundle["latest_nominal"]
                 latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
-                warm_start_getter = getattr(controller, "get_warm_start_plan", None)
-                if callable(warm_start_getter):
-                    nominal_trajectory = np.asarray(
-                        warm_start_getter(controller_state, horizon=gatekeeper.params.T),
-                        dtype=np.float32,
-                    )
-                else:
-                    nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
+
+                t_ws = time.time()
+                nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
+                nominal_trajectory_jax = jnp.asarray(nominal_trajectory, dtype=jnp.float32)
+                gk_nom_prep = (time.time() - t_ws) * 1000.0
+
                 track_bounds = None
                 if gatekeeper.theta_dim > 0:
                     current_width_ft = float(state.get("canyon_width", np.nanmean(width_samples_ft)))
@@ -870,13 +877,18 @@ def main():
                         half_width=max(0.5 * current_width_ft, 1.0),
                         relative_uncertainty=0.0,
                     )
+
+                t_update = time.time()
                 gatekeeper_state = gatekeeper.update(
                     controller_state_to_gatekeeper_flat(controller_state),
                     track_bounds=track_bounds,
-                    nominal_trajectory=jnp.asarray(nominal_trajectory, dtype=jnp.float32),
+                    nominal_trajectory=nominal_trajectory_jax,
                     max_steps=int(args.max_steps),
                 )
+                gk_update_ms = (time.time() - t_update) * 1000.0
+
                 if gatekeeper_state.using_backup:
+                    t_backup = time.time()
                     backup_controller = gatekeeper_bundle["backup_controller"]
                     if not gatekeeper_prev_using_backup:
                         backup_controller.reset(
@@ -885,6 +897,7 @@ def main():
                             reference_trajectory=gatekeeper_bundle["backup_reference"],
                         )
                     action = backup_controller.get_action(controller_state)
+                    gk_backup_ms = (time.time() - t_backup) * 1000.0
                 gatekeeper.tick()
                 gatekeeper_prev_using_backup = bool(gatekeeper_state.using_backup)
             gk_ms = (time.time() - t0) * 1000.0
@@ -1069,6 +1082,9 @@ def main():
                         "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
                         "plan_ms": float(plan_ms),
                         "gatekeeper_ms": float(gk_ms),
+                        "gatekeeper_nominal_prep_ms": float(gk_nom_prep),
+                        "gatekeeper_update_ms": float(gk_update_ms),
+                        "gatekeeper_backup_ms": float(gk_backup_ms),
                     }
                 )
             if controller_tag == "simple":
@@ -1097,7 +1113,8 @@ def main():
                 rel_alt_ft = float(controller_state["h"])
                 print(
                     f"{step:<5} | {rel_north_ft:<8.0f} | {lateral_ft:<8.0f} | {rel_alt_ft:<8.0f} | "
-                    f"{speed_fps:<6.0f} | {width_ft:<6.0f} | {plan_ms:<8.1f} | {gk_ms:<8.1f}"
+                    f"{speed_fps:<6.0f} | {width_ft:<6.0f} | {plan_ms:<8.1f} | {gk_ms:<8.1f} | "
+                    f"{gk_nom_prep:<7.1f} | {gk_update_ms:<7.1f} | {gk_backup_ms:<7.1f}"
                 )
 
             if terminated or truncated:

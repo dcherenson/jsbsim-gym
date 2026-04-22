@@ -77,7 +77,7 @@ def build_mppi_base_config_kwargs(
         lambda_=optuna_params.get("lambda_", 10.0),
         gamma_=optuna_params.get("gamma_", 0.015),
         progress_gain=optuna_params.get("progress_gain", 10.20),
-        speed_gain=optuna_params.get("speed_gain", 1.00),
+        speed_gain=0.0*optuna_params.get("speed_gain", 1.00),
         low_altitude_gain=optuna_params.get("low_altitude_gain", 1.40),
         centerline_gain=optuna_params.get("centerline_gain", 0.60),
         offcenter_penalty_gain=optuna_params.get("offcenter_penalty_gain", 0.30),
@@ -88,7 +88,7 @@ def build_mppi_base_config_kwargs(
         terrain_collision_height_ft=float(terrain_collision_height_ft),
         wall_margin_ft=float(wall_margin_ft),
         terrain_crash_penalty=max(float(optuna_params.get("terrain_crash_penalty", 250.0)), 250.0),
-        early_termination_penalty_gain=120.0,
+        early_termination_penalty_gain=0.0,
         max_step_reward_abs=15.0,
     )
 

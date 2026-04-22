@@ -806,33 +806,14 @@ def single_rollout_cost_from_states(
     lateral_error_ft = p_E - effective_center_east_ft
     lateral_norm = jnp.abs(lateral_error_ft) / usable_half_ft
     centerline_term = config.centerline_gain * (1.0 - jnp.clip(lateral_norm, 0.0, 1.0))
-    offcenter_term = -config.offcenter_penalty_gain * jnp.clip(lateral_norm - 0.5, 0.0, 2.0)
-
-    heading_error_rad = wrap_angle_rad(psi - effective_heading_rad)
-    heading_term = config.heading_alignment_gain * (
-        1.0
-        - jnp.clip(
-            jnp.abs(heading_error_rad) / jnp.maximum(config.heading_alignment_scale_rad, 1e-3),
-            0.0,
-            2.0,
-        )
-    )
-
-    rate_mag_rad_s = jnp.sqrt(jnp.maximum(p_rate * p_rate + q_rate * q_rate + r_rate * r_rate, 0.0))
-    rate_mag_deg_s = jnp.degrees(rate_mag_rad_s)
-    angular_rate_term = -config.angular_rate_penalty_gain * jnp.clip(
-        (rate_mag_deg_s - config.angular_rate_threshold_deg_s)
-        / jnp.maximum(config.angular_rate_threshold_deg_s, 1.0),
-        0.0,
-        3.0,
-    )
+    # offcenter_term = -config.offcenter_penalty_gain * jnp.clip(lateral_norm - 0.5, 0.0, 2.0)
 
     stage_reward = (
         progress_term
         + speed_term
         + low_altitude_term
         + centerline_term
-        + offcenter_term
+        # + offcenter_term
     )
     stage_reward = jnp.clip(stage_reward, -config.max_step_reward_abs, config.max_step_reward_abs)
 

@@ -5,18 +5,18 @@
     "mppi_controller": "mppi"
   },
   "best_params": {
-    "action_diff_weight": 3.0563302095797695,
+    "action_diff_weight": 0.0563302095797695,
     "action_l2_weight": 0.14318942726571898,
     "action_noise_std_pitch": 0.9480222316630628,
     "action_noise_std_roll": 0.49203683595073455,
     "action_noise_std_throttle": 0.7509324398400633,
     "action_noise_std_yaw": 0.33123293769672757,
-    "centerline_gain": 4.889293267205653,
+    "centerline_gain": 40.889293267205653,
     "gamma_": 0.09449402287535166,
-    "lambda_": 1.4828940655772733,
+    "lambda_": 0.4828940655772733,
     "low_altitude_gain": 5.288428990725201,
     "offcenter_penalty_gain": 4.744473721309144,
-    "progress_gain": 0.0,
+    "progress_gain": 7.0,
     "speed_gain": 1.719647707011502,
     "terrain_crash_penalty": 556.1111198385959
   },
