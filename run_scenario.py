@@ -1,5 +1,6 @@
 import argparse
 import csv
+import json
 import os
 import time
 from pathlib import Path
@@ -14,9 +15,14 @@ from drs_gatekeeper import DRSGatekeeper, GatekeeperParams, TrackBoundsEstimate
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
 from jsbsim_gym.canyon_env import OBS_ALTITUDE_ERROR_FT, OBS_PHI, OBS_P, OBS_Q, OBS_R, OBS_THETA
 from jsbsim_gym.canyon_artifacts import CanyonRunRecorder
-from jsbsim_gym.mppi_jax import JaxMPPIConfig, JaxMPPIController
+from jsbsim_gym.mppi_run_config import (
+    KTS_TO_FPS,
+    MPPI_TUNING_JSON_PATH,
+    build_mppi_base_config_kwargs,
+    build_mppi_controller,
+    load_mppi_optuna_params,
+)
 from jsbsim_gym.mppi_support import f16_kinematics_step_with_load_factors, load_nominal_weights
-from jsbsim_gym.smooth_mppi_jax import JaxSmoothMPPIConfig, JaxSmoothMPPIController
 from jsbsim_gym.simple_controller import (
     SimpleCanyonController,
     SimpleCanyonControllerConfig,
@@ -34,7 +40,6 @@ REPO_ROOT = Path(__file__).resolve().parent
 DEM_PATH = REPO_ROOT / DEM_PATH
 OUTPUT_ROOT = REPO_ROOT / "output"
 UNCERTAINTY_ARTIFACT_PATH = REPO_ROOT / "f16_uncertainty_model.pkl"
-KTS_TO_FPS = 1.68781
 M_TO_FT = 3.28084
 G_FTPS2 = 32.174
 
@@ -108,6 +113,63 @@ def save_simple_controller_diagnostics(output_dir, file_stem, rows, termination_
     axs[3].legend(loc="best")
     axs[3].grid(True, alpha=0.25)
 
+    fig.savefig(plot_path, dpi=150)
+    plt.close(fig)
+    return csv_path, plot_path
+
+
+def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reason, controller_label):
+    if not rows:
+        return None, None
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / f"{file_stem}_tracking_diagnostics.csv"
+    plot_path = output_dir / f"{file_stem}_tracking_diagnostics.png"
+
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
+    along_track_progress_ft = np.asarray([row["along_track_progress_ft"] for row in rows], dtype=np.float64)
+    cross_track_error_ft = np.asarray([row["cross_track_error_ft"] for row in rows], dtype=np.float64)
+    altitude_error_ft = np.asarray([row["altitude_error_ft"] for row in rows], dtype=np.float64)
+    speed_error_kts = np.asarray([row["speed_error_kts"] for row in rows], dtype=np.float64)
+
+    fig, axs = plt.subplots(2, 2, figsize=(12, 8), sharex=True, constrained_layout=True)
+    axs = axs.reshape(-1)
+
+    axs[0].plot(time_s, along_track_progress_ft, color="tab:blue", linewidth=2.0)
+    axs[0].set_ylabel("Feet")
+    axs[0].set_title("Along-Track Progress")
+    axs[0].grid(True, alpha=0.25)
+
+    axs[1].plot(time_s, cross_track_error_ft, color="tab:red", linewidth=2.0)
+    axs[1].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
+    axs[1].set_ylabel("Feet")
+    axs[1].set_title("Cross-Track Error")
+    axs[1].grid(True, alpha=0.25)
+
+    axs[2].plot(time_s, altitude_error_ft, color="tab:purple", linewidth=2.0)
+    axs[2].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
+    axs[2].set_xlabel("Time (s)")
+    axs[2].set_ylabel("Feet")
+    axs[2].set_title("Altitude Error")
+    axs[2].grid(True, alpha=0.25)
+
+    axs[3].plot(time_s, speed_error_kts, color="tab:orange", linewidth=2.0)
+    axs[3].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
+    axs[3].set_xlabel("Time (s)")
+    axs[3].set_ylabel("Knots")
+    axs[3].set_title("Speed Error")
+    axs[3].grid(True, alpha=0.25)
+
+    fig.suptitle(
+        f"{controller_label.upper()} Tracking Diagnostics | end={termination_reason} | steps={len(rows)}",
+        fontsize=13,
+    )
     fig.savefig(plot_path, dpi=150)
     plt.close(fig)
     return csv_path, plot_path
@@ -567,10 +629,6 @@ def parse_args():
     )
     return parser.parse_args()
 
-
-
-
-
 def main():
     args = parse_args()
     if args.gatekeeper and args.controller not in {"mppi", "smooth_mppi"}:
@@ -648,49 +706,29 @@ def main():
 
     mppi_target_altitude_ft = target_altitude_ft
 
-    optuna_params = {}
-    tuning_db_candidates = [
-        REPO_ROOT / "optuna" / "mppi_tuning.db",
-        REPO_ROOT / "mppi_tuning.db",
-    ]
-    tuning_db_path = next((candidate for candidate in tuning_db_candidates if candidate.exists()), None)
-    if tuning_db_path is not None:
-        try:
-            import optuna
-            storage = f"sqlite:///{tuning_db_path.as_posix()}"
-            study = optuna.load_study(study_name=args.study_name, storage=storage)
-            optuna_params = study.best_params
-            print(
-                f"Auto-loaded tuned parameters from {args.study_name} "
-                f"at {tuning_db_path}! (Reward: {study.best_value:.2f})"
-            )
-            if "target_alt_tune_ft" in optuna_params:
-                mppi_target_altitude_ft = float(optuna_params["target_alt_tune_ft"])
-        except Exception as e:
-            print(f"Note: Could not load tuning DB {tuning_db_path} ({e})")
+    optuna_params, optuna_source = load_mppi_optuna_params(study_name=args.study_name)
+    if optuna_params:
+        print(
+            f"Auto-loaded MPPI tuned parameters from {optuna_source} "
+            f"({len(optuna_params)} parameters)."
+        )
+        if "target_alt_tune_ft" in optuna_params:
+            mppi_target_altitude_ft = float(optuna_params["target_alt_tune_ft"])
+    else:
+        print("Note: No tuned MPPI parameters found; using built-in defaults.")
 
-    config_base_kwargs = dict(
-        horizon=40,
-        num_samples=4000,
-        optimization_steps=3,
-        lambda_=optuna_params.get("lambda_", 10.0),
-        progress_gain=optuna_params.get("progress_gain", 10.20),
-        speed_gain=optuna_params.get("speed_gain", 1.00),
-        low_altitude_gain=optuna_params.get("low_altitude_gain", 1.40),
-        target_speed_fps=args.target_speed_kts * 1.68781,
+    config_base_kwargs = build_mppi_base_config_kwargs(
+        optuna_params=optuna_params,
+        target_speed_fps=args.target_speed_kts * KTS_TO_FPS,
         target_altitude_ft=mppi_target_altitude_ft,
         min_altitude_ft=min_altitude_ft,
         max_altitude_ft=max_altitude_ft,
-        terrain_collision_height_ft=max(min_altitude_ft + 40.0, 160.0),
         wall_margin_ft=float(env.unwrapped.wall_margin_ft),
-        terrain_crash_penalty=max(float(optuna_params.get("terrain_crash_penalty", 250.0)), 250.0),
-        early_termination_penalty_gain=0.0,
-        max_step_reward_abs=0.0,
+        horizon=40,
+        num_samples=4000,
+        optimization_steps=3,
+        terrain_collision_height_ft=max(min_altitude_ft + 40.0, 160.0),
     )
-
-    smooth_kwargs = {}
-    if "gamma_" in optuna_params:
-        smooth_kwargs["gamma_"] = optuna_params["gamma_"]
 
     if controller_tag == "simple":
         simple_config = SimpleCanyonControllerConfig(
@@ -712,49 +750,10 @@ def main():
     elif controller_tag == "altitude_hold":
         controller = AltitudeHoldController()
     else:
-        if controller_tag == "smooth_mppi":
-            action_noise_std_roll = optuna_params.get("action_noise_std_roll", optuna_params.get("delta_roll_bound", 0.14))
-            action_noise_std_pitch = optuna_params.get("action_noise_std_pitch", optuna_params.get("delta_pitch_bound", 0.22))
-            action_noise_std_yaw = optuna_params.get("action_noise_std_yaw", 0.12)
-            action_noise_std_throttle = optuna_params.get("action_noise_std_throttle", 0.10)
-            config = JaxSmoothMPPIConfig(
-                **config_base_kwargs,
-                **smooth_kwargs,
-                action_noise_std=(
-                    action_noise_std_roll,
-                    action_noise_std_pitch,
-                    action_noise_std_yaw,
-                    action_noise_std_throttle,
-                ),
-                delta_noise_std=(
-                    action_noise_std_roll * 0.6,
-                    action_noise_std_pitch * 0.6,
-                    action_noise_std_yaw * 0.6,
-                    action_noise_std_throttle * 0.6,
-                ),
-                delta_action_bounds=(
-                    action_noise_std_roll,
-                    action_noise_std_pitch,
-                    action_noise_std_yaw,
-                    action_noise_std_throttle,
-                ),
-                noise_smoothing_kernel=(0.10, 0.20, 0.40, 0.20, 0.10),
-                smoothness_penalty_weight=optuna_params.get("smoothness_penalty_weight", 0.35),
-                action_diff_weight=optuna_params.get("action_diff_weight", 0.8),
-                action_l2_weight=optuna_params.get("action_l2_weight", 0.1),
-            )
-            controller_cls = JaxSmoothMPPIController
-        else:
-            config = JaxMPPIConfig(
-                **config_base_kwargs,
-                action_noise_std=(0.7, 0.7, 0.7, 0.80),
-                action_diff_weight=optuna_params.get("action_diff_weight", 0.6),
-                action_l2_weight=optuna_params.get("action_l2_weight", 0.1),
-            )
-            controller_cls = JaxMPPIController
-
-        controller = controller_cls(
-            config=config,
+        controller, config = build_mppi_controller(
+            controller_tag,
+            optuna_params=optuna_params,
+            config_base_kwargs=config_base_kwargs,
             canyon_north_samples_ft=north_samples_ft,
             canyon_width_samples_ft=width_samples_ft,
             canyon_center_east_samples_ft=center_east_samples_ft,
@@ -775,6 +774,7 @@ def main():
     recorder.set_centerline_profile(north_samples_ft, center_east_samples_ft)
     termination_reason = "running"
     simple_diagnostic_rows = []
+    mppi_tracking_rows = []
 
     gatekeeper_bundle = None
     gatekeeper_prev_using_backup = False
@@ -890,29 +890,38 @@ def main():
             gk_ms = (time.time() - t0) * 1000.0
 
             planner_debug = None
+            raw_debug = None
+            debug_getter = getattr(controller, "get_render_debug", None)
+            if callable(debug_getter):
+                raw_debug = debug_getter()
             if gatekeeper_state is None:
-                debug_getter = getattr(controller, "get_render_debug", None)
-                if callable(debug_getter):
-                    raw_debug = debug_getter()
-                    if raw_debug is not None:
-                        planner_debug = {
-                            "candidate_xy": np.asarray(
-                                raw_debug.get("candidate_xy", np.zeros((0, 0, 2), dtype=np.float32)),
-                                dtype=np.float32,
-                            ).copy(),
-                            "candidate_h_ft": np.asarray(
-                                raw_debug.get("candidate_h_ft", np.zeros((0, 0), dtype=np.float32)),
-                                dtype=np.float32,
-                            ).copy(),
-                            "final_xy": np.asarray(
-                                raw_debug.get("final_xy", np.zeros((0, 2), dtype=np.float32)),
-                                dtype=np.float32,
-                            ).copy(),
-                            "final_h_ft": np.asarray(
-                                raw_debug.get("final_h_ft", np.zeros((0,), dtype=np.float32)),
-                                dtype=np.float32,
-                            ).copy(),
-                        }
+                if raw_debug is not None:
+                    planner_debug = {
+                        "candidate_xy": np.asarray(
+                            raw_debug.get("candidate_xy", np.zeros((0, 0, 2), dtype=np.float32)),
+                            dtype=np.float32,
+                        ).copy(),
+                        "candidate_h_ft": np.asarray(
+                            raw_debug.get("candidate_h_ft", np.zeros((0, 0), dtype=np.float32)),
+                            dtype=np.float32,
+                        ).copy(),
+                        "final_xy": np.asarray(
+                            raw_debug.get("final_xy", np.zeros((0, 2), dtype=np.float32)),
+                            dtype=np.float32,
+                        ).copy(),
+                        "final_h_ft": np.asarray(
+                            raw_debug.get("final_h_ft", np.zeros((0,), dtype=np.float32)),
+                            dtype=np.float32,
+                        ).copy(),
+                        "warm_start_xy": np.asarray(
+                            raw_debug.get("warm_start_xy", np.zeros((0, 2), dtype=np.float32)),
+                            dtype=np.float32,
+                        ).copy(),
+                        "warm_start_h_ft": np.asarray(
+                            raw_debug.get("warm_start_h_ft", np.zeros((0,), dtype=np.float32)),
+                            dtype=np.float32,
+                        ).copy(),
+                    }
             else:
                 predicted_xy = np.asarray(
                     gatekeeper_state.predicted_trajectories
@@ -944,6 +953,15 @@ def main():
                     "q_bar_star": float(gatekeeper_state.q_bar_star),
                     "epsilon": float(gatekeeper_bundle["gatekeeper"].params.epsilon),
                 }
+                if raw_debug is not None:
+                    planner_debug["warm_start_xy"] = np.asarray(
+                        raw_debug.get("warm_start_xy", np.zeros((0, 2), dtype=np.float32)),
+                        dtype=np.float32,
+                    ).copy()
+                    planner_debug["warm_start_h_ft"] = np.asarray(
+                        raw_debug.get("warm_start_h_ft", np.zeros((0,), dtype=np.float32)),
+                        dtype=np.float32,
+                    ).copy()
 
             if controller_tag == "simple" and gatekeeper_state is None:
                 guidance = dict(getattr(controller, "last_guidance", {}) or {})
@@ -1024,17 +1042,37 @@ def main():
             obs, _, terminated, truncated, info = env.step(action)
             termination_reason = info.get("termination_reason", "running")
             state = env.unwrapped.get_full_state_dict()
+            post_controller_state = to_mppi_state(env, state, altitude_ref_ft)
             recorder.record_step(planner_debug=planner_debug, hud_debug=hud_debug)
 
             width_ft = float(info.get("canyon_width_ft", np.nan))
             lateral_ft = float(info.get("lateral_error_ft", np.nan))
+            speed_fps = float(
+                np.sqrt(
+                    float(state["u"]) ** 2 + float(state["v"]) ** 2 + float(state["w"]) ** 2
+                )
+            )
+            speed_error_kts = float((speed_fps - float(config_base_kwargs["target_speed_fps"])) / KTS_TO_FPS)
+            if controller_tag in {"mppi", "smooth_mppi"}:
+                mppi_tracking_rows.append(
+                    {
+                        "step": int(step),
+                        "time_s": float(step / 30.0),
+                        "along_track_progress_ft": float(post_controller_state["p_N"] - start_path_north_ft),
+                        "cross_track_error_ft": float(info.get("lateral_error_ft", np.nan)),
+                        "altitude_error_ft": float(info.get("altitude_error_ft", np.nan)),
+                        "speed_error_kts": float(speed_error_kts),
+                        "speed_fps": float(speed_fps),
+                        "target_speed_kts": float(config_base_kwargs["target_speed_fps"] / KTS_TO_FPS),
+                        "terrain_clearance_ft": float(info.get("terrain_clearance_ft", np.nan)),
+                        "termination_reason": str(termination_reason),
+                        "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
+                        "plan_ms": float(plan_ms),
+                        "gatekeeper_ms": float(gk_ms),
+                    }
+                )
             if controller_tag == "simple":
                 simple_guidance = dict(getattr(controller, "last_guidance", {}) or {})
-                speed_fps = float(
-                    np.sqrt(
-                        float(state["u"]) ** 2 + float(state["v"]) ** 2 + float(state["w"]) ** 2
-                    )
-                )
                 simple_diagnostic_rows.append(
                     {
                         "step": int(step),
@@ -1055,11 +1093,6 @@ def main():
                 )
 
             if step % 5 == 0:
-                speed_fps = float(
-                    np.sqrt(
-                        float(state["u"]) ** 2 + float(state["v"]) ** 2 + float(state["w"]) ** 2
-                    )
-                )
                 rel_north_ft = float(controller_state["p_N"] - start_path_north_ft)
                 rel_alt_ft = float(controller_state["h"])
                 print(
@@ -1090,6 +1123,17 @@ def main():
         if diag_csv_path is not None and diag_plot_path is not None:
             print(f"Saved diagnostics CSV: {diag_csv_path}")
             print(f"Saved diagnostics plot: {diag_plot_path}")
+    if controller_tag in {"mppi", "smooth_mppi"}:
+        diag_csv_path, diag_plot_path = save_mppi_tracking_diagnostics(
+            output_dir=output_dir,
+            file_stem=f"canyon_{controller_tag}_{mode_tag}",
+            rows=mppi_tracking_rows,
+            termination_reason=termination_reason,
+            controller_label=controller_tag,
+        )
+        if diag_csv_path is not None and diag_plot_path is not None:
+            print(f"Saved tracking diagnostics CSV: {diag_csv_path}")
+            print(f"Saved tracking diagnostics plot: {diag_plot_path}")
 
 
 if __name__ == "__main__":
