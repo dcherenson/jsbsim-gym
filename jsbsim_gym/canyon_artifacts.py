@@ -173,6 +173,8 @@ class CanyonRunRecorder:
 
         self._writer = iio.get_writer(self.video_path, format="ffmpeg", fps=int(fps))
         self._closed = False
+        self._capture_enabled = True
+        self._capture_failure_reason = None
 
         self._sim = self.env.unwrapped.simulation
         self._rows = int(self.env.unwrapped.canyon.rows)
@@ -188,6 +190,23 @@ class CanyonRunRecorder:
         self._centerline_east_ft = None
         self._centerline_overlay_x = None
         self._centerline_overlay_y = None
+
+    def _capture_frame_or_disable(self):
+        if not self._capture_enabled:
+            return None
+
+        try:
+            frame = capture_frame(self.env)
+        except Exception as exc:
+            self._capture_enabled = False
+            self._capture_failure_reason = f"{type(exc).__name__}: {exc}"
+            print(
+                "Recorder warning: frame capture disabled for this run "
+                f"because rendering failed ({self._capture_failure_reason})."
+            )
+            return None
+
+        return frame
 
     def set_centerline_profile(self, north_samples_ft, center_east_samples_ft):
         """Provide the MPPI canyon centerline so it can be drawn in video frames
@@ -632,13 +651,13 @@ class CanyonRunRecorder:
         self.track_lon.append(lon_deg)
 
     def initialize(self):
-        frame = capture_frame(self.env)
+        frame = self._capture_frame_or_disable()
         if frame is not None:
             self._writer.append_data(frame)
         self._sample_position()
 
     def record_step(self, planner_debug=None, hud_debug=None):
-        frame = capture_frame(self.env)
+        frame = self._capture_frame_or_disable()
         if frame is not None:
             frame = self._overlay_centerline(frame)
             frame = self._overlay_planner_debug(frame, planner_debug)

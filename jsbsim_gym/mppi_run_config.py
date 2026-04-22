@@ -70,26 +70,38 @@ def build_mppi_base_config_kwargs(
     if terrain_collision_height_ft is None:
         terrain_collision_height_ft = max(min_altitude_ft + 40.0, 160.0)
 
+    # Manual runtime baseline (intentionally not driven by Optuna trial output).
     return dict(
         horizon=int(horizon),
         num_samples=int(num_samples),
         optimization_steps=int(optimization_steps),
-        lambda_=optuna_params.get("lambda_", 10.0),
-        gamma_=optuna_params.get("gamma_", 0.015),
-        progress_gain=optuna_params.get("progress_gain", 10.20),
-        speed_gain=0.0*optuna_params.get("speed_gain", 1.00),
-        low_altitude_gain=optuna_params.get("low_altitude_gain", 1.40),
-        centerline_gain=optuna_params.get("centerline_gain", 0.60),
-        offcenter_penalty_gain=optuna_params.get("offcenter_penalty_gain", 0.30),
+        lambda_=1.15,
+        gamma_=0.06,
+        progress_gain=0.70,
+        speed_gain=0.0,
+        low_altitude_gain=0.0,
+        altitude_target_gain=0.0,
+        altitude_target_scale_ft=450.0,
+        centerline_gain=7.0,
+        offcenter_penalty_gain=12.0,
+        heading_alignment_gain=4.0,
+        heading_alignment_scale_rad=0.45,
+        alive_bonus=0.05,
         target_speed_fps=float(target_speed_fps),
         target_altitude_ft=float(target_altitude_ft),
         min_altitude_ft=min_altitude_ft,
         max_altitude_ft=max_altitude_ft,
         terrain_collision_height_ft=float(terrain_collision_height_ft),
         wall_margin_ft=float(wall_margin_ft),
-        terrain_crash_penalty=max(float(optuna_params.get("terrain_crash_penalty", 250.0)), 250.0),
-        early_termination_penalty_gain=0.0,
+        terrain_crash_penalty=700.0,
+        wall_crash_penalty=55.0,
+        altitude_violation_penalty=14.0,
+        early_termination_penalty_gain=130.0,
         max_step_reward_abs=15.0,
+        angular_rate_penalty_gain=1.2,
+        angular_rate_threshold_deg_s=40.0,
+        bank_angle_penalty_gain=2.0,
+        bank_angle_threshold_deg=80.0,
     )
 
 
@@ -136,10 +148,10 @@ def build_mppi_controller(
         )
         controller_cls = JaxSmoothMPPIController
     elif controller_tag == "mppi":
-        action_noise_std_roll = optuna_params.get("action_noise_std_roll", 0.7)
-        action_noise_std_pitch = optuna_params.get("action_noise_std_pitch", 0.7)
-        action_noise_std_yaw = optuna_params.get("action_noise_std_yaw", 0.7)
-        action_noise_std_throttle = optuna_params.get("action_noise_std_throttle", 0.80)
+        action_noise_std_roll = 0.12
+        action_noise_std_pitch = 0.14
+        action_noise_std_yaw = 0.06
+        action_noise_std_throttle = 0.04
         config = JaxMPPIConfig(
             **config_base_kwargs,
             action_noise_std=(
@@ -148,8 +160,8 @@ def build_mppi_controller(
                 action_noise_std_yaw,
                 action_noise_std_throttle,
             ),
-            action_diff_weight=optuna_params.get("action_diff_weight", 0.6),
-            action_l2_weight=optuna_params.get("action_l2_weight", 0.1),
+            action_diff_weight=1.0,
+            action_l2_weight=0.10,
         )
         controller_cls = JaxMPPIController
     else:

@@ -60,6 +60,8 @@ class JaxMPPIConfig:
     progress_gain: float = 0.70
     speed_gain: float = 0.35
     low_altitude_gain: float = 0.45
+    altitude_target_gain: float = 0.0
+    altitude_target_scale_ft: float = 250.0
     centerline_gain: float = 0.60
     offcenter_penalty_gain: float = 0.30
     heading_alignment_gain: float = 0.45
@@ -79,6 +81,8 @@ class JaxMPPIConfig:
     max_step_reward_abs: float = 15.0
     angular_rate_penalty_gain: float = 0.45
     angular_rate_threshold_deg_s: float = 45.0
+    bank_angle_penalty_gain: float = 0.0
+    bank_angle_threshold_deg: float = 85.0
     action_diff_weight: float = 2.5
     action_l2_weight: float = 0.4
     debug_render_plans: bool = True
@@ -90,13 +94,15 @@ class JaxMPPIConfig:
         # We include floats and tuples of floats (which JAX will flatten further)
         children = (
             self.lambda_, self.gamma_, self.progress_gain, self.speed_gain,
-            self.low_altitude_gain, self.centerline_gain, self.offcenter_penalty_gain,
+            self.low_altitude_gain, self.altitude_target_gain, self.altitude_target_scale_ft,
+            self.centerline_gain, self.offcenter_penalty_gain,
             self.heading_alignment_gain, self.heading_alignment_scale_rad,
             self.alive_bonus, self.target_speed_fps, self.target_altitude_ft, self.min_altitude_ft,
             self.max_altitude_ft, self.terrain_collision_height_ft, self.wall_margin_ft,
             self.terrain_crash_penalty, self.wall_crash_penalty, self.altitude_violation_penalty,
             self.early_termination_penalty_gain, self.time_limit_bonus, self.max_step_reward_abs,
             self.angular_rate_penalty_gain, self.angular_rate_threshold_deg_s,
+            self.bank_angle_penalty_gain, self.bank_angle_threshold_deg,
             self.action_diff_weight, self.action_l2_weight,
             # Tuples are children too
             self.action_noise_std, self.action_low, self.action_high,
@@ -114,13 +120,15 @@ class JaxMPPIConfig:
         # Reconstruct the dataclass. Order must match tree_flatten.
         (
             lambda_, gamma_, progress_gain, speed_gain,
-            low_altitude_gain, centerline_gain, offcenter_penalty_gain,
+            low_altitude_gain, altitude_target_gain, altitude_target_scale_ft,
+            centerline_gain, offcenter_penalty_gain,
             heading_alignment_gain, heading_alignment_scale_rad,
             alive_bonus, target_speed_fps, target_altitude_ft, min_altitude_ft,
             max_altitude_ft, terrain_collision_height_ft, wall_margin_ft,
             terrain_crash_penalty, wall_crash_penalty, altitude_violation_penalty,
             early_termination_penalty_gain, time_limit_bonus, max_step_reward_abs,
             angular_rate_penalty_gain, angular_rate_threshold_deg_s,
+            bank_angle_penalty_gain, bank_angle_threshold_deg,
             action_diff_weight, action_l2_weight,
             action_noise_std, action_low, action_high,
         ) = children
@@ -135,6 +143,7 @@ class JaxMPPIConfig:
             replan_interval=replan_interval, lambda_=lambda_, gamma_=gamma_,
             action_noise_std=action_noise_std, action_low=action_low, action_high=action_high,
             progress_gain=progress_gain, speed_gain=speed_gain, low_altitude_gain=low_altitude_gain,
+            altitude_target_gain=altitude_target_gain, altitude_target_scale_ft=altitude_target_scale_ft,
             centerline_gain=centerline_gain, offcenter_penalty_gain=offcenter_penalty_gain,
             heading_alignment_gain=heading_alignment_gain, heading_alignment_scale_rad=heading_alignment_scale_rad,
             alive_bonus=alive_bonus, target_speed_fps=target_speed_fps, target_altitude_ft=target_altitude_ft,
@@ -146,6 +155,8 @@ class JaxMPPIConfig:
             time_limit_bonus=time_limit_bonus, max_step_reward_abs=max_step_reward_abs,
             angular_rate_penalty_gain=angular_rate_penalty_gain,
             angular_rate_threshold_deg_s=angular_rate_threshold_deg_s,
+            bank_angle_penalty_gain=bank_angle_penalty_gain,
+            bank_angle_threshold_deg=bank_angle_threshold_deg,
             action_diff_weight=action_diff_weight, action_l2_weight=action_l2_weight,
             debug_render_plans=debug_render_plans, debug_num_trajectories=debug_num_trajectories,
             seed=seed
@@ -595,6 +606,7 @@ def single_rollout_cost(
         p_rate = next_state_raw[6]
         q_rate = next_state_raw[7]
         r_rate = next_state_raw[8]
+        phi = next_state_raw[9]
         psi = next_state_raw[11]
 
         width_ft = canyon_width_from_profile(p_N, canyon_north_samples_ft, canyon_width_samples_ft)
@@ -639,9 +651,15 @@ def single_rollout_cost(
             2.5,
         )
 
-        altitude_range_ft = jnp.maximum(config.max_altitude_ft - config.min_altitude_ft, 1.0)
-        altitude_norm = (h - config.min_altitude_ft) / altitude_range_ft
-        low_altitude_term = config.low_altitude_gain * (1.0 - jnp.clip(altitude_norm, 0.0, 1.0))
+        altitude_target_error_ft = jnp.abs(h - config.target_altitude_ft)
+        altitude_target_term = config.altitude_target_gain * (
+            1.0
+            - jnp.clip(
+                altitude_target_error_ft / jnp.maximum(config.altitude_target_scale_ft, 1.0),
+                0.0,
+                2.0,
+            )
+        )
 
         lateral_error_ft = p_E - effective_center_east_ft
         lateral_norm = jnp.abs(lateral_error_ft) / usable_half_ft
@@ -666,27 +684,54 @@ def single_rollout_cost(
             0.0,
             3.0,
         )
+        bank_angle_deg = jnp.abs(jnp.degrees(phi))
+        bank_angle_term = -config.bank_angle_penalty_gain * jnp.clip(
+            (bank_angle_deg - config.bank_angle_threshold_deg)
+            / jnp.maximum(config.bank_angle_threshold_deg, 1.0),
+            0.0,
+            3.0,
+        )
 
         stage_reward = (
             progress_term
             + speed_term
-            + low_altitude_term
+            + altitude_target_term
             + centerline_term
             + offcenter_term
+            + heading_term
+            + angular_rate_term
+            + bank_angle_term
+            + config.alive_bonus
         )
         stage_reward = jnp.clip(stage_reward, -config.max_step_reward_abs, config.max_step_reward_abs)
 
         terrain_collision = h <= config.terrain_collision_height_ft
         out_of_canyon = jnp.abs(lateral_error_ft) > usable_half_ft
         out_of_altitude = (h < config.min_altitude_ft) | (h > config.max_altitude_ft)
-        terminated_now = terrain_collision | out_of_canyon | out_of_altitude
+        terminated_now = terrain_collision | out_of_altitude
 
         remaining_frac = (horizon_f - (step_idx.astype(jnp.float32) + 1.0)) / horizon_f
         early_penalty = config.early_termination_penalty_gain * jnp.clip(remaining_frac, 0.0, 1.0)
-        termination_penalty = jnp.where(
-            terrain_collision,
-            config.terrain_crash_penalty + 2.0 * early_penalty,
-            0.0,
+        wall_violation = jnp.clip(lateral_norm - 1.0, 0.0, 3.0)
+        wall_penalty = config.wall_crash_penalty * wall_violation
+        altitude_violation_ft = (
+            jnp.maximum(config.min_altitude_ft - h, 0.0)
+            + jnp.maximum(h - config.max_altitude_ft, 0.0)
+        )
+        altitude_penalty = config.altitude_violation_penalty * jnp.clip(altitude_violation_ft / 250.0, 0.0, 3.0)
+        termination_penalty = (
+            wall_penalty
+            + altitude_penalty
+            + jnp.where(
+                terrain_collision,
+                config.terrain_crash_penalty + 2.0 * early_penalty,
+                0.0,
+            )
+            + jnp.where(
+                out_of_altitude,
+                config.altitude_violation_penalty + early_penalty,
+                0.0,
+            )
         )
 
         stage_reward = stage_reward - termination_penalty
@@ -755,6 +800,7 @@ def single_rollout_cost_from_states(
     p_rate = state_seq[:, 6]
     q_rate = state_seq[:, 7]
     r_rate = state_seq[:, 8]
+    phi = state_seq[:, 9]
     psi = state_seq[:, 11]
 
     prev_p_N = prev_states[:, 0]
@@ -799,36 +845,87 @@ def single_rollout_cost_from_states(
         2.5,
     )
 
-    altitude_range_ft = jnp.maximum(config.max_altitude_ft - config.min_altitude_ft, 1.0)
-    altitude_norm = (h - config.min_altitude_ft) / altitude_range_ft
-    low_altitude_term = config.low_altitude_gain * (1.0 - jnp.clip(altitude_norm, 0.0, 1.0))
+    altitude_target_error_ft = jnp.abs(h - config.target_altitude_ft)
+    altitude_target_term = config.altitude_target_gain * (
+        1.0
+        - jnp.clip(
+            altitude_target_error_ft / jnp.maximum(config.altitude_target_scale_ft, 1.0),
+            0.0,
+            2.0,
+        )
+    )
 
     lateral_error_ft = p_E - effective_center_east_ft
     lateral_norm = jnp.abs(lateral_error_ft) / usable_half_ft
     centerline_term = config.centerline_gain * (1.0 - jnp.clip(lateral_norm, 0.0, 1.0))
-    # offcenter_term = -config.offcenter_penalty_gain * jnp.clip(lateral_norm - 0.5, 0.0, 2.0)
+    offcenter_term = -config.offcenter_penalty_gain * jnp.clip(lateral_norm - 0.5, 0.0, 2.0)
+    heading_error_rad = wrap_angle_rad(psi - effective_heading_rad)
+    heading_term = config.heading_alignment_gain * (
+        1.0
+        - jnp.clip(
+            jnp.abs(heading_error_rad) / jnp.maximum(config.heading_alignment_scale_rad, 1e-3),
+            0.0,
+            2.0,
+        )
+    )
+
+    rate_mag_rad_s = jnp.sqrt(jnp.maximum(p_rate * p_rate + q_rate * q_rate + r_rate * r_rate, 0.0))
+    rate_mag_deg_s = jnp.degrees(rate_mag_rad_s)
+    angular_rate_term = -config.angular_rate_penalty_gain * jnp.clip(
+        (rate_mag_deg_s - config.angular_rate_threshold_deg_s)
+        / jnp.maximum(config.angular_rate_threshold_deg_s, 1.0),
+        0.0,
+        3.0,
+    )
+    bank_angle_deg = jnp.abs(jnp.degrees(phi))
+    bank_angle_term = -config.bank_angle_penalty_gain * jnp.clip(
+        (bank_angle_deg - config.bank_angle_threshold_deg)
+        / jnp.maximum(config.bank_angle_threshold_deg, 1.0),
+        0.0,
+        3.0,
+    )
 
     stage_reward = (
         progress_term
         + speed_term
-        + low_altitude_term
+        + altitude_target_term
         + centerline_term
-        # + offcenter_term
+        + offcenter_term
+        + heading_term
+        + angular_rate_term
+        + bank_angle_term
+        + config.alive_bonus
     )
     stage_reward = jnp.clip(stage_reward, -config.max_step_reward_abs, config.max_step_reward_abs)
 
     terrain_collision = h <= config.terrain_collision_height_ft
     out_of_canyon = jnp.abs(lateral_error_ft) > usable_half_ft
     out_of_altitude = (h < config.min_altitude_ft) | (h > config.max_altitude_ft)
-    terminated_now = terrain_collision | out_of_canyon | out_of_altitude
+    terminated_now = terrain_collision | out_of_altitude
 
     step_idx = jnp.arange(config.horizon, dtype=jnp.int32)
     remaining_frac = (horizon_f - (step_idx.astype(jnp.float32) + 1.0)) / horizon_f
     early_penalty = config.early_termination_penalty_gain * jnp.clip(remaining_frac, 0.0, 1.0)
-    termination_penalty = jnp.where(
-        terrain_collision,
-        config.terrain_crash_penalty + 2.0 * early_penalty,
-        0.0,
+    wall_violation = jnp.clip(lateral_norm - 1.0, 0.0, 3.0)
+    wall_penalty = config.wall_crash_penalty * wall_violation
+    altitude_violation_ft = (
+        jnp.maximum(config.min_altitude_ft - h, 0.0)
+        + jnp.maximum(h - config.max_altitude_ft, 0.0)
+    )
+    altitude_penalty = config.altitude_violation_penalty * jnp.clip(altitude_violation_ft / 250.0, 0.0, 3.0)
+    termination_penalty = (
+        wall_penalty
+        + altitude_penalty
+        + jnp.where(
+            terrain_collision,
+            config.terrain_crash_penalty + 2.0 * early_penalty,
+            0.0,
+        )
+        + jnp.where(
+            out_of_altitude,
+            config.altitude_violation_penalty + early_penalty,
+            0.0,
+        )
     )
 
     stage_reward = stage_reward - termination_penalty
