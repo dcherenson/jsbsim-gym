@@ -144,4 +144,5 @@ models/
 *.png
 *.DS_Store
 uncertain_racecar_gym/
+*.svg
 *.csv
