@@ -74,8 +74,9 @@ def save_canyon_overlay_plot(
     termination_reason,
     output_path,
     title_prefix,
-    centerline_x=None,
-    centerline_y=None,
+    reference_x=None,
+    reference_y=None,
+    reference_label="Reference trajectory",
 ):
     dem = iio_v3.imread(Path(dem_path)).astype(np.float32)
     if dem.ndim == 3:
@@ -90,13 +91,13 @@ def save_canyon_overlay_plot(
     im = ax.imshow(dem, cmap="terrain", origin="upper", vmin=vmin, vmax=vmax)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Elevation (m)")
 
-    # Draw centerline if available
-    if centerline_x is not None and centerline_y is not None:
-        cl_x = np.asarray(centerline_x)
-        cl_y = np.asarray(centerline_y)
+    # Draw reference trajectory if available
+    if reference_x is not None and reference_y is not None:
+        cl_x = np.asarray(reference_x)
+        cl_y = np.asarray(reference_y)
         valid = np.isfinite(cl_x) & np.isfinite(cl_y)
         ax.plot(cl_x[valid], cl_y[valid], color="cyan", linewidth=1.5,
-                linestyle="--", alpha=0.85, label="MPPI centerline")
+                linestyle="--", alpha=0.85, label=str(reference_label))
 
     ax.plot(track_x, track_y, color="red", linewidth=2.0, label="Aircraft trajectory")
     ax.scatter([track_x[0]], [track_y[0]], c="lime", s=70, edgecolors="black", linewidths=0.5, label="Trajectory start")
@@ -185,11 +186,13 @@ class CanyonRunRecorder:
         self.track_lat = []
         self.track_lon = []
 
-        # Centerline profile (set via set_centerline_profile)
-        self._centerline_north_ft = None
-        self._centerline_east_ft = None
-        self._centerline_overlay_x = None
-        self._centerline_overlay_y = None
+        # Reference profile shown in overlays/video.
+        self._reference_north_ft = None
+        self._reference_east_ft = None
+        self._reference_altitude_ft = None
+        self._reference_overlay_x = None
+        self._reference_overlay_y = None
+        self._reference_label = "Reference trajectory"
 
     def _capture_frame_or_disable(self):
         if not self._capture_enabled:
@@ -208,21 +211,40 @@ class CanyonRunRecorder:
 
         return frame
 
-    def set_centerline_profile(self, north_samples_ft, center_east_samples_ft):
-        """Provide the MPPI canyon centerline so it can be drawn in video frames
-        and the trajectory overlay."""
-        self._centerline_north_ft = np.asarray(north_samples_ft, dtype=np.float32).copy()
-        self._centerline_east_ft = np.asarray(center_east_samples_ft, dtype=np.float32).copy()
+    def set_reference_profile(
+        self,
+        north_samples_ft,
+        east_samples_ft,
+        altitude_samples_ft=None,
+        label="Reference trajectory",
+    ):
+        """Provide a reference trajectory to draw in video frames and overlays."""
+        self._reference_north_ft = np.asarray(north_samples_ft, dtype=np.float32).copy()
+        self._reference_east_ft = np.asarray(east_samples_ft, dtype=np.float32).copy()
+        if altitude_samples_ft is None:
+            self._reference_altitude_ft = None
+        else:
+            self._reference_altitude_ft = np.asarray(altitude_samples_ft, dtype=np.float32).copy()
+        self._reference_label = str(label)
 
         # Precompute pixel coords for the 2D overlay plot
         canyon = getattr(self.env.unwrapped, "canyon", None)
         if canyon is not None:
             cx, cy = _centerline_pixel_coords(
                 canyon, self.dem_bbox, self._rows, self._cols,
-                self._centerline_north_ft, self._centerline_east_ft,
+                self._reference_north_ft, self._reference_east_ft,
             )
-            self._centerline_overlay_x = cx
-            self._centerline_overlay_y = cy
+            self._reference_overlay_x = cx
+            self._reference_overlay_y = cy
+
+    def set_centerline_profile(self, north_samples_ft, center_east_samples_ft):
+        """Backward-compatible wrapper for legacy centerline overlays."""
+        self.set_reference_profile(
+            north_samples_ft=north_samples_ft,
+            east_samples_ft=center_east_samples_ft,
+            altitude_samples_ft=None,
+            label="MPPI centerline",
+        )
 
     @staticmethod
     def _project_world_points(world_points, view, projection, width, height):
@@ -396,9 +418,9 @@ class CanyonRunRecorder:
 
         return np.asarray(image.convert("RGB"), dtype=np.uint8)
 
-    def _overlay_centerline(self, frame):
-        """Draw the MPPI centerline as a cyan ribbon in the 3D video frame."""
-        if self._centerline_north_ft is None or self._centerline_east_ft is None:
+    def _overlay_reference_trajectory(self, frame):
+        """Draw the configured reference trajectory as a cyan ribbon in the 3D video frame."""
+        if self._reference_north_ft is None or self._reference_east_ft is None:
             return frame
 
         viewer = getattr(self.env.unwrapped, "viewer", None)
@@ -421,13 +443,15 @@ class CanyonRunRecorder:
             except Exception:
                 pass
 
-        n_arr = self._centerline_north_ft
-        e_arr = self._centerline_east_ft
+        n_arr = self._reference_north_ft
+        e_arr = self._reference_east_ft
+        h_arr = self._reference_altitude_ft
 
         # Subsample for performance — draw every Nth point
         stride = max(1, len(n_arr) // 600)
         n_sub = n_arr[::stride]
         e_sub = e_arr[::stride]
+        h_sub = None if h_arr is None else h_arr[::stride]
 
         # Only draw within a window around the aircraft
         if cur_local_north is not None:
@@ -435,13 +459,17 @@ class CanyonRunRecorder:
             mask = np.abs(n_sub - cur_local_north) < window_ft
             n_sub = n_sub[mask]
             e_sub = e_sub[mask]
+            if h_sub is not None:
+                h_sub = h_sub[mask]
 
         if len(n_sub) < 2:
             return frame
 
-        # Altitude: place centerline at the DEM surface elevation (start_elev_ft relative)
-        # Use a constant altitude reference near ground for visibility
-        h_ref = np.full_like(n_sub, 0.0)  # h=0 means DEM start elevation
+        # If no altitude profile is provided, keep the legacy near-ground ribbon behavior.
+        if h_sub is None:
+            h_ref = np.full_like(n_sub, 0.0)
+        else:
+            h_ref = np.asarray(h_sub, dtype=np.float32)
         xy = np.column_stack([n_sub, e_sub])
         world_points = self._trajectory_world_points(xy, h_ref)
         
@@ -457,7 +485,6 @@ class CanyonRunRecorder:
 
         image = Image.fromarray(frame.astype(np.uint8), mode="RGB").convert("RGBA")
         draw = ImageDraw.Draw(image, "RGBA")
-        # Draw a bright cyan centerline
         draw.line([tuple(p) for p in pixels_valid], fill=(0, 255, 255, 200), width=3)
         return np.asarray(image.convert("RGB"), dtype=np.uint8)
 
@@ -659,7 +686,7 @@ class CanyonRunRecorder:
     def record_step(self, planner_debug=None, hud_debug=None):
         frame = self._capture_frame_or_disable()
         if frame is not None:
-            frame = self._overlay_centerline(frame)
+            frame = self._overlay_reference_trajectory(frame)
             frame = self._overlay_planner_debug(frame, planner_debug)
             frame = self._overlay_flight_hud(frame, hud_debug)
             self._writer.append_data(frame)
@@ -683,8 +710,9 @@ class CanyonRunRecorder:
                 termination_reason=termination_reason,
                 output_path=self.overlay_path,
                 title_prefix=self.title_prefix,
-                centerline_x=self._centerline_overlay_x,
-                centerline_y=self._centerline_overlay_y,
+                reference_x=self._reference_overlay_x,
+                reference_y=self._reference_overlay_y,
+                reference_label=self._reference_label,
             )
             save_trajectory_csv(
                 output_path=self.trajectory_csv_path,

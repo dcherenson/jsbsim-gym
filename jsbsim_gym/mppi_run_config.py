@@ -88,6 +88,8 @@ def build_mppi_base_config_kwargs(
         heading_alignment_scale_rad=0.45,
         alive_bonus=0.05,
         target_speed_fps=float(target_speed_fps),
+        speed_target_gain=0.0,
+        speed_target_scale_fps=140.0,
         target_altitude_ft=float(target_altitude_ft),
         min_altitude_ft=min_altitude_ft,
         max_altitude_ft=max_altitude_ft,
@@ -115,6 +117,8 @@ def build_mppi_controller(
     canyon_width_samples_ft=None,
     canyon_center_east_samples_ft=None,
     canyon_centerline_heading_rad_samples=None,
+    reference_altitude_samples_ft=None,
+    reference_speed_samples_fps=None,
 ):
     if controller_tag == "smooth_mppi":
         action_noise_std_roll = optuna_params.get("action_noise_std_roll", optuna_params.get("delta_roll_bound", 0.14))
@@ -173,5 +177,7 @@ def build_mppi_controller(
         canyon_width_samples_ft=canyon_width_samples_ft,
         canyon_center_east_samples_ft=canyon_center_east_samples_ft,
         canyon_centerline_heading_rad_samples=canyon_centerline_heading_rad_samples,
+        reference_altitude_samples_ft=reference_altitude_samples_ft,
+        reference_speed_samples_fps=reference_speed_samples_fps,
     )
     return controller, config

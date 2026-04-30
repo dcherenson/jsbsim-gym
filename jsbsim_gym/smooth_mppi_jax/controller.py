@@ -39,6 +39,8 @@ class JaxSmoothMPPIController:
         canyon_width_samples_ft=None,
         canyon_center_east_samples_ft=None,
         canyon_centerline_heading_rad_samples=None,
+        reference_altitude_samples_ft=None,
+        reference_speed_samples_fps=None,
     ):
         self.config = config or JaxSmoothMPPIConfig()
         self.name = "smooth_mppi_jax"
@@ -47,6 +49,8 @@ class JaxSmoothMPPIController:
             canyon_width_samples_ft=canyon_width_samples_ft,
             canyon_center_east_samples_ft=canyon_center_east_samples_ft,
             canyon_centerline_heading_rad_samples=canyon_centerline_heading_rad_samples,
+            reference_altitude_samples_ft=reference_altitude_samples_ft,
+            reference_speed_samples_fps=reference_speed_samples_fps,
         )
         self.driver = build_heuristic_driver(
             target_speed_fps=self.config.target_speed_fps,
@@ -72,6 +76,8 @@ class JaxSmoothMPPIController:
             heading_alignment_scale_rad=self.config.heading_alignment_scale_rad,
             alive_bonus=self.config.alive_bonus,
             target_speed_fps=self.config.target_speed_fps,
+            speed_target_gain=self.config.speed_target_gain,
+            speed_target_scale_fps=self.config.speed_target_scale_fps,
             target_altitude_ft=self.config.target_altitude_ft,
             min_altitude_ft=self.config.min_altitude_ft,
             max_altitude_ft=self.config.max_altitude_ft,

@@ -40,6 +40,8 @@ class MPPICostConfig:
     heading_alignment_scale_rad: float = 0.70
     alive_bonus: float = 0.15
     target_speed_fps: float = 800.0
+    speed_target_gain: float = 0.0
+    speed_target_scale_fps: float = 120.0
     target_altitude_ft: float = 250.0
     min_altitude_ft: float = -500.0
     max_altitude_ft: float = 3000.0
@@ -68,10 +70,14 @@ class NominalJSBSimParams:
     canyon_width_samples_ft: Array
     canyon_center_east_samples_ft: Array
     canyon_heading_samples_rad: Array
+    reference_altitude_samples_ft: Array | None
+    reference_speed_samples_fps: Array | None
     canyon_north_np: np.ndarray
     canyon_width_np: np.ndarray
     canyon_center_east_np: np.ndarray
     canyon_heading_rad_np: np.ndarray
+    reference_altitude_ft_np: np.ndarray | None
+    reference_speed_fps_np: np.ndarray | None
 
 
 @dataclass(slots=True)
@@ -88,6 +94,8 @@ class F16CenterlineDriver:
 
     def act(self, state: dict[str, float], params: NominalJSBSimParams) -> np.ndarray:
         controller = self._ensure_tail_controller(state, params)
+        controller.target_altitude_ft = self._target_altitude_ft_for_p_n(float(state["p_N"]), params)
+        controller.target_speed_fps = self._target_speed_fps_for_p_n(float(state["p_N"]), params)
         action = controller.get_action(self._state_for_controller(state))
         return np.asarray(
             clip_action(action, low=self.action_low, high=self.action_high),
@@ -109,14 +117,18 @@ class F16CenterlineDriver:
             jsbsim_state_to_jax_with_load_factors(self._state_for_controller(state)),
             dtype=np.float32,
         )
+        initial_p_n_ft = float(simulated[0])
         controller.reset(
             state_dict=_flat_state_to_dict(simulated),
-            target_altitude_ft=self.target_altitude_ft,
+            target_altitude_ft=self._target_altitude_ft_for_p_n(initial_p_n_ft, params),
         )
+        controller.target_speed_fps = self._target_speed_fps_for_p_n(initial_p_n_ft, params)
 
         actions: list[np.ndarray] = []
         for _ in range(int(horizon)):
             sim_dict = _flat_state_to_dict(simulated)
+            controller.target_altitude_ft = self._target_altitude_ft_for_p_n(float(simulated[0]), params)
+            controller.target_speed_fps = self._target_speed_fps_for_p_n(float(simulated[0]), params)
             action = np.asarray(controller.get_action(sim_dict), dtype=np.float32)
             action = np.asarray(
                 clip_action(action, low=self.action_low, high=self.action_high),
@@ -134,6 +146,16 @@ class F16CenterlineDriver:
                 dtype=np.float32,
             )
         return np.asarray(actions, dtype=np.float32)
+
+    def _target_altitude_ft_for_p_n(self, p_n_ft: float, params: NominalJSBSimParams) -> float:
+        if params.reference_altitude_ft_np is None:
+            return float(self.target_altitude_ft)
+        return float(np.interp(float(p_n_ft), params.canyon_north_np, params.reference_altitude_ft_np))
+
+    def _target_speed_fps_for_p_n(self, p_n_ft: float, params: NominalJSBSimParams) -> float:
+        if params.reference_speed_fps_np is None:
+            return float(self.target_speed_fps)
+        return float(np.interp(float(p_n_ft), params.canyon_north_np, params.reference_speed_fps_np))
 
     def _state_for_controller(self, state: dict[str, float]) -> dict[str, float]:
         state_dict = dict(state)
@@ -291,6 +313,8 @@ def build_nominal_params(
     canyon_width_samples_ft: np.ndarray | None = None,
     canyon_center_east_samples_ft: np.ndarray | None = None,
     canyon_centerline_heading_rad_samples: np.ndarray | None = None,
+    reference_altitude_samples_ft: np.ndarray | None = None,
+    reference_speed_samples_fps: np.ndarray | None = None,
 ) -> NominalJSBSimParams:
     W, B, poly_powers = load_nominal_weights()
 
@@ -332,6 +356,22 @@ def build_nominal_params(
         center_east_np = center_east_np[order]
         heading_np = heading_np[order]
 
+    reference_altitude_np = None
+    if reference_altitude_samples_ft is not None:
+        reference_altitude_np = np.asarray(reference_altitude_samples_ft, dtype=np.float32).reshape(-1)
+        if reference_altitude_np.size != north_np.size:
+            raise ValueError("reference_altitude_samples_ft must have same length as canyon_north_samples_ft")
+        if canyon_north_samples_ft is not None and canyon_width_samples_ft is not None:
+            reference_altitude_np = reference_altitude_np[order]
+
+    reference_speed_np = None
+    if reference_speed_samples_fps is not None:
+        reference_speed_np = np.asarray(reference_speed_samples_fps, dtype=np.float32).reshape(-1)
+        if reference_speed_np.size != north_np.size:
+            raise ValueError("reference_speed_samples_fps must have same length as canyon_north_samples_ft")
+        if canyon_north_samples_ft is not None and canyon_width_samples_ft is not None:
+            reference_speed_np = reference_speed_np[order]
+
     return NominalJSBSimParams(
         W=jnp.asarray(W, dtype=jnp.float32),
         B=jnp.asarray(B, dtype=jnp.float32),
@@ -340,10 +380,18 @@ def build_nominal_params(
         canyon_width_samples_ft=jnp.asarray(width_np, dtype=jnp.float32),
         canyon_center_east_samples_ft=jnp.asarray(center_east_np, dtype=jnp.float32),
         canyon_heading_samples_rad=jnp.asarray(heading_np, dtype=jnp.float32),
+        reference_altitude_samples_ft=(
+            None if reference_altitude_np is None else jnp.asarray(reference_altitude_np, dtype=jnp.float32)
+        ),
+        reference_speed_samples_fps=(
+            None if reference_speed_np is None else jnp.asarray(reference_speed_np, dtype=jnp.float32)
+        ),
         canyon_north_np=north_np,
         canyon_width_np=width_np,
         canyon_center_east_np=center_east_np,
         canyon_heading_rad_np=heading_np,
+        reference_altitude_ft_np=reference_altitude_np,
+        reference_speed_fps_np=reference_speed_np,
     )
 
 
@@ -392,6 +440,8 @@ def _backend_cost_config(cost_config: MPPICostConfig) -> backend.JaxMPPIConfig:
         heading_alignment_scale_rad=float(cost_config.heading_alignment_scale_rad),
         alive_bonus=float(cost_config.alive_bonus),
         target_speed_fps=float(cost_config.target_speed_fps),
+        speed_target_gain=float(cost_config.speed_target_gain),
+        speed_target_scale_fps=float(cost_config.speed_target_scale_fps),
         target_altitude_ft=float(cost_config.target_altitude_ft),
         min_altitude_ft=float(cost_config.min_altitude_ft),
         max_altitude_ft=float(cost_config.max_altitude_ft),
@@ -418,11 +468,25 @@ def _backend_cost_config(cost_config: MPPICostConfig) -> backend.JaxMPPIConfig:
 def build_rollout_cost_fn(params: NominalJSBSimParams, cost_config: MPPICostConfig) -> Any:
     backend_config = _backend_cost_config(cost_config)
     rollout_states = backend.build_rollout_state_batch_fn(params.W, params.B, params.poly_powers)
+    reference_altitude_samples_ft = params.reference_altitude_samples_ft
+    if reference_altitude_samples_ft is None:
+        reference_altitude_samples_ft = jnp.full_like(
+            params.canyon_north_samples_ft,
+            float(cost_config.target_altitude_ft),
+        )
+    reference_speed_samples_fps = params.reference_speed_samples_fps
+    if reference_speed_samples_fps is None:
+        reference_speed_samples_fps = jnp.full_like(
+            params.canyon_north_samples_ft,
+            float(cost_config.target_speed_fps),
+        )
     rollout_costs_from_states = backend.build_rollout_cost_from_states_fn(
         params.canyon_north_samples_ft,
         params.canyon_width_samples_ft,
         params.canyon_center_east_samples_ft,
         params.canyon_heading_samples_rad,
+        reference_altitude_samples_ft,
+        reference_speed_samples_fps,
         backend_config,
     )
 

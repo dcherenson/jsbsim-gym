@@ -14,6 +14,7 @@ import jax.numpy as jnp
 
 from drs_gatekeeper import DRSGatekeeper, GatekeeperParams, TrackBoundsEstimate
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
+from jsbsim_gym.canyon import DEMCanyon
 from jsbsim_gym.canyon_env import OBS_ALTITUDE_ERROR_FT, OBS_PHI, OBS_P, OBS_Q, OBS_R, OBS_THETA
 from jsbsim_gym.canyon_artifacts import CanyonRunRecorder
 from jsbsim_gym.mppi_run_config import (
@@ -24,6 +25,10 @@ from jsbsim_gym.mppi_run_config import (
     load_mppi_optuna_params,
 )
 from jsbsim_gym.mppi_support import f16_kinematics_step_with_load_factors, load_nominal_weights
+from jsbsim_gym.nominal_trajectory import (
+    build_nominal_reference_from_dyn,
+    load_nominal_initial_conditions_from_dyn,
+)
 from jsbsim_gym.simple_controller import (
     SimpleCanyonController,
     SimpleCanyonControllerConfig,
@@ -764,6 +769,12 @@ def parse_args():
         default=3,
         help="Number of optimization passes per MPPI replan.",
     )
+    parser.add_argument(
+        "--nominal-dyn-path",
+        type=Path,
+        default=None,
+        help="Optional Aerosandbox dyn.asb path to use as the MPPI nominal reference trajectory.",
+    )
     return parser.parse_args()
 
 def main():
@@ -772,6 +783,51 @@ def main():
         raise ValueError("--gatekeeper currently requires --controller mppi or --controller smooth_mppi.")
     initial_speed_kts = float(args.target_speed_kts if args.initial_speed_kts is None else args.initial_speed_kts)
     initial_altitude_ft = float(args.initial_altitude_ft)
+    dem_start_pixel = DEM_START_PIXEL
+    initial_heading_deg = args.initial_heading_deg
+    initial_roll_deg = args.initial_roll_deg
+    initial_pitch_deg = args.initial_pitch_deg
+    initial_alpha_deg = args.initial_alpha_deg
+    initial_beta_deg = args.initial_beta_deg
+
+    nominal_initial_conditions = None
+    if args.nominal_dyn_path is not None:
+        nominal_canyon = DEMCanyon(
+            dem_path=str(DEM_PATH),
+            south=DEM_BBOX[0],
+            north=DEM_BBOX[1],
+            west=DEM_BBOX[2],
+            east=DEM_BBOX[3],
+            valley_rel_elev=0.08,
+            smoothing_window=11,
+            min_width_ft=140.0,
+            max_width_ft=2200.0,
+            fly_direction="south_to_north",
+            dem_start_pixel=DEM_START_PIXEL,
+        )
+        nominal_initial_conditions = load_nominal_initial_conditions_from_dyn(
+            args.nominal_dyn_path,
+            canyon=nominal_canyon,
+        )
+        dem_start_pixel = tuple(nominal_initial_conditions["start_pixel"])
+        initial_speed_kts = float(nominal_initial_conditions["speed_kts"])
+        initial_altitude_ft = float(nominal_initial_conditions["entry_altitude_ft"])
+        initial_heading_deg = float(nominal_initial_conditions["heading_deg"])
+        initial_roll_deg = float(nominal_initial_conditions["roll_deg"])
+        initial_pitch_deg = float(nominal_initial_conditions["pitch_deg"])
+        initial_alpha_deg = float(nominal_initial_conditions["alpha_deg"])
+        initial_beta_deg = float(nominal_initial_conditions["beta_deg"])
+        print(
+            "Using nominal offline initial conditions: "
+            f"start_pixel={dem_start_pixel}, "
+            f"speed={initial_speed_kts:.1f} kts, "
+            f"altitude={initial_altitude_ft:.1f} ft AGL, "
+            f"heading={initial_heading_deg:.1f} deg, "
+            f"roll={initial_roll_deg:.1f} deg, "
+            f"pitch={initial_pitch_deg:.1f} deg, "
+            f"alpha={initial_alpha_deg:.1f} deg, "
+            f"beta={initial_beta_deg:.1f} deg."
+        )
 
     output_subdirs = {
         "mppi": "canyon_mppi",
@@ -800,9 +856,9 @@ def main():
         dem_smoothing_window=11,
         dem_min_width_ft=140.0,
         dem_max_width_ft=2200.0,
-        dem_start_pixel=DEM_START_PIXEL,
+        dem_start_pixel=dem_start_pixel,
         dem_start_heading_mode="follow_canyon",
-        dem_start_heading_deg=args.initial_heading_deg,
+        dem_start_heading_deg=initial_heading_deg,
         dem_render_mesh=True,
         dem_use_proxy_canyon_bounds=False,
         wall_margin_ft=30.0,
@@ -816,10 +872,10 @@ def main():
         max_episode_steps=1200,
         terrain_collision_buffer_ft=10.0,
         entry_speed_kts=initial_speed_kts,
-        entry_roll_deg=args.initial_roll_deg,
-        entry_pitch_deg=args.initial_pitch_deg,
-        entry_alpha_deg=args.initial_alpha_deg,
-        entry_beta_deg=args.initial_beta_deg,
+        entry_roll_deg=initial_roll_deg,
+        entry_pitch_deg=initial_pitch_deg,
+        entry_alpha_deg=initial_alpha_deg,
+        entry_beta_deg=initial_beta_deg,
         wind_sigma=0.0,
         canyon_span_ft=9000.0,
         canyon_segment_spacing_ft=12.0,
@@ -840,7 +896,28 @@ def main():
     max_altitude_ft = float(env.unwrapped.max_altitude_ft - altitude_ref_ft)
 
     canyon = env.unwrapped.canyon
-    north_samples_ft, width_samples_ft, center_east_samples_ft, centerline_heading_samples_rad = get_active_canyon_reference(env)
+    reference_altitude_samples_ft = None
+    reference_speed_samples_fps = None
+    nominal_reference = None
+    if args.nominal_dyn_path is not None:
+        nominal_reference = build_nominal_reference_from_dyn(
+            args.nominal_dyn_path,
+            canyon=canyon,
+            altitude_ref_ft=altitude_ref_ft,
+            resample_spacing_ft=float(getattr(env.unwrapped, "canyon_segment_spacing_ft", 12.0)),
+        )
+        north_samples_ft = np.asarray(nominal_reference["north_ft"], dtype=np.float32)
+        width_samples_ft = np.asarray(nominal_reference["width_ft"], dtype=np.float32)
+        center_east_samples_ft = np.asarray(nominal_reference["east_ft"], dtype=np.float32)
+        centerline_heading_samples_rad = np.asarray(nominal_reference["heading_rad"], dtype=np.float32)
+        reference_altitude_samples_ft = np.asarray(nominal_reference["altitude_ft"], dtype=np.float32)
+        reference_speed_samples_fps = np.asarray(nominal_reference["speed_fps"], dtype=np.float32)
+        print(
+            f"Loaded nominal dyn reference from {args.nominal_dyn_path} "
+            f"({len(north_samples_ft)} samples)."
+        )
+    else:
+        north_samples_ft, width_samples_ft, center_east_samples_ft, centerline_heading_samples_rad = get_active_canyon_reference(env)
 
     mppi_target_altitude_ft = target_altitude_ft
 
@@ -855,6 +932,9 @@ def main():
     else:
         print("Note: No tuned MPPI parameters found; using built-in defaults.")
 
+    if reference_altitude_samples_ft is not None:
+        mppi_target_altitude_ft = float(reference_altitude_samples_ft[0])
+
     config_base_kwargs = build_mppi_base_config_kwargs(
         optuna_params=optuna_params,
         target_speed_fps=args.target_speed_kts * KTS_TO_FPS,
@@ -867,6 +947,17 @@ def main():
         optimization_steps=args.mppi_optimization_steps,
         terrain_collision_height_ft=max(min_altitude_ft + 40.0, 160.0),
     )
+    if reference_altitude_samples_ft is not None:
+        config_base_kwargs["altitude_target_gain"] = max(
+            float(config_base_kwargs.get("altitude_target_gain", 0.0)),
+            4.0,
+        )
+    if reference_speed_samples_fps is not None:
+        config_base_kwargs["speed_target_gain"] = max(
+            float(config_base_kwargs.get("speed_target_gain", 0.0)),
+            1.5,
+        )
+        config_base_kwargs["target_speed_fps"] = float(reference_speed_samples_fps[0])
 
     if controller_tag == "simple":
         simple_config = SimpleCanyonControllerConfig(
@@ -896,6 +987,8 @@ def main():
             canyon_width_samples_ft=width_samples_ft,
             canyon_center_east_samples_ft=center_east_samples_ft,
             canyon_centerline_heading_rad_samples=centerline_heading_samples_rad,
+            reference_altitude_samples_ft=reference_altitude_samples_ft,
+            reference_speed_samples_fps=reference_speed_samples_fps,
         )
         _print_mppi_config(controller_tag, config)
 
@@ -910,7 +1003,15 @@ def main():
         fps=30,
     )
     recorder.initialize()
-    recorder.set_centerline_profile(north_samples_ft, center_east_samples_ft)
+    if nominal_reference is not None:
+        recorder.set_reference_profile(
+            north_samples_ft=np.asarray(nominal_reference["display_north_ft"], dtype=np.float32),
+            east_samples_ft=np.asarray(nominal_reference["display_east_ft"], dtype=np.float32),
+            altitude_samples_ft=np.asarray(nominal_reference["display_altitude_ft"], dtype=np.float32),
+            label="Nominal offline trajectory",
+        )
+    else:
+        recorder.set_centerline_profile(north_samples_ft, center_east_samples_ft)
     termination_reason = "running"
     simple_diagnostic_rows = []
     mppi_tracking_rows = []
@@ -1120,10 +1221,17 @@ def main():
                     [[lookahead_north_ft, lookahead_center_east_ft]],
                     dtype=np.float32,
                 )
+                lookahead_h_ft = 0.0
+                if reference_altitude_samples_ft is not None and len(reference_altitude_samples_ft) == len(north_samples_ft):
+                    lookahead_h_ft = float(
+                        np.interp(
+                            lookahead_north_ft,
+                            north_samples_ft,
+                            reference_altitude_samples_ft,
+                        )
+                    )
                 planner_debug["lookahead_h_ft"] = np.asarray(
-                    # Match the centerline overlay reference height so the marker
-                    # visually sits on the blue centerline ribbon.
-                    [0.0],
+                    [lookahead_h_ft],
                     dtype=np.float32,
                 )
 

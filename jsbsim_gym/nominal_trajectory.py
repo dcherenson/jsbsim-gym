@@ -1,0 +1,327 @@
+from __future__ import annotations
+
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+
+M_TO_FT = 3.28084
+METERS_PER_DEG_LAT = 1e6 / 9.0
+FPS_PER_KT = 1.68781
+
+
+def _load_aerosandbox_dyn(dyn_path: Path):
+    import aerosandbox as asb
+
+    sink = StringIO()
+    with redirect_stdout(sink):
+        return asb.load(str(dyn_path))
+
+
+def _north_east_m_to_lat_lon(
+    north_m: np.ndarray,
+    east_m: np.ndarray,
+    *,
+    south_deg: float,
+    north_deg: float,
+    west_deg: float,
+    east_deg: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    datum_lat = 0.5 * (float(south_deg) + float(north_deg))
+    datum_lon = 0.5 * (float(west_deg) + float(east_deg))
+    cos_lat = float(np.cos(np.deg2rad(datum_lat)))
+
+    lat_deg = np.asarray(north_m, dtype=np.float64) / METERS_PER_DEG_LAT + datum_lat
+    lon_deg = np.asarray(east_m, dtype=np.float64) / (METERS_PER_DEG_LAT * cos_lat) + datum_lon
+    return lat_deg, lon_deg
+
+
+def _sorted_unique_samples(north_ft: np.ndarray, *arrays: np.ndarray) -> tuple[np.ndarray, ...]:
+    north = np.asarray(north_ft, dtype=np.float64).reshape(-1)
+    aligned = [np.asarray(arr, dtype=np.float64).reshape(-1) for arr in arrays]
+    if any(arr.size != north.size for arr in aligned):
+        raise ValueError("All sampled reference arrays must have the same length.")
+
+    finite_mask = np.isfinite(north)
+    for arr in aligned:
+        finite_mask &= np.isfinite(arr)
+
+    north = north[finite_mask]
+    aligned = [arr[finite_mask] for arr in aligned]
+    if north.size < 2:
+        raise ValueError("Need at least two finite trajectory samples to build a reference.")
+
+    order = np.argsort(north, kind="mergesort")
+    north = north[order]
+    aligned = [arr[order] for arr in aligned]
+
+    unique_north, unique_idx = np.unique(north, return_index=True)
+    north = unique_north
+    aligned = [arr[unique_idx] for arr in aligned]
+    if north.size < 2:
+        raise ValueError("Trajectory reference collapsed to fewer than two unique north samples.")
+
+    return (north, *aligned)
+
+
+def _ordered_display_samples(
+    north_ft: np.ndarray,
+    east_ft: np.ndarray,
+    altitude_ft: np.ndarray,
+    *,
+    spacing_ft: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    north = np.asarray(north_ft, dtype=np.float64).reshape(-1)
+    east = np.asarray(east_ft, dtype=np.float64).reshape(-1)
+    altitude = np.asarray(altitude_ft, dtype=np.float64).reshape(-1)
+
+    finite_mask = np.isfinite(north) & np.isfinite(east) & np.isfinite(altitude)
+    north = north[finite_mask]
+    east = east[finite_mask]
+    altitude = altitude[finite_mask]
+    if north.size < 2:
+        raise ValueError("Need at least two finite samples to build a display trajectory.")
+
+    segment_lengths = np.hypot(np.diff(north), np.diff(east))
+    keep_mask = np.concatenate([[True], segment_lengths > 1e-6])
+    north = north[keep_mask]
+    east = east[keep_mask]
+    altitude = altitude[keep_mask]
+    if north.size < 2:
+        raise ValueError("Display trajectory collapsed after removing duplicate samples.")
+
+    arc_length_ft = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(north), np.diff(east)))])
+    if float(arc_length_ft[-1]) <= 1e-6:
+        raise ValueError("Display trajectory has zero arc length.")
+
+    spacing = float(max(spacing_ft, 1.0))
+    sample_s = np.arange(0.0, float(arc_length_ft[-1]) + 0.5 * spacing, spacing)
+    if sample_s.size < 2:
+        sample_s = np.asarray([0.0, float(arc_length_ft[-1])], dtype=np.float64)
+
+    display_north = np.interp(sample_s, arc_length_ft, north)
+    display_east = np.interp(sample_s, arc_length_ft, east)
+    display_altitude = np.interp(sample_s, arc_length_ft, altitude)
+    return display_north, display_east, display_altitude
+
+
+def _wrap_heading_deg(angle_deg: float) -> float:
+    return float(np.mod(float(angle_deg), 360.0))
+
+
+def _body_euler_deg_from_dyn(dyn) -> tuple[float, float, float]:
+    """Recover JSBSim-style body Euler angles from the Aerosandbox trajectory."""
+    x_body_earth = np.stack(dyn.convert_axes(1, 0, 0, "body", "earth"), axis=1)[0]
+    y_body_earth = np.stack(dyn.convert_axes(0, 1, 0, "body", "earth"), axis=1)[0]
+    z_body_earth = np.stack(dyn.convert_axes(0, 0, 1, "body", "earth"), axis=1)[0]
+
+    # Aerosandbox uses north-east-down. JSBSim ICs use north-east-up attitudes.
+    x_body_neu = np.asarray([x_body_earth[0], x_body_earth[1], -x_body_earth[2]], dtype=np.float64)
+    y_body_neu = np.asarray([y_body_earth[0], y_body_earth[1], -y_body_earth[2]], dtype=np.float64)
+    z_body_neu = np.asarray([z_body_earth[0], z_body_earth[1], -z_body_earth[2]], dtype=np.float64)
+
+    pitch_deg = float(np.degrees(np.arctan2(x_body_neu[2], np.hypot(x_body_neu[0], x_body_neu[1]))))
+    heading_deg = _wrap_heading_deg(np.degrees(np.arctan2(x_body_neu[1], x_body_neu[0])))
+    roll_deg = float(np.degrees(np.arctan2(y_body_neu[2], -z_body_neu[2])))
+    return roll_deg, pitch_deg, heading_deg
+
+
+def load_nominal_initial_conditions_from_dyn(
+    dyn_path: str | Path,
+    *,
+    canyon: Any,
+) -> dict[str, float | int | tuple[int, int]]:
+    """Extract JSBSim-friendly initial conditions from an offline `dyn.asb`."""
+
+    dyn_path = Path(dyn_path).expanduser()
+    dyn = _load_aerosandbox_dyn(dyn_path)
+
+    if not all(hasattr(canyon, attr) for attr in ("south", "north", "west", "east", "get_local_from_latlon")):
+        raise TypeError("canyon must provide DEM bounds and get_local_from_latlon().")
+
+    north_m = float(np.asarray(dyn.x_e, dtype=np.float64).reshape(-1)[0])
+    east_m = float(np.asarray(dyn.y_e, dtype=np.float64).reshape(-1)[0])
+    altitude_msl_ft = float(-np.asarray(dyn.z_e, dtype=np.float64).reshape(-1)[0] * M_TO_FT)
+    speed_fps = float(np.asarray(dyn.speed, dtype=np.float64).reshape(-1)[0] * M_TO_FT)
+    alpha_deg = float(np.asarray(dyn.alpha, dtype=np.float64).reshape(-1)[0])
+    beta_deg = float(np.asarray(dyn.beta, dtype=np.float64).reshape(-1)[0])
+    gamma_deg = float(np.degrees(np.asarray(dyn.gamma, dtype=np.float64).reshape(-1)[0]))
+    track_deg = _wrap_heading_deg(np.degrees(np.asarray(dyn.track, dtype=np.float64).reshape(-1)[0]))
+    bank_deg = float(np.degrees(np.asarray(dyn.bank, dtype=np.float64).reshape(-1)[0]))
+
+    lat_deg_arr, lon_deg_arr = _north_east_m_to_lat_lon(
+        np.asarray([north_m], dtype=np.float64),
+        np.asarray([east_m], dtype=np.float64),
+        south_deg=float(canyon.south),
+        north_deg=float(canyon.north),
+        west_deg=float(canyon.west),
+        east_deg=float(canyon.east),
+    )
+    lat_deg = float(lat_deg_arr[0])
+    lon_deg = float(lon_deg_arr[0])
+
+    local_north_ft, local_east_ft = canyon.get_local_from_latlon(lat_deg, lon_deg)
+
+    if hasattr(canyon, "_latlon_to_ordered_row_col"):
+        row_ordered, col_float = canyon._latlon_to_ordered_row_col(lat_deg, lon_deg)
+        if getattr(canyon, "fly_direction", "south_to_north") == "south_to_north":
+            row_original = float(canyon.rows - 1) - float(row_ordered)
+        else:
+            row_original = float(row_ordered)
+        pixel_x = int(np.clip(int(np.rint(col_float)), 0, int(canyon.cols) - 1))
+        pixel_y = int(np.clip(int(np.rint(row_original)), 0, int(canyon.rows) - 1))
+    else:
+        pixel_x = 0
+        pixel_y = 0
+
+    if hasattr(canyon, "get_elevation_msl_ft_from_latlon"):
+        terrain_msl_ft = float(canyon.get_elevation_msl_ft_from_latlon(lat_deg, lon_deg))
+    else:
+        terrain_msl_ft = float(canyon.get_pixel_info(pixel_x, pixel_y)["elevation_msl_ft"])
+
+    roll_deg, pitch_deg, heading_deg = _body_euler_deg_from_dyn(dyn)
+
+    return {
+        "start_pixel": (pixel_x, pixel_y),
+        "lat_deg": lat_deg,
+        "lon_deg": lon_deg,
+        "local_north_ft": float(local_north_ft),
+        "local_east_ft": float(local_east_ft),
+        "altitude_msl_ft": altitude_msl_ft,
+        "terrain_msl_ft": terrain_msl_ft,
+        "entry_altitude_ft": float(altitude_msl_ft - terrain_msl_ft),
+        "speed_fps": speed_fps,
+        "speed_kts": float(speed_fps / FPS_PER_KT),
+        "roll_deg": roll_deg,
+        "pitch_deg": pitch_deg,
+        "heading_deg": heading_deg,
+        "alpha_deg": alpha_deg,
+        "beta_deg": beta_deg,
+        "gamma_deg": gamma_deg,
+        "track_deg": track_deg,
+        "bank_deg": bank_deg,
+        "source_dyn_path": str(dyn_path),
+    }
+
+
+def build_nominal_reference_from_dyn(
+    dyn_path: str | Path,
+    *,
+    canyon: Any,
+    altitude_ref_ft: float = 0.0,
+    resample_spacing_ft: float = 12.0,
+) -> dict[str, np.ndarray]:
+    """Convert an Aerosandbox `dyn.asb` trajectory into DEM-local MPPI references.
+
+    The optimization stores position in a global north/east meter frame tied to the
+    DEM clip midpoint. The runtime canyon environment uses a DEM-local north/east
+    frame in feet, so we convert through latitude/longitude using the DEM bounds.
+    """
+
+    dyn_path = Path(dyn_path).expanduser()
+    dyn = _load_aerosandbox_dyn(dyn_path)
+
+    if not all(hasattr(canyon, attr) for attr in ("south", "north", "west", "east", "get_local_from_latlon")):
+        raise TypeError("canyon must provide DEM bounds and get_local_from_latlon().")
+
+    north_m = np.asarray(dyn.x_e, dtype=np.float64).reshape(-1)
+    east_m = np.asarray(dyn.y_e, dtype=np.float64).reshape(-1)
+    altitude_msl_ft = -np.asarray(dyn.z_e, dtype=np.float64).reshape(-1) * M_TO_FT
+    speed_fps = np.asarray(dyn.speed, dtype=np.float64).reshape(-1) * M_TO_FT
+
+    lat_deg, lon_deg = _north_east_m_to_lat_lon(
+        north_m,
+        east_m,
+        south_deg=float(canyon.south),
+        north_deg=float(canyon.north),
+        west_deg=float(canyon.west),
+        east_deg=float(canyon.east),
+    )
+
+    local_samples = np.asarray(
+        [canyon.get_local_from_latlon(float(lat), float(lon)) for lat, lon in zip(lat_deg, lon_deg)],
+        dtype=np.float64,
+    )
+    local_north_ft = local_samples[:, 0]
+    local_east_ft = local_samples[:, 1]
+    altitude_rel_ft = altitude_msl_ft - float(altitude_ref_ft)
+    (
+        display_north_ft,
+        display_east_ft,
+        display_altitude_ft,
+    ) = _ordered_display_samples(
+        local_north_ft,
+        local_east_ft,
+        altitude_rel_ft,
+        spacing_ft=resample_spacing_ft,
+    )
+
+    (
+        local_north_ft,
+        local_east_ft,
+        altitude_rel_ft,
+        speed_fps,
+    ) = _sorted_unique_samples(
+        local_north_ft,
+        local_east_ft,
+        altitude_rel_ft,
+        speed_fps,
+    )
+
+    spacing_ft = float(max(resample_spacing_ft, 1.0))
+    sample_north_ft = np.arange(local_north_ft[0], local_north_ft[-1] + 0.5 * spacing_ft, spacing_ft)
+    if sample_north_ft.size < 2:
+        sample_north_ft = np.asarray([local_north_ft[0], local_north_ft[-1]], dtype=np.float64)
+
+    sample_east_ft = np.interp(sample_north_ft, local_north_ft, local_east_ft)
+    sample_altitude_ft = np.interp(sample_north_ft, local_north_ft, altitude_rel_ft)
+    sample_speed_fps = np.interp(sample_north_ft, local_north_ft, speed_fps)
+
+    east_slope = np.gradient(sample_east_ft, sample_north_ft, edge_order=1)
+    sample_heading_rad = np.arctan2(east_slope, 1.0)
+
+    canyon_north = np.asarray(canyon.north_samples_ft, dtype=np.float64)
+    canyon_center = np.asarray(canyon.center_east_samples_ft, dtype=np.float64)
+    canyon_width = np.asarray(canyon.width_samples_ft, dtype=np.float64)
+
+    if hasattr(canyon, "left_half_samples_ft") and hasattr(canyon, "right_half_samples_ft"):
+        left_half_ft = np.interp(
+            sample_north_ft,
+            canyon_north,
+            np.asarray(canyon.left_half_samples_ft, dtype=np.float64),
+        )
+        right_half_ft = np.interp(
+            sample_north_ft,
+            canyon_north,
+            np.asarray(canyon.right_half_samples_ft, dtype=np.float64),
+        )
+    else:
+        half_width_ft = 0.5 * np.interp(sample_north_ft, canyon_north, canyon_width)
+        left_half_ft = half_width_ft
+        right_half_ft = half_width_ft
+
+    canyon_center_ft = np.interp(sample_north_ft, canyon_north, canyon_center)
+    left_wall_ft = canyon_center_ft - left_half_ft
+    right_wall_ft = canyon_center_ft + right_half_ft
+    symmetric_half_width_ft = np.minimum(
+        np.maximum(sample_east_ft - left_wall_ft, 20.0),
+        np.maximum(right_wall_ft - sample_east_ft, 20.0),
+    )
+    sample_width_ft = 2.0 * symmetric_half_width_ft
+
+    return {
+        "north_ft": sample_north_ft.astype(np.float32),
+        "east_ft": sample_east_ft.astype(np.float32),
+        "heading_rad": sample_heading_rad.astype(np.float32),
+        "width_ft": sample_width_ft.astype(np.float32),
+        "altitude_ft": sample_altitude_ft.astype(np.float32),
+        "speed_fps": sample_speed_fps.astype(np.float32),
+        "display_north_ft": display_north_ft.astype(np.float32),
+        "display_east_ft": display_east_ft.astype(np.float32),
+        "display_altitude_ft": display_altitude_ft.astype(np.float32),
+        "closed_loop": False,
+        "source_dyn_path": str(dyn_path),
+    }

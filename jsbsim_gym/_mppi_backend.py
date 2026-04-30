@@ -68,6 +68,8 @@ class JaxMPPIConfig:
     heading_alignment_scale_rad: float = 0.70
     alive_bonus: float = 0.15
     target_speed_fps: float = 800.0
+    speed_target_gain: float = 0.0
+    speed_target_scale_fps: float = 120.0
     target_altitude_ft: float = 250.0
     min_altitude_ft: float = -500.0
     max_altitude_ft: float = 3000.0
@@ -97,7 +99,8 @@ class JaxMPPIConfig:
             self.low_altitude_gain, self.altitude_target_gain, self.altitude_target_scale_ft,
             self.centerline_gain, self.offcenter_penalty_gain,
             self.heading_alignment_gain, self.heading_alignment_scale_rad,
-            self.alive_bonus, self.target_speed_fps, self.target_altitude_ft, self.min_altitude_ft,
+            self.alive_bonus, self.target_speed_fps, self.speed_target_gain,
+            self.speed_target_scale_fps, self.target_altitude_ft, self.min_altitude_ft,
             self.max_altitude_ft, self.terrain_collision_height_ft, self.wall_margin_ft,
             self.terrain_crash_penalty, self.wall_crash_penalty, self.altitude_violation_penalty,
             self.early_termination_penalty_gain, self.time_limit_bonus, self.max_step_reward_abs,
@@ -123,7 +126,8 @@ class JaxMPPIConfig:
             low_altitude_gain, altitude_target_gain, altitude_target_scale_ft,
             centerline_gain, offcenter_penalty_gain,
             heading_alignment_gain, heading_alignment_scale_rad,
-            alive_bonus, target_speed_fps, target_altitude_ft, min_altitude_ft,
+            alive_bonus, target_speed_fps, speed_target_gain,
+            speed_target_scale_fps, target_altitude_ft, min_altitude_ft,
             max_altitude_ft, terrain_collision_height_ft, wall_margin_ft,
             terrain_crash_penalty, wall_crash_penalty, altitude_violation_penalty,
             early_termination_penalty_gain, time_limit_bonus, max_step_reward_abs,
@@ -146,7 +150,9 @@ class JaxMPPIConfig:
             altitude_target_gain=altitude_target_gain, altitude_target_scale_ft=altitude_target_scale_ft,
             centerline_gain=centerline_gain, offcenter_penalty_gain=offcenter_penalty_gain,
             heading_alignment_gain=heading_alignment_gain, heading_alignment_scale_rad=heading_alignment_scale_rad,
-            alive_bonus=alive_bonus, target_speed_fps=target_speed_fps, target_altitude_ft=target_altitude_ft,
+            alive_bonus=alive_bonus, target_speed_fps=target_speed_fps,
+            speed_target_gain=speed_target_gain, speed_target_scale_fps=speed_target_scale_fps,
+            target_altitude_ft=target_altitude_ft,
             min_altitude_ft=min_altitude_ft, max_altitude_ft=max_altitude_ft,
             terrain_collision_height_ft=terrain_collision_height_ft, wall_margin_ft=wall_margin_ft,
             terrain_crash_penalty=terrain_crash_penalty, wall_crash_penalty=wall_crash_penalty,
@@ -584,6 +590,8 @@ def single_rollout_cost(
     canyon_width_samples_ft,
     canyon_center_east_samples_ft,
     canyon_heading_samples_rad,
+    reference_altitude_samples_ft,
+    reference_speed_samples_fps,
     config: JaxMPPIConfig,
 ):
     horizon_f = jnp.maximum(float(config.horizon), 1.0)
@@ -645,13 +653,32 @@ def single_rollout_cost(
         progress_term = config.progress_gain * (0.8 * progress_local + 0.2 * progress_global)
 
         speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
+        reference_speed_fps = jnp.interp(
+            p_N,
+            canyon_north_samples_ft,
+            reference_speed_samples_fps,
+        )
         speed_term = config.speed_gain * jnp.clip(
             speed_fps / SPEED_REWARD_SCALE_FPS,
             0.0,
             2.5,
         )
+        speed_target_error_fps = jnp.abs(speed_fps - reference_speed_fps)
+        speed_target_term = config.speed_target_gain * (
+            1.0
+            - jnp.clip(
+                speed_target_error_fps / jnp.maximum(config.speed_target_scale_fps, 1.0),
+                0.0,
+                2.0,
+            )
+        )
 
-        altitude_target_error_ft = jnp.abs(h - config.target_altitude_ft)
+        reference_altitude_ft = jnp.interp(
+            p_N,
+            canyon_north_samples_ft,
+            reference_altitude_samples_ft,
+        )
+        altitude_target_error_ft = jnp.abs(h - reference_altitude_ft)
         altitude_target_term = config.altitude_target_gain * (
             1.0
             - jnp.clip(
@@ -695,6 +722,7 @@ def single_rollout_cost(
         stage_reward = (
             progress_term
             + speed_term
+            + speed_target_term
             + altitude_target_term
             + centerline_term
             + offcenter_term
@@ -782,6 +810,8 @@ def single_rollout_cost_from_states(
     canyon_width_samples_ft,
     canyon_center_east_samples_ft,
     canyon_heading_samples_rad,
+    reference_altitude_samples_ft,
+    reference_speed_samples_fps,
     config: JaxMPPIConfig,
 ):
     horizon_f = jnp.maximum(float(config.horizon), 1.0)
@@ -839,13 +869,24 @@ def single_rollout_cost_from_states(
     progress_term = config.progress_gain * (0.8 * progress_local + 0.2 * progress_global)
 
     speed_fps = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
+    reference_speed_fps = jnp.interp(p_N, canyon_north_samples_ft, reference_speed_samples_fps)
     speed_term = config.speed_gain * jnp.clip(
         speed_fps / SPEED_REWARD_SCALE_FPS,
         0.0,
         2.5,
     )
+    speed_target_error_fps = jnp.abs(speed_fps - reference_speed_fps)
+    speed_target_term = config.speed_target_gain * (
+        1.0
+        - jnp.clip(
+            speed_target_error_fps / jnp.maximum(config.speed_target_scale_fps, 1.0),
+            0.0,
+            2.0,
+        )
+    )
 
-    altitude_target_error_ft = jnp.abs(h - config.target_altitude_ft)
+    reference_altitude_ft = jnp.interp(p_N, canyon_north_samples_ft, reference_altitude_samples_ft)
+    altitude_target_error_ft = jnp.abs(h - reference_altitude_ft)
     altitude_target_term = config.altitude_target_gain * (
         1.0
         - jnp.clip(
@@ -888,6 +929,7 @@ def single_rollout_cost_from_states(
     stage_reward = (
         progress_term
         + speed_term
+        + speed_target_term
         + altitude_target_term
         + centerline_term
         + offcenter_term
@@ -953,6 +995,8 @@ def build_rollout_cost_fn(
     canyon_width_samples_ft,
     canyon_center_east_samples_ft,
     canyon_heading_samples_rad,
+    reference_altitude_samples_ft,
+    reference_speed_samples_fps,
     config: JaxMPPIConfig,
 ):
     def rollout_costs(initial_state, action_batch, initial_prev_action):
@@ -968,6 +1012,8 @@ def build_rollout_cost_fn(
                 canyon_width_samples_ft,
                 canyon_center_east_samples_ft,
                 canyon_heading_samples_rad,
+                reference_altitude_samples_ft,
+                reference_speed_samples_fps,
                 config,
             )
         )(action_batch)
@@ -987,6 +1033,8 @@ def build_rollout_cost_from_states_fn(
     canyon_width_samples_ft,
     canyon_center_east_samples_ft,
     canyon_heading_samples_rad,
+    reference_altitude_samples_ft,
+    reference_speed_samples_fps,
     config: JaxMPPIConfig,
 ):
     def rollout_costs_from_states(initial_state, state_batch, action_batch, initial_prev_action):
@@ -1000,6 +1048,8 @@ def build_rollout_cost_from_states_fn(
                 canyon_width_samples_ft,
                 canyon_center_east_samples_ft,
                 canyon_heading_samples_rad,
+                reference_altitude_samples_ft,
+                reference_speed_samples_fps,
                 config,
             )
         )(state_batch, action_batch)
@@ -1032,6 +1082,8 @@ def mppi_optimize_step(
     canyon_width_samples_ft,
     canyon_center_east_samples_ft,
     canyon_heading_samples_rad,
+    reference_altitude_samples_ft,
+    reference_speed_samples_fps,
     config: JaxMPPIConfig,
 ):
     sigma = jnp.asarray(config.action_noise_std, dtype=jnp.float32)
@@ -1057,6 +1109,8 @@ def mppi_optimize_step(
             canyon_width_samples_ft,
             canyon_center_east_samples_ft,
             canyon_heading_samples_rad,
+            reference_altitude_samples_ft,
+            reference_speed_samples_fps,
             config,
         )
     )(candidate_actions)
@@ -1087,6 +1141,8 @@ def smooth_mppi_optimize_step(
     canyon_width_samples_ft,
     canyon_center_east_samples_ft,
     canyon_heading_samples_rad,
+    reference_altitude_samples_ft,
+    reference_speed_samples_fps,
     config: JaxSmoothMPPIConfig,
 ):
     low = jnp.asarray(config.action_low, dtype=jnp.float32)
@@ -1116,6 +1172,8 @@ def smooth_mppi_optimize_step(
             canyon_width_samples_ft,
             canyon_center_east_samples_ft,
             canyon_heading_samples_rad,
+            reference_altitude_samples_ft,
+            reference_speed_samples_fps,
             config,
         )
     )(candidate_actions)
@@ -1205,6 +1263,14 @@ class JaxMPPIController:
         self.canyon_width_samples_ft = jnp.asarray(self._canyon_width_np)
         self.canyon_center_east_samples_ft = jnp.asarray(self._canyon_center_east_np)
         self.canyon_heading_samples_rad = jnp.asarray(self._canyon_heading_rad_np)
+        self.reference_altitude_samples_ft = jnp.full_like(
+            self.canyon_north_samples_ft,
+            float(self.config.target_altitude_ft),
+        )
+        self.reference_speed_samples_fps = jnp.full_like(
+            self.canyon_north_samples_ft,
+            float(self.config.target_speed_fps),
+        )
         self._rollout_states = build_rollout_state_batch_fn(
             self.W,
             self.B,
@@ -1215,6 +1281,8 @@ class JaxMPPIController:
             self.canyon_width_samples_ft,
             self.canyon_center_east_samples_ft,
             self.canyon_heading_samples_rad,
+            self.reference_altitude_samples_ft,
+            self.reference_speed_samples_fps,
             self.config,
         )
         self._rollout_positions = build_rollout_positions_fn(
