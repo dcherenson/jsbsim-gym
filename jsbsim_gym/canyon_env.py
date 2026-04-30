@@ -134,13 +134,15 @@ class CanyonFlightEnv(DataCollectionEnv):
             if hasattr(self.canyon, "get_pixel_info"):
                 if dem_start_pixel is not None:
                     px, py = dem_start_pixel
+                    # Honor an explicitly requested DEM start pixel exactly.
+                    self.dem_start_info = self.canyon.get_pixel_info(px, py)
                 else:
                     px = self.canyon.cols - 1
                     py = self.canyon.rows - 1 if dem_fly_direction == "south_to_north" else 0
-                if hasattr(self.canyon, "get_centerline_pixel_info"):
-                    self.dem_start_info = self.canyon.get_centerline_pixel_info(px, py)
-                else:
-                    self.dem_start_info = self.canyon.get_pixel_info(px, py)
+                    if hasattr(self.canyon, "get_centerline_pixel_info"):
+                        self.dem_start_info = self.canyon.get_centerline_pixel_info(px, py)
+                    else:
+                        self.dem_start_info = self.canyon.get_pixel_info(px, py)
                 self.dem_start_pixel = (
                     int(self.dem_start_info["pixel_x"]),
                     int(self.dem_start_info["pixel_y"]),

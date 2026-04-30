@@ -1,42 +1,77 @@
 {
   "base_config": {
-    "entry_speed_fps": 1181.467,
-    "low_flight_reference_ft": 100.0,
-    "mppi_controller": "mppi"
+    "action_noise_std": [
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "alpha_limit_rad": 0.4363323129985824,
+    "alpha_penalty_weight": 0.0,
+    "control_rate_weights": [
+      15.0,
+      20.0,
+      5.0,
+      2.0
+    ],
+    "gamma_": 0.05,
+    "horizon": 40,
+    "lambda_": 1.0,
+    "num_samples": 4000,
+    "nz_limit_g": 9.0,
+    "nz_penalty_weight": 0.0,
+    "optimization_steps": 3,
+    "state_tracking_weights": [
+      0.05,
+      0.05,
+      0.05,
+      10.0,
+      10.0,
+      8.0
+    ],
+    "terrain_collision_penalty": 0.0,
+    "terrain_decay_rate_ft_inv": 0.03,
+    "terrain_repulsion_scale": 0.0,
+    "terrain_safe_clearance_ft": 131.2336
   },
   "best_params": {
-    "action_diff_weight": 0.0563302095797695,
-    "action_l2_weight": 0.14318942726571898,
-    "action_noise_std_pitch": 0.9480222316630628,
-    "action_noise_std_roll": 0.49203683595073455,
-    "action_noise_std_throttle": 0.7509324398400633,
-    "action_noise_std_yaw": 0.33123293769672757,
-    "centerline_gain": 40.889293267205653,
-    "gamma_": 0.09449402287535166,
-    "lambda_": 0.4828940655772733,
-    "low_altitude_gain": 5.288428990725201,
-    "offcenter_penalty_gain": 4.744473721309144,
-    "progress_gain": 7.0,
-    "speed_gain": 1.719647707011502,
-    "terrain_crash_penalty": 556.1111198385959
+    "action_noise_std": [
+      0.02330148227594551,
+      0.021673196126100202,
+      0.03952115577859738,
+      0.05527080219120754
+    ],
+    "control_rate_weights": [
+      87.97119322406907,
+      0.16457224911404678,
+      0.025528879539990456,
+      0.6570686227090325
+    ],
+    "gamma_": 0.08568528169719242,
+    "lambda_": 1.9255462826197205,
+    "state_tracking_weights": [
+      0.00042189666727812886,
+      0.00015419120374637435,
+      0.0001005015130734904,
+      0.04383318354121996,
+      29.223242182214523,
+      21.09290257885712
+    ],
+    "terrain_collision_penalty": 8.412880308958066,
+    "terrain_repulsion_scale": 51.01189124206492
   },
-  "best_trial_number": 1782,
-  "best_value": -515.8170947647093,
+  "best_trial_number": 104,
+  "best_value": -299.9834645157442,
   "evaluation": {
-    "altitude_error_scale_ft": 150.0,
-    "centerline_error_scale_ft": 200.0,
-    "entry_speed_kts": 700.0,
-    "low_flight_reference_ft": 100.0,
     "max_steps": 1200,
-    "mppi_controller": "mppi",
-    "robustness_weight": 0.2,
+    "nominal_dyn_path": "air-racing-optimization/final_results/dyn.asb",
     "seeds": [
       3,
       7,
       42
     ],
-    "wind_sigma": 0.6
+    "wind_sigma": 0.0
   },
   "storage": "sqlite:////home/dasc-lab/Github/jsbsim-gym/optuna/mppi_tuning.db",
-  "study_name": "mppi_canyon_tuning"
+  "study_name": "mppi_nominal_tracking_tuning"
 }

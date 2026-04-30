@@ -1,8 +1,6 @@
 import argparse
 import csv
 from dataclasses import fields, is_dataclass
-import json
-import os
 import time
 from pathlib import Path
 
@@ -19,10 +17,9 @@ from jsbsim_gym.canyon_env import OBS_ALTITUDE_ERROR_FT, OBS_PHI, OBS_P, OBS_Q, 
 from jsbsim_gym.canyon_artifacts import CanyonRunRecorder
 from jsbsim_gym.mppi_run_config import (
     KTS_TO_FPS,
-    MPPI_TUNING_JSON_PATH,
     build_mppi_base_config_kwargs,
     build_mppi_controller,
-    load_mppi_optuna_params,
+    with_default_mppi_optuna_params,
 )
 from jsbsim_gym.mppi_support import f16_kinematics_step_with_load_factors, load_nominal_weights
 from jsbsim_gym.nominal_trajectory import (
@@ -48,6 +45,13 @@ OUTPUT_ROOT = REPO_ROOT / "output"
 UNCERTAINTY_ARTIFACT_PATH = REPO_ROOT / "f16_uncertainty_model.pkl"
 M_TO_FT = 3.28084
 G_FTPS2 = 32.174
+DEFAULT_INITIAL_SPEED_KTS = 450.0
+DEFAULT_INITIAL_ALTITUDE_FT = 500.0
+DEFAULT_INITIAL_HEADING_DEG = None
+DEFAULT_INITIAL_ROLL_DEG = None
+DEFAULT_INITIAL_PITCH_DEG = None
+DEFAULT_INITIAL_ALPHA_DEG = None
+DEFAULT_INITIAL_BETA_DEG = None
 
 def render_state(lateral_error_ft, width_ft):
     y_norm = 2.0 * lateral_error_ft / max(width_ft, 1.0)
@@ -150,125 +154,98 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
         writer.writerows(rows)
 
     time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
-    along_track_progress_ft = np.asarray([row["along_track_progress_ft"] for row in rows], dtype=np.float64)
-    cross_track_error_ft = np.asarray([row["cross_track_error_ft"] for row in rows], dtype=np.float64)
-    cross_track_error_norm = np.asarray([row.get("cross_track_error_norm", np.nan) for row in rows], dtype=np.float64)
+    position_error_ft = np.asarray([row["position_error_ft"] for row in rows], dtype=np.float64)
+    north_error_ft = np.asarray([row["north_error_ft"] for row in rows], dtype=np.float64)
+    east_error_ft = np.asarray([row["east_error_ft"] for row in rows], dtype=np.float64)
     altitude_error_ft = np.asarray([row["altitude_error_ft"] for row in rows], dtype=np.float64)
-    speed_error_kts = np.asarray([row["speed_error_kts"] for row in rows], dtype=np.float64)
-    usable_half_width_ft = np.asarray([row.get("usable_half_width_ft", np.nan) for row in rows], dtype=np.float64)
     terrain_clearance_ft = np.asarray([row.get("terrain_clearance_ft", np.nan) for row in rows], dtype=np.float64)
-    heading_error_deg = np.asarray([row.get("heading_error_deg", np.nan) for row in rows], dtype=np.float64)
-    phi_deg = np.asarray([row.get("phi_deg", np.nan) for row in rows], dtype=np.float64)
+    terrain_safe_clearance_ft = np.asarray([row.get("terrain_safe_clearance_ft", np.nan) for row in rows], dtype=np.float64)
+    phi_error_deg = np.asarray([row.get("phi_error_deg", np.nan) for row in rows], dtype=np.float64)
+    theta_error_deg = np.asarray([row.get("theta_error_deg", np.nan) for row in rows], dtype=np.float64)
+    psi_error_deg = np.asarray([row.get("psi_error_deg", np.nan) for row in rows], dtype=np.float64)
+    alpha_deg = np.asarray([row.get("alpha_deg", np.nan) for row in rows], dtype=np.float64)
+    alpha_limit_deg = np.asarray([row.get("alpha_limit_deg", np.nan) for row in rows], dtype=np.float64)
+    nz_g = np.asarray([row.get("nz_g", np.nan) for row in rows], dtype=np.float64)
+    nz_limit_g = np.asarray([row.get("nz_limit_g", np.nan) for row in rows], dtype=np.float64)
     aileron_cmd = np.asarray([row.get("aileron_cmd", np.nan) for row in rows], dtype=np.float64)
     elevator_cmd = np.asarray([row.get("elevator_cmd", np.nan) for row in rows], dtype=np.float64)
     rudder_cmd = np.asarray([row.get("rudder_cmd", np.nan) for row in rows], dtype=np.float64)
     throttle_cmd = np.asarray([row.get("throttle_cmd", np.nan) for row in rows], dtype=np.float64)
-    progress_term_est = np.asarray([row.get("progress_term_est", np.nan) for row in rows], dtype=np.float64)
-    altitude_target_term_est = np.asarray(
-        [row.get("altitude_target_term_est", np.nan) for row in rows],
-        dtype=np.float64,
-    )
-    centerline_term_est = np.asarray([row.get("centerline_term_est", np.nan) for row in rows], dtype=np.float64)
-    offcenter_term_est = np.asarray([row.get("offcenter_term_est", np.nan) for row in rows], dtype=np.float64)
-    heading_term_est = np.asarray([row.get("heading_term_est", np.nan) for row in rows], dtype=np.float64)
-    angular_rate_term_est = np.asarray([row.get("angular_rate_term_est", np.nan) for row in rows], dtype=np.float64)
-    bank_angle_term_est = np.asarray([row.get("bank_angle_term_est", np.nan) for row in rows], dtype=np.float64)
-    wall_penalty_est = np.asarray([row.get("wall_penalty_est", np.nan) for row in rows], dtype=np.float64)
-    altitude_penalty_est = np.asarray([row.get("altitude_penalty_est", np.nan) for row in rows], dtype=np.float64)
-    termination_penalty_est = np.asarray([row.get("termination_penalty_est", np.nan) for row in rows], dtype=np.float64)
-    stage_reward_est_clipped = np.asarray([row.get("stage_reward_est_clipped", np.nan) for row in rows], dtype=np.float64)
-    stage_reward_after_penalty_est = np.asarray(
-        [row.get("stage_reward_after_penalty_est", np.nan) for row in rows],
-        dtype=np.float64,
-    )
-    planned_terminal_cross_track_norm = np.asarray(
-        [row.get("planned_terminal_cross_track_norm", np.nan) for row in rows],
-        dtype=np.float64,
-    )
+    aileron_rate = np.asarray([row.get("aileron_rate", np.nan) for row in rows], dtype=np.float64)
+    elevator_rate = np.asarray([row.get("elevator_rate", np.nan) for row in rows], dtype=np.float64)
+    rudder_rate = np.asarray([row.get("rudder_rate", np.nan) for row in rows], dtype=np.float64)
+    throttle_rate = np.asarray([row.get("throttle_rate", np.nan) for row in rows], dtype=np.float64)
+    state_cost_est = np.asarray([row.get("state_cost_est", np.nan) for row in rows], dtype=np.float64)
+    terrain_cost_est = np.asarray([row.get("terrain_cost_est", np.nan) for row in rows], dtype=np.float64)
+    rate_cost_est = np.asarray([row.get("rate_cost_est", np.nan) for row in rows], dtype=np.float64)
+    limit_cost_est = np.asarray([row.get("limit_cost_est", np.nan) for row in rows], dtype=np.float64)
+    total_stage_cost_est = np.asarray([row.get("total_stage_cost_est", np.nan) for row in rows], dtype=np.float64)
 
     fig, axs = plt.subplots(4, 2, figsize=(14, 13), sharex=True, constrained_layout=True)
     axs = axs.reshape(-1)
 
-    axs[0].plot(time_s, along_track_progress_ft, color="tab:blue", linewidth=2.0)
+    axs[0].plot(time_s, position_error_ft, color="tab:blue", linewidth=2.0, label="position")
+    axs[0].plot(time_s, np.abs(north_error_ft), color="tab:orange", linewidth=1.4, alpha=0.9, label="|north|")
+    axs[0].plot(time_s, np.abs(east_error_ft), color="tab:green", linewidth=1.4, alpha=0.9, label="|east|")
     axs[0].set_ylabel("Feet")
-    axs[0].set_title("Along-Track Progress")
+    axs[0].set_title("Reference Position Error")
+    axs[0].legend(loc="best")
     axs[0].grid(True, alpha=0.25)
 
-    axs[1].plot(time_s, cross_track_error_ft, color="tab:red", linewidth=2.0)
+    axs[1].plot(time_s, altitude_error_ft, color="tab:red", linewidth=2.0, label="altitude")
     axs[1].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
-    if np.isfinite(usable_half_width_ft).any():
-        axs[1].plot(time_s, usable_half_width_ft, color="black", linewidth=1.0, alpha=0.45, linestyle="--")
-        axs[1].plot(time_s, -usable_half_width_ft, color="black", linewidth=1.0, alpha=0.45, linestyle="--")
-    axs[1].set_ylabel("Feet")
-    axs[1].set_title("Cross-Track Error vs Usable Half-Width")
+    axs[1].plot(time_s, phi_error_deg, color="tab:purple", linewidth=1.3, alpha=0.9, label="phi")
+    axs[1].plot(time_s, theta_error_deg, color="tab:brown", linewidth=1.3, alpha=0.9, label="theta")
+    axs[1].plot(time_s, psi_error_deg, color="tab:cyan", linewidth=1.3, alpha=0.9, label="psi")
+    axs[1].set_ylabel("Feet / Deg")
+    axs[1].set_title("Altitude / Attitude Errors")
+    axs[1].legend(loc="best")
     axs[1].grid(True, alpha=0.25)
 
-    axs[2].plot(time_s, altitude_error_ft, color="tab:purple", linewidth=2.0)
-    axs[2].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
+    axs[2].plot(time_s, terrain_clearance_ft, color="tab:green", linewidth=2.0, label="terrain clr")
     if np.isfinite(terrain_clearance_ft).any():
-        axs[2].plot(time_s, terrain_clearance_ft, color="tab:green", linewidth=1.2, alpha=0.8, label="terrain clr")
-    axs[2].set_xlabel("Time (s)")
+        axs[2].plot(
+            time_s,
+            terrain_safe_clearance_ft,
+            color="black",
+            linewidth=1.0,
+            alpha=0.6,
+            linestyle="--",
+            label="safe clr",
+        )
     axs[2].set_ylabel("Feet")
-    axs[2].set_title("Altitude Error / Terrain Clearance")
-    if np.isfinite(terrain_clearance_ft).any():
-        axs[2].legend(loc="best")
+    axs[2].set_title("Terrain Clearance")
+    axs[2].legend(loc="best")
     axs[2].grid(True, alpha=0.25)
 
-    axs[3].plot(time_s, speed_error_kts, color="tab:orange", linewidth=2.0)
-    axs[3].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
-    axs[3].set_ylabel("Knots")
-    axs[3].set_title("Speed Error")
+    axs[3].plot(time_s, nz_g, color="tab:orange", linewidth=1.8, label="nz")
+    axs[3].plot(time_s, alpha_deg, color="tab:red", linewidth=1.8, label="alpha")
+    if np.isfinite(nz_limit_g).any():
+        axs[3].plot(time_s, nz_limit_g, color="black", linewidth=1.0, alpha=0.5, linestyle="--")
+        axs[3].plot(time_s, -nz_limit_g, color="black", linewidth=1.0, alpha=0.5, linestyle="--")
+    if np.isfinite(alpha_limit_deg).any():
+        axs[3].plot(time_s, alpha_limit_deg, color="tab:red", linewidth=1.0, alpha=0.5, linestyle="--")
+    axs[3].set_ylabel("g / deg")
+    axs[3].set_title("Structural Limits")
+    axs[3].legend(loc="best")
     axs[3].grid(True, alpha=0.25)
 
-    axs[4].plot(time_s, cross_track_error_norm, color="tab:red", linewidth=1.8, label="xtrack norm")
-    if np.isfinite(planned_terminal_cross_track_norm).any():
-        axs[4].plot(
-            time_s,
-            planned_terminal_cross_track_norm,
-            color="tab:cyan",
-            linewidth=1.4,
-            alpha=0.9,
-            label="plan terminal xtrack norm",
-        )
-    axs[4].plot(time_s, heading_error_deg / 45.0, color="tab:blue", linewidth=1.4, alpha=0.9, label="heading err / 45")
-    axs[4].axhline(1.0, color="black", linewidth=1.0, alpha=0.35, linestyle="--")
-    axs[4].axhline(-1.0, color="black", linewidth=1.0, alpha=0.35, linestyle="--")
-    axs[4].set_ylabel("Norm")
-    axs[4].set_title("Cross-Track Norm / Heading Error")
+    axs[4].plot(time_s, state_cost_est, color="tab:blue", linewidth=1.6, label="state")
+    axs[4].plot(time_s, terrain_cost_est, color="tab:green", linewidth=1.6, label="terrain")
+    axs[4].plot(time_s, rate_cost_est, color="tab:orange", linewidth=1.6, label="rate")
+    axs[4].plot(time_s, limit_cost_est, color="tab:red", linewidth=1.6, label="limit")
+    axs[4].plot(time_s, total_stage_cost_est, color="black", linewidth=1.8, alpha=0.9, label="total")
+    axs[4].set_ylabel("Cost")
+    axs[4].set_title("Stage Cost Terms")
     axs[4].legend(loc="best")
     axs[4].grid(True, alpha=0.25)
 
-    axs[5].plot(time_s, progress_term_est, color="tab:blue", linewidth=1.6, label="progress")
-    if np.isfinite(altitude_target_term_est).any():
-        axs[5].plot(
-            time_s,
-            altitude_target_term_est,
-            color="tab:purple",
-            linewidth=1.4,
-            alpha=0.95,
-            label="alt target",
-        )
-    axs[5].plot(time_s, centerline_term_est, color="tab:green", linewidth=1.6, label="centerline")
-    axs[5].plot(time_s, offcenter_term_est, color="tab:red", linewidth=1.6, label="offcenter")
-    if np.isfinite(heading_term_est).any():
-        axs[5].plot(time_s, heading_term_est, color="tab:cyan", linewidth=1.2, alpha=0.95, label="heading")
-    if np.isfinite(angular_rate_term_est).any():
-        axs[5].plot(time_s, angular_rate_term_est, color="tab:orange", linewidth=1.2, alpha=0.95, label="ang rate")
-    if np.isfinite(bank_angle_term_est).any():
-        axs[5].plot(time_s, bank_angle_term_est, color="tab:brown", linewidth=1.2, alpha=0.95, label="bank")
-    if np.isfinite(termination_penalty_est).any():
-        axs[5].plot(
-            time_s,
-            -termination_penalty_est,
-            color="black",
-            linewidth=1.2,
-            alpha=0.8,
-            linestyle="--",
-            label="-penalty",
-        )
-    axs[5].plot(time_s, stage_reward_after_penalty_est, color="tab:pink", linewidth=1.8, label="stage post-pen")
-    axs[5].set_ylabel("Reward")
-    axs[5].set_title("Reward Terms")
+    axs[5].plot(time_s, aileron_rate, color="tab:blue", linewidth=1.5, label="ail rate")
+    axs[5].plot(time_s, elevator_rate, color="tab:orange", linewidth=1.5, label="ele rate")
+    axs[5].plot(time_s, rudder_rate, color="tab:green", linewidth=1.5, label="rud rate")
+    axs[5].plot(time_s, throttle_rate, color="tab:brown", linewidth=1.5, label="thr rate")
+    axs[5].set_ylabel("Delta cmd")
+    axs[5].set_title("Control Rates")
     axs[5].legend(loc="best")
     axs[5].grid(True, alpha=0.25)
 
@@ -282,11 +259,12 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
     axs[6].legend(loc="best")
     axs[6].grid(True, alpha=0.25)
 
-    axs[7].plot(time_s, phi_deg, color="tab:purple", linewidth=1.8, label="phi")
-    axs[7].plot(time_s, heading_error_deg, color="tab:blue", linewidth=1.4, alpha=0.9, label="hdg err")
+    axs[7].plot(time_s, north_error_ft, color="tab:blue", linewidth=1.6, label="north")
+    axs[7].plot(time_s, east_error_ft, color="tab:orange", linewidth=1.6, label="east")
+    axs[7].plot(time_s, altitude_error_ft, color="tab:green", linewidth=1.6, label="altitude")
     axs[7].set_xlabel("Time (s)")
-    axs[7].set_ylabel("Deg")
-    axs[7].set_title("Bank / Heading Error")
+    axs[7].set_ylabel("Feet")
+    axs[7].set_title("Signed Reference Errors")
     axs[7].legend(loc="best")
     axs[7].grid(True, alpha=0.25)
 
@@ -688,60 +666,6 @@ def parse_args():
         help="Maximum control steps to run.",
     )
     parser.add_argument(
-        "--target-speed-kts",
-        type=float,
-        default=450.0,
-        help="Target flight speed in knots (kts).",
-    )
-    parser.add_argument(
-        "--initial-speed-kts",
-        type=float,
-        default=450,
-        help="Initial entry speed in knots (kts). Defaults to --target-speed-kts.",
-    )
-    parser.add_argument(
-        "--initial-altitude-ft",
-        type=float,
-        default=500.0,
-        help="Initial entry altitude in feet, relative to the DEM start elevation in canyon DEM mode.",
-    )
-    parser.add_argument(
-        "--initial-roll-deg",
-        type=float,
-        default=None,
-        help="Optional initial roll attitude in degrees.",
-    )
-    parser.add_argument(
-        "--initial-pitch-deg",
-        type=float,
-        default=None,
-        help="Optional initial pitch attitude in degrees.",
-    )
-    parser.add_argument(
-        "--initial-heading-deg",
-        type=float,
-        default=None,
-        help="Optional initial true heading in degrees. Defaults to the DEM follow-canyon heading.",
-    )
-    parser.add_argument(
-        "--initial-alpha-deg",
-        type=float,
-        default=None,
-        help="Optional initial angle of attack in degrees.",
-    )
-    parser.add_argument(
-        "--initial-beta-deg",
-        type=float,
-        default=None,
-        help="Optional initial sideslip angle in degrees.",
-    )
-    parser.add_argument(
-        "--study-name",
-        type=str,
-        default="mppi_canyon_tuning",
-        help="Name of the Optuna study to load tuned parameters from.",
-    )
-    parser.add_argument(
         "--gatekeeper",
         action="store_true",
         help="Wrap the nominal MPPI controller with the DRS gatekeeper and a conservative simple-controller backup.",
@@ -751,24 +675,7 @@ def parse_args():
         action="store_true",
         help="Print gatekeeper timing diagnostics each step.",
     )
-    parser.add_argument(
-        "--mppi-horizon",
-        type=int,
-        default=40,
-        help="Planning horizon for MPPI-based controllers.",
-    )
-    parser.add_argument(
-        "--mppi-num-samples",
-        type=int,
-        default=10000,
-        help="Number of sampled trajectories for MPPI-based controllers.",
-    )
-    parser.add_argument(
-        "--mppi-optimization-steps",
-        type=int,
-        default=3,
-        help="Number of optimization passes per MPPI replan.",
-    )
+
     parser.add_argument(
         "--nominal-dyn-path",
         type=Path,
@@ -781,16 +688,15 @@ def main():
     args = parse_args()
     if args.gatekeeper and args.controller not in {"mppi", "smooth_mppi"}:
         raise ValueError("--gatekeeper currently requires --controller mppi or --controller smooth_mppi.")
-    initial_speed_kts = float(args.target_speed_kts if args.initial_speed_kts is None else args.initial_speed_kts)
-    initial_altitude_ft = float(args.initial_altitude_ft)
+    initial_speed_kts = float(DEFAULT_INITIAL_SPEED_KTS)
+    initial_altitude_ft = float(DEFAULT_INITIAL_ALTITUDE_FT)
     dem_start_pixel = DEM_START_PIXEL
-    initial_heading_deg = args.initial_heading_deg
-    initial_roll_deg = args.initial_roll_deg
-    initial_pitch_deg = args.initial_pitch_deg
-    initial_alpha_deg = args.initial_alpha_deg
-    initial_beta_deg = args.initial_beta_deg
+    initial_heading_deg = DEFAULT_INITIAL_HEADING_DEG
+    initial_roll_deg = DEFAULT_INITIAL_ROLL_DEG
+    initial_pitch_deg = DEFAULT_INITIAL_PITCH_DEG
+    initial_alpha_deg = DEFAULT_INITIAL_ALPHA_DEG
+    initial_beta_deg = DEFAULT_INITIAL_BETA_DEG
 
-    nominal_initial_conditions = None
     if args.nominal_dyn_path is not None:
         nominal_canyon = DEMCanyon(
             dem_path=str(DEM_PATH),
@@ -889,15 +795,9 @@ def main():
     altitude_ref_ft = float(getattr(env.unwrapped, "dem_start_elev_ft", 0.0))
     initial_controller_state = to_mppi_state(env, state, altitude_ref_ft)
     start_path_north_ft = float(initial_controller_state["p_N"])
-    start_path_east_ft = float(initial_controller_state["p_E"])
-
-    target_altitude_ft = float(env.unwrapped.target_altitude_ft - altitude_ref_ft)
-    min_altitude_ft = float(env.unwrapped.min_altitude_ft - altitude_ref_ft)
-    max_altitude_ft = float(env.unwrapped.max_altitude_ft - altitude_ref_ft)
 
     canyon = env.unwrapped.canyon
-    reference_altitude_samples_ft = None
-    reference_speed_samples_fps = None
+    north_samples_ft, width_samples_ft, center_east_samples_ft, _ = get_active_canyon_reference(env)
     nominal_reference = None
     if args.nominal_dyn_path is not None:
         nominal_reference = build_nominal_reference_from_dyn(
@@ -906,62 +806,25 @@ def main():
             altitude_ref_ft=altitude_ref_ft,
             resample_spacing_ft=float(getattr(env.unwrapped, "canyon_segment_spacing_ft", 12.0)),
         )
-        north_samples_ft = np.asarray(nominal_reference["north_ft"], dtype=np.float32)
-        width_samples_ft = np.asarray(nominal_reference["width_ft"], dtype=np.float32)
-        center_east_samples_ft = np.asarray(nominal_reference["east_ft"], dtype=np.float32)
-        centerline_heading_samples_rad = np.asarray(nominal_reference["heading_rad"], dtype=np.float32)
-        reference_altitude_samples_ft = np.asarray(nominal_reference["altitude_ft"], dtype=np.float32)
-        reference_speed_samples_fps = np.asarray(nominal_reference["speed_fps"], dtype=np.float32)
         print(
             f"Loaded nominal dyn reference from {args.nominal_dyn_path} "
-            f"({len(north_samples_ft)} samples)."
+            f"({len(np.asarray(nominal_reference['reference_states_ft_rad']))} samples)."
         )
-    else:
-        north_samples_ft, width_samples_ft, center_east_samples_ft, centerline_heading_samples_rad = get_active_canyon_reference(env)
 
-    mppi_target_altitude_ft = target_altitude_ft
-
-    optuna_params, optuna_source = load_mppi_optuna_params(study_name=args.study_name)
-    if optuna_params:
-        print(
-            f"Auto-loaded MPPI tuned parameters from {optuna_source} "
-            f"({len(optuna_params)} parameters)."
-        )
-        if "target_alt_tune_ft" in optuna_params:
-            mppi_target_altitude_ft = float(optuna_params["target_alt_tune_ft"])
-    else:
-        print("Note: No tuned MPPI parameters found; using built-in defaults.")
-
-    if reference_altitude_samples_ft is not None:
-        mppi_target_altitude_ft = float(reference_altitude_samples_ft[0])
-
-    config_base_kwargs = build_mppi_base_config_kwargs(
-        optuna_params=optuna_params,
-        target_speed_fps=args.target_speed_kts * KTS_TO_FPS,
-        target_altitude_ft=mppi_target_altitude_ft,
-        min_altitude_ft=min_altitude_ft,
-        max_altitude_ft=max_altitude_ft,
-        wall_margin_ft=float(env.unwrapped.wall_margin_ft),
-        horizon=args.mppi_horizon,
-        num_samples=args.mppi_num_samples,
-        optimization_steps=args.mppi_optimization_steps,
-        terrain_collision_height_ft=max(min_altitude_ft + 40.0, 160.0),
-    )
-    if reference_altitude_samples_ft is not None:
-        config_base_kwargs["altitude_target_gain"] = max(
-            float(config_base_kwargs.get("altitude_target_gain", 0.0)),
-            4.0,
-        )
-    if reference_speed_samples_fps is not None:
-        config_base_kwargs["speed_target_gain"] = max(
-            float(config_base_kwargs.get("speed_target_gain", 0.0)),
-            1.5,
-        )
-        config_base_kwargs["target_speed_fps"] = float(reference_speed_samples_fps[0])
+    config_base_kwargs = build_mppi_base_config_kwargs()
+    if controller_tag == "mppi":
+        config_base_kwargs, mppi_tuning_source, mppi_tuned_keys = with_default_mppi_optuna_params(config_base_kwargs)
+        if mppi_tuned_keys:
+            print(
+                f"Auto-loaded MPPI tuned parameters from {mppi_tuning_source} "
+                f"({len(mppi_tuned_keys)} parameters)."
+            )
+        else:
+            print("Note: No tuned MPPI parameters found; using built-in defaults.")
 
     if controller_tag == "simple":
         simple_config = SimpleCanyonControllerConfig(
-            target_speed_fps=args.target_speed_kts * 1.68781,
+            target_speed_fps=float(initial_speed_kts) * KTS_TO_FPS,
         )
         simple_config, simple_tuning_source, simple_tuned_keys = with_default_simple_controller_optuna_gains(simple_config)
         if simple_tuned_keys:
@@ -979,16 +842,20 @@ def main():
     elif controller_tag == "altitude_hold":
         controller = AltitudeHoldController()
     else:
+        if nominal_reference is None:
+            raise ValueError("MPPI controllers now require --nominal-dyn-path.")
+        if not all(
+            hasattr(canyon, attr)
+            for attr in ("north_samples_ft", "east_samples_ft", "ordered_dem_msl_m")
+        ):
+            raise TypeError("MPPI controllers require a DEM canyon with a queryable terrain grid.")
         controller, config = build_mppi_controller(
             controller_tag,
-            optuna_params=optuna_params,
             config_base_kwargs=config_base_kwargs,
-            canyon_north_samples_ft=north_samples_ft,
-            canyon_width_samples_ft=width_samples_ft,
-            canyon_center_east_samples_ft=center_east_samples_ft,
-            canyon_centerline_heading_rad_samples=centerline_heading_samples_rad,
-            reference_altitude_samples_ft=reference_altitude_samples_ft,
-            reference_speed_samples_fps=reference_speed_samples_fps,
+            reference_trajectory=nominal_reference,
+            terrain_north_samples_ft=np.asarray(canyon.north_samples_ft, dtype=np.float32),
+            terrain_east_samples_ft=np.asarray(canyon.east_samples_ft, dtype=np.float32),
+            terrain_elevation_ft=np.asarray(canyon.ordered_dem_msl_m, dtype=np.float32) * M_TO_FT - altitude_ref_ft,
         )
         _print_mppi_config(controller_tag, config)
 
@@ -1064,11 +931,18 @@ def main():
         f"alpha={np.degrees(float(state['alpha'])):.1f} deg, "
         f"beta={np.degrees(float(state.get('beta', 0.0))):.1f} deg."
     )
-    print(
-        f"{'Step':<5} | {'p_N_rel':<8} | {'LatErr':<8} | {'h_rel':<8} | "
-        f"{'V':<6} | {'W_c':<6} | {'Plan(ms)':<8} | {'gk(ms)':<8} | {'gk_ws':<7} | {'gk_upd':<7} | {'gk_bak':<7}"
-    )
-    print("-" * 110)
+    if controller_tag in {"mppi", "smooth_mppi"}:
+        print(
+            f"{'Step':<5} | {'Ref':<5} | {'PosErr':<8} | {'dN':<8} | {'dE':<8} | {'dH':<8} | "
+            f"{'dPsi':<7} | {'Clr':<7} | {'Cost':<10} | {'Mode':<6} | {'Plan(ms)':<8} | {'gk(ms)':<8}"
+        )
+        print("-" * 124)
+    else:
+        print(
+            f"{'Step':<5} | {'p_N_rel':<8} | {'LatErr':<8} | {'h_rel':<8} | "
+            f"{'V':<6} | {'W_c':<6} | {'Plan(ms)':<8} | {'gk(ms)':<8} | {'gk_ws':<7} | {'gk_upd':<7} | {'gk_bak':<7}"
+        )
+        print("-" * 110)
 
     try:
         prev_applied_action = np.asarray([0.0, 0.0, 0.0, 0.55], dtype=np.float32)
@@ -1221,15 +1095,7 @@ def main():
                     [[lookahead_north_ft, lookahead_center_east_ft]],
                     dtype=np.float32,
                 )
-                lookahead_h_ft = 0.0
-                if reference_altitude_samples_ft is not None and len(reference_altitude_samples_ft) == len(north_samples_ft):
-                    lookahead_h_ft = float(
-                        np.interp(
-                            lookahead_north_ft,
-                            north_samples_ft,
-                            reference_altitude_samples_ft,
-                        )
-                    )
+                lookahead_h_ft = float(controller_state["h"])
                 planner_debug["lookahead_h_ft"] = np.asarray(
                     [lookahead_h_ft],
                     dtype=np.float32,
@@ -1241,10 +1107,10 @@ def main():
                 simple_guidance = dict(getattr(controller, "last_guidance", {}) or {})
                 heading_cmd_deg = float(simple_guidance.get("centerline_heading_deg", heading_deg))
             else:
-                get_hdg_cmd = getattr(controller, "get_centerline_heading_rad", None)
+                get_hdg_cmd = getattr(controller, "get_reference_heading_rad", None)
                 if callable(get_hdg_cmd):
                     try:
-                        heading_cmd_deg = _wrap_heading_deg(get_hdg_cmd(controller_state["p_N"]))
+                        heading_cmd_deg = _wrap_heading_deg(get_hdg_cmd())
                     except Exception:
                         heading_cmd_deg = heading_deg
 
@@ -1300,286 +1166,104 @@ def main():
                     float(state["u"]) ** 2 + float(state["v"]) ** 2 + float(state["w"]) ** 2
                 )
             )
-            speed_error_kts = float((speed_fps - float(config_base_kwargs["target_speed_fps"])) / KTS_TO_FPS)
             if controller_tag in {"mppi", "smooth_mppi"}:
                 mppi_cfg = getattr(controller, "config", None)
                 if mppi_cfg is None:
                     raise RuntimeError("MPPI controller missing config while collecting debug diagnostics.")
-
-                p_n_post_ft = float(post_controller_state["p_N"])
-                p_e_post_ft = float(post_controller_state["p_E"])
-                h_post_ft = float(post_controller_state["h"])
-                psi_post_rad = float(post_controller_state["psi"])
-
-                width_post_ft = float(np.interp(p_n_post_ft, north_samples_ft, width_samples_ft))
-                center_post_e_ft = float(np.interp(p_n_post_ft, north_samples_ft, center_east_samples_ft))
-                center_heading_post_rad = float(np.interp(p_n_post_ft, north_samples_ft, centerline_heading_samples_rad))
-                lateral_debug_ft = p_e_post_ft - center_post_e_ft
-                usable_half_width_ft = float(max(0.5 * width_post_ft - float(mppi_cfg.wall_margin_ft), 1.0))
-                lateral_error_norm = float(abs(lateral_debug_ft) / usable_half_width_ft)
-
-                heading_error_rad = _wrap_angle_rad(psi_post_rad - center_heading_post_rad)
-                heading_error_deg = float(np.degrees(heading_error_rad))
-                phi_post_deg = float(np.degrees(float(post_controller_state["phi"])))
-
-                dn_step_ft = float(post_controller_state["p_N"] - controller_state["p_N"])
-                de_step_ft = float(post_controller_state["p_E"] - controller_state["p_E"])
-                progress_step_ft = float(
-                    dn_step_ft * np.cos(center_heading_post_rad)
-                    + de_step_ft * np.sin(center_heading_post_rad)
-                )
-
-                dist_prev_start_ft = float(
-                    np.hypot(
-                        float(controller_state["p_N"]) - start_path_north_ft,
-                        float(controller_state["p_E"]) - start_path_east_ft,
-                    )
-                )
-                dist_now_start_ft = float(
-                    np.hypot(
-                        p_n_post_ft - start_path_north_ft,
-                        p_e_post_ft - start_path_east_ft,
-                    )
-                )
-                progress_from_start_step_ft = float(dist_now_start_ft - dist_prev_start_ft)
-
-                progress_local = float(np.clip(progress_step_ft / 25.0, -2.0, 3.0))
-                progress_global = float(np.clip(progress_from_start_step_ft / 25.0, -2.0, 2.0))
-                progress_term_est = float(
-                    float(mppi_cfg.progress_gain) * (0.8 * progress_local + 0.2 * progress_global)
-                )
-
-                speed_term_est = float(
-                    float(mppi_cfg.speed_gain) * np.clip(speed_fps / 600.0, 0.0, 2.5)
-                )
-
-                altitude_target_error_ft = float(
-                    abs(h_post_ft - float(getattr(mppi_cfg, "target_altitude_ft", 250.0)))
-                )
-                altitude_target_term_est = float(
-                    float(getattr(mppi_cfg, "altitude_target_gain", 0.0))
-                    * (
-                        1.0
-                        - float(
-                            np.clip(
-                                altitude_target_error_ft
-                                / max(float(getattr(mppi_cfg, "altitude_target_scale_ft", 250.0)), 1.0),
-                                0.0,
-                                2.0,
-                            )
-                        )
-                    )
-                )
-
-                centerline_term_est = float(
-                    float(mppi_cfg.centerline_gain)
-                    * (1.0 - float(np.clip(lateral_error_norm, 0.0, 1.0)))
-                )
-                offcenter_term_est = float(
-                    -float(mppi_cfg.offcenter_penalty_gain)
-                    * float(np.clip(lateral_error_norm - 0.5, 0.0, 2.0))
-                )
-                heading_term_est = float(
-                    float(mppi_cfg.heading_alignment_gain)
-                    * (
-                        1.0
-                        - float(
-                            np.clip(
-                                abs(heading_error_rad) / max(float(mppi_cfg.heading_alignment_scale_rad), 1e-3),
-                                0.0,
-                                2.0,
-                            )
-                        )
-                    )
-                )
-                rate_mag_deg_s = float(
-                    np.degrees(
-                        np.sqrt(
-                            max(
-                                float(post_controller_state["p"]) ** 2
-                                + float(post_controller_state["q"]) ** 2
-                                + float(post_controller_state["r"]) ** 2,
-                                0.0,
-                            )
-                        )
-                    )
-                )
-                angular_rate_term_est = float(
-                    -float(mppi_cfg.angular_rate_penalty_gain)
-                    * float(
-                        np.clip(
-                            (rate_mag_deg_s - float(mppi_cfg.angular_rate_threshold_deg_s))
-                            / max(float(mppi_cfg.angular_rate_threshold_deg_s), 1.0),
-                            0.0,
-                            3.0,
-                        )
-                    )
-                )
-                bank_angle_term_est = float(
-                    -float(getattr(mppi_cfg, "bank_angle_penalty_gain", 0.0))
-                    * float(
-                        np.clip(
-                            (abs(phi_post_deg) - float(getattr(mppi_cfg, "bank_angle_threshold_deg", 85.0)))
-                            / max(float(getattr(mppi_cfg, "bank_angle_threshold_deg", 85.0)), 1.0),
-                            0.0,
-                            3.0,
-                        )
-                    )
-                )
-                alive_bonus_est = float(getattr(mppi_cfg, "alive_bonus", 0.0))
-
-                stage_reward_est_unclipped = float(
-                    progress_term_est
-                    + speed_term_est
-                    + altitude_target_term_est
-                    + centerline_term_est
-                    + offcenter_term_est
-                    + heading_term_est
-                    + angular_rate_term_est
-                    + bank_angle_term_est
-                    + alive_bonus_est
-                )
-                stage_reward_est_clipped = float(
-                    np.clip(
-                        stage_reward_est_unclipped,
-                        -float(mppi_cfg.max_step_reward_abs),
-                        float(mppi_cfg.max_step_reward_abs),
-                    )
-                )
-                wall_penalty_est = float(
-                    float(getattr(mppi_cfg, "wall_crash_penalty", 0.0))
-                    * float(np.clip(lateral_error_norm - 1.0, 0.0, 3.0))
-                )
-                altitude_violation_ft = float(
-                    max(float(mppi_cfg.min_altitude_ft) - h_post_ft, 0.0)
-                    + max(h_post_ft - float(mppi_cfg.max_altitude_ft), 0.0)
-                )
-                altitude_penalty_est = float(
-                    float(getattr(mppi_cfg, "altitude_violation_penalty", 0.0))
-                    * float(np.clip(altitude_violation_ft / 250.0, 0.0, 3.0))
-                )
-                terrain_collision_est = bool(h_post_ft <= float(mppi_cfg.terrain_collision_height_ft))
-                out_of_altitude_est = bool(
-                    (h_post_ft < float(mppi_cfg.min_altitude_ft))
-                    or (h_post_ft > float(mppi_cfg.max_altitude_ft))
-                )
-                early_remaining_frac = float(
-                    np.clip(
-                        (float(mppi_cfg.horizon) - (float(step) + 1.0)) / max(float(mppi_cfg.horizon), 1.0),
-                        0.0,
-                        1.0,
-                    )
-                )
-                early_penalty_est = float(getattr(mppi_cfg, "early_termination_penalty_gain", 0.0)) * early_remaining_frac
-                terrain_penalty_est = float(
-                    float(mppi_cfg.terrain_crash_penalty) + 2.0 * early_penalty_est
-                    if terrain_collision_est
-                    else 0.0
-                )
-                altitude_termination_penalty_est = float(
-                    float(getattr(mppi_cfg, "altitude_violation_penalty", 0.0)) + early_penalty_est
-                    if out_of_altitude_est
-                    else 0.0
-                )
-                termination_penalty_est = float(
-                    wall_penalty_est
-                    + altitude_penalty_est
-                    + terrain_penalty_est
-                    + altitude_termination_penalty_est
-                )
-                stage_reward_after_penalty_est = float(stage_reward_est_clipped - termination_penalty_est)
-
+                reference_state = np.asarray(controller.get_reference_state(step + 1), dtype=np.float32)
+                state_weights = np.asarray(mppi_cfg.state_tracking_weights, dtype=np.float64)
                 action_vec = np.asarray(action, dtype=np.float32)
-                action_l2_cost_est = float(
-                    float(mppi_cfg.action_l2_weight) * np.sum(np.square(action_vec))
-                )
-                action_diff_cost_est = float(
-                    float(mppi_cfg.action_diff_weight)
-                    * np.sum(np.square(action_vec - prev_applied_action))
-                )
+                action_rate = action_vec - prev_applied_action
 
-                planned_terminal_cross_track_ft = np.nan
-                planned_terminal_cross_track_norm = np.nan
-                planned_terminal_heading_error_deg = np.nan
-                planned_min_cross_track_norm = np.nan
-                final_xy = None
-                if raw_debug is not None:
-                    final_xy = np.asarray(raw_debug.get("final_xy", np.zeros((0, 2), dtype=np.float32)), dtype=np.float32)
-                if final_xy is not None and final_xy.ndim == 2 and final_xy.shape[0] >= 1 and final_xy.shape[1] == 2:
-                    plan_n_ft = final_xy[:, 0].astype(np.float64, copy=False)
-                    plan_e_ft = final_xy[:, 1].astype(np.float64, copy=False)
-                    plan_center_e_ft = np.interp(plan_n_ft, north_samples_ft, center_east_samples_ft)
-                    plan_width_ft = np.interp(plan_n_ft, north_samples_ft, width_samples_ft)
-                    plan_heading_rad = np.interp(plan_n_ft, north_samples_ft, centerline_heading_samples_rad)
-                    plan_usable_half_ft = np.maximum(
-                        0.5 * plan_width_ft - float(mppi_cfg.wall_margin_ft),
-                        1.0,
-                    )
-                    plan_cross_track_ft = plan_e_ft - plan_center_e_ft
-                    plan_cross_track_norm = np.abs(plan_cross_track_ft) / plan_usable_half_ft
-                    planned_terminal_cross_track_ft = float(plan_cross_track_ft[-1])
-                    planned_terminal_cross_track_norm = float(plan_cross_track_norm[-1])
-                    planned_min_cross_track_norm = float(np.nanmin(plan_cross_track_norm))
-                    if final_xy.shape[0] >= 2:
-                        plan_dn_ft = float(plan_n_ft[-1] - plan_n_ft[-2])
-                        plan_de_ft = float(plan_e_ft[-1] - plan_e_ft[-2])
-                        plan_heading_terminal_rad = float(np.arctan2(plan_de_ft, plan_dn_ft))
+                north_error_ft = float(post_controller_state["p_N"] - reference_state[0])
+                east_error_ft = float(post_controller_state["p_E"] - reference_state[1])
+                altitude_error_ft = float(post_controller_state["h"] - reference_state[2])
+                phi_error_rad = _wrap_angle_rad(float(post_controller_state["phi"]) - float(reference_state[3]))
+                theta_error_rad = _wrap_angle_rad(float(post_controller_state["theta"]) - float(reference_state[4]))
+                psi_error_rad = _wrap_angle_rad(float(post_controller_state["psi"]) - float(reference_state[5]))
+                position_error_ft = float(np.hypot(north_error_ft, east_error_ft))
+
+                state_error_vec = np.asarray(
+                    [
+                        north_error_ft,
+                        east_error_ft,
+                        altitude_error_ft,
+                        phi_error_rad,
+                        theta_error_rad,
+                        psi_error_rad,
+                    ],
+                    dtype=np.float64,
+                )
+                state_cost_est = float(np.sum(state_weights * np.square(state_error_vec)))
+
+                terrain_clearance_ft = float(info.get("terrain_clearance_ft", np.nan))
+                terrain_safe_clearance_ft = float(mppi_cfg.terrain_safe_clearance_ft)
+                if np.isfinite(terrain_clearance_ft):
+                    if terrain_clearance_ft <= 0.0:
+                        terrain_cost_est = float(mppi_cfg.terrain_collision_penalty)
                     else:
-                        plan_heading_terminal_rad = float(plan_heading_rad[-1])
-                    planned_terminal_heading_error_deg = float(
-                        np.degrees(_wrap_angle_rad(plan_heading_terminal_rad - plan_heading_rad[-1]))
-                    )
+                        terrain_cost_est = float(
+                            min(
+                                float(mppi_cfg.terrain_collision_penalty),
+                                float(mppi_cfg.terrain_repulsion_scale)
+                                * np.exp(
+                                    -float(mppi_cfg.terrain_decay_rate_ft_inv)
+                                    * (terrain_clearance_ft - terrain_safe_clearance_ft)
+                                ),
+                            )
+                        )
+                else:
+                    terrain_cost_est = np.nan
+
+                rate_weights = np.asarray(mppi_cfg.control_rate_weights, dtype=np.float64)
+                rate_cost_est = float(np.sum(rate_weights * np.square(action_rate)))
+
+                alpha_rad = float(np.arctan2(float(post_controller_state["w"]), max(float(post_controller_state["u"]), 1.0)))
+                alpha_deg = float(np.degrees(alpha_rad))
+                alpha_limit_deg = float(np.degrees(float(mppi_cfg.alpha_limit_rad)))
+                alpha_excess_rad = max(alpha_rad - float(mppi_cfg.alpha_limit_rad), 0.0)
+                nz_g = float(post_controller_state.get("nz", 1.0))
+                nz_excess_g = max(abs(nz_g) - float(mppi_cfg.nz_limit_g), 0.0)
+                limit_cost_est = float(
+                    float(mppi_cfg.nz_penalty_weight) * (nz_excess_g ** 2)
+                    + float(mppi_cfg.alpha_penalty_weight) * (alpha_excess_rad ** 2)
+                )
+                total_stage_cost_est = float(state_cost_est + terrain_cost_est + rate_cost_est + limit_cost_est)
 
                 mppi_tracking_rows.append(
                     {
                         "step": int(step),
                         "time_s": float(step / 30.0),
-                        "along_track_progress_ft": float(post_controller_state["p_N"] - start_path_north_ft),
-                        "cross_track_error_ft": float(info.get("lateral_error_ft", np.nan)),
-                        "cross_track_error_norm": float(lateral_error_norm),
-                        "canyon_width_ft": float(width_post_ft),
-                        "usable_half_width_ft": float(usable_half_width_ft),
-                        "altitude_error_ft": float(info.get("altitude_error_ft", np.nan)),
-                        "speed_error_kts": float(speed_error_kts),
-                        "speed_fps": float(speed_fps),
-                        "centerline_heading_deg": float(np.degrees(center_heading_post_rad)),
-                        "heading_error_deg": float(heading_error_deg),
-                        "phi_deg": float(phi_post_deg),
-                        "p_rate_deg_s": float(np.degrees(float(post_controller_state["p"]))),
-                        "q_rate_deg_s": float(np.degrees(float(post_controller_state["q"]))),
-                        "r_rate_deg_s": float(np.degrees(float(post_controller_state["r"]))),
-                        "rate_mag_deg_s": float(rate_mag_deg_s),
-                        "progress_step_ft": float(progress_step_ft),
-                        "progress_from_start_step_ft": float(progress_from_start_step_ft),
-                        "progress_term_est": float(progress_term_est),
-                        "speed_term_est": float(speed_term_est),
-                        "altitude_target_term_est": float(altitude_target_term_est),
-                        "centerline_term_est": float(centerline_term_est),
-                        "offcenter_term_est": float(offcenter_term_est),
-                        "heading_term_est": float(heading_term_est),
-                        "angular_rate_term_est": float(angular_rate_term_est),
-                        "bank_angle_term_est": float(bank_angle_term_est),
-                        "alive_bonus_est": float(alive_bonus_est),
-                        "stage_reward_est_unclipped": float(stage_reward_est_unclipped),
-                        "stage_reward_est_clipped": float(stage_reward_est_clipped),
-                        "wall_penalty_est": float(wall_penalty_est),
-                        "altitude_penalty_est": float(altitude_penalty_est),
-                        "terrain_penalty_est": float(terrain_penalty_est),
-                        "altitude_termination_penalty_est": float(altitude_termination_penalty_est),
-                        "termination_penalty_est": float(termination_penalty_est),
-                        "stage_reward_after_penalty_est": float(stage_reward_after_penalty_est),
-                        "action_l2_cost_est": float(action_l2_cost_est),
-                        "action_diff_cost_est": float(action_diff_cost_est),
+                        "reference_index": int(step + 1),
+                        "reference_north_ft": float(reference_state[0]),
+                        "reference_east_ft": float(reference_state[1]),
+                        "reference_altitude_ft": float(reference_state[2]),
+                        "north_error_ft": float(north_error_ft),
+                        "east_error_ft": float(east_error_ft),
+                        "position_error_ft": float(position_error_ft),
+                        "altitude_error_ft": float(altitude_error_ft),
+                        "phi_error_deg": float(np.degrees(phi_error_rad)),
+                        "theta_error_deg": float(np.degrees(theta_error_rad)),
+                        "psi_error_deg": float(np.degrees(psi_error_rad)),
+                        "terrain_clearance_ft": float(terrain_clearance_ft),
+                        "terrain_safe_clearance_ft": float(terrain_safe_clearance_ft),
+                        "nz_g": float(nz_g),
+                        "nz_limit_g": float(mppi_cfg.nz_limit_g),
+                        "alpha_deg": float(alpha_deg),
+                        "alpha_limit_deg": float(alpha_limit_deg),
+                        "state_cost_est": float(state_cost_est),
+                        "terrain_cost_est": float(terrain_cost_est),
+                        "rate_cost_est": float(rate_cost_est),
+                        "limit_cost_est": float(limit_cost_est),
+                        "total_stage_cost_est": float(total_stage_cost_est),
                         "aileron_cmd": float(action_vec[0]),
                         "elevator_cmd": float(action_vec[1]),
                         "rudder_cmd": float(action_vec[2]),
                         "throttle_cmd": float(action_vec[3]),
-                        "planned_terminal_cross_track_ft": float(planned_terminal_cross_track_ft),
-                        "planned_terminal_cross_track_norm": float(planned_terminal_cross_track_norm),
-                        "planned_terminal_heading_error_deg": float(planned_terminal_heading_error_deg),
-                        "planned_min_cross_track_norm": float(planned_min_cross_track_norm),
-                        "target_speed_kts": float(config_base_kwargs["target_speed_fps"] / KTS_TO_FPS),
-                        "terrain_clearance_ft": float(info.get("terrain_clearance_ft", np.nan)),
+                        "aileron_rate": float(action_rate[0]),
+                        "elevator_rate": float(action_rate[1]),
+                        "rudder_rate": float(action_rate[2]),
+                        "throttle_rate": float(action_rate[3]),
                         "termination_reason": str(termination_reason),
                         "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
                         "plan_ms": float(plan_ms),
@@ -1612,13 +1296,24 @@ def main():
                 )
 
             if step % 5 == 0:
-                rel_north_ft = float(controller_state["p_N"] - start_path_north_ft)
-                rel_alt_ft = float(controller_state["h"])
-                print(
-                    f"{step:<5} | {rel_north_ft:<8.0f} | {lateral_ft:<8.0f} | {rel_alt_ft:<8.0f} | "
-                    f"{speed_fps:<6.0f} | {width_ft:<6.0f} | {plan_ms:<8.1f} | {gk_ms:<8.1f} | "
-                    f"{gk_nom_prep:<7.1f} | {gk_update_ms:<7.1f} | {gk_backup_ms:<7.1f}"
-                )
+                if controller_tag in {"mppi", "smooth_mppi"}:
+                    mode_label = "NOM"
+                    if gatekeeper_state is not None and bool(gatekeeper_state.using_backup):
+                        mode_label = "BACKUP"
+                    print(
+                        f"{step:<5} | {step + 1:<5d} | {position_error_ft:<8.1f} | {north_error_ft:<8.1f} | "
+                        f"{east_error_ft:<8.1f} | {altitude_error_ft:<8.1f} | {np.degrees(psi_error_rad):<7.1f} | "
+                        f"{terrain_clearance_ft:<7.1f} | {total_stage_cost_est:<10.1f} | {mode_label:<6} | "
+                        f"{plan_ms:<8.1f} | {gk_ms:<8.1f}"
+                    )
+                else:
+                    rel_north_ft = float(controller_state["p_N"] - start_path_north_ft)
+                    rel_alt_ft = float(controller_state["h"])
+                    print(
+                        f"{step:<5} | {rel_north_ft:<8.0f} | {lateral_ft:<8.0f} | {rel_alt_ft:<8.0f} | "
+                        f"{speed_fps:<6.0f} | {width_ft:<6.0f} | {plan_ms:<8.1f} | {gk_ms:<8.1f} | "
+                        f"{gk_nom_prep:<7.1f} | {gk_update_ms:<7.1f} | {gk_backup_ms:<7.1f}"
+                    )
 
             if terminated or truncated:
                 print(f"Episode ended at step {step}: {termination_reason}")
@@ -1655,34 +1350,29 @@ def main():
             print(f"Saved tracking diagnostics CSV: {diag_csv_path}")
             print(f"Saved tracking diagnostics plot: {diag_plot_path}")
         if mppi_tracking_rows:
-            abs_cte_norm = np.asarray(
-                [abs(float(row.get("cross_track_error_norm", np.nan))) for row in mppi_tracking_rows],
+            position_error_ft = np.asarray(
+                [float(row.get("position_error_ft", np.nan)) for row in mppi_tracking_rows],
                 dtype=np.float64,
             )
-            progress_term = np.asarray(
-                [float(row.get("progress_term_est", np.nan)) for row in mppi_tracking_rows],
+            terrain_clearance_ft = np.asarray(
+                [float(row.get("terrain_clearance_ft", np.nan)) for row in mppi_tracking_rows],
                 dtype=np.float64,
             )
-            centerline_term = np.asarray(
-                [float(row.get("centerline_term_est", np.nan)) for row in mppi_tracking_rows],
+            total_stage_cost = np.asarray(
+                [float(row.get("total_stage_cost_est", np.nan)) for row in mppi_tracking_rows],
                 dtype=np.float64,
             )
-            offcenter_term = np.asarray(
-                [float(row.get("offcenter_term_est", np.nan)) for row in mppi_tracking_rows],
-                dtype=np.float64,
-            )
-            stage_reward_clip = np.asarray(
-                [float(row.get("stage_reward_est_clipped", np.nan)) for row in mppi_tracking_rows],
+            limit_cost = np.asarray(
+                [float(row.get("limit_cost_est", np.nan)) for row in mppi_tracking_rows],
                 dtype=np.float64,
             )
             print(
                 "MPPI debug summary: "
-                f"mean|cte_norm|={np.nanmean(abs_cte_norm):.3f}, "
-                f"max|cte_norm|={np.nanmax(abs_cte_norm):.3f}, "
-                f"mean(progress_term)={np.nanmean(progress_term):.3f}, "
-                f"mean(centerline_term)={np.nanmean(centerline_term):.3f}, "
-                f"mean(offcenter_term)={np.nanmean(offcenter_term):.3f}, "
-                f"mean(stage_reward_clip)={np.nanmean(stage_reward_clip):.3f}"
+                f"mean(position_error_ft)={np.nanmean(position_error_ft):.1f}, "
+                f"max(position_error_ft)={np.nanmax(position_error_ft):.1f}, "
+                f"min(terrain_clearance_ft)={np.nanmin(terrain_clearance_ft):.1f}, "
+                f"mean(limit_cost)={np.nanmean(limit_cost):.1f}, "
+                f"mean(total_stage_cost)={np.nanmean(total_stage_cost):.1f}"
             )
 
 

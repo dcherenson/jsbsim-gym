@@ -112,21 +112,28 @@ def _wrap_heading_deg(angle_deg: float) -> float:
     return float(np.mod(float(angle_deg), 360.0))
 
 
-def _body_euler_deg_from_dyn(dyn) -> tuple[float, float, float]:
+def _body_euler_deg_series_from_dyn(dyn) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Recover JSBSim-style body Euler angles from the Aerosandbox trajectory."""
-    x_body_earth = np.stack(dyn.convert_axes(1, 0, 0, "body", "earth"), axis=1)[0]
-    y_body_earth = np.stack(dyn.convert_axes(0, 1, 0, "body", "earth"), axis=1)[0]
-    z_body_earth = np.stack(dyn.convert_axes(0, 0, 1, "body", "earth"), axis=1)[0]
+    x_body_earth = np.stack(dyn.convert_axes(1, 0, 0, "body", "earth"), axis=1)
+    y_body_earth = np.stack(dyn.convert_axes(0, 1, 0, "body", "earth"), axis=1)
+    z_body_earth = np.stack(dyn.convert_axes(0, 0, 1, "body", "earth"), axis=1)
 
     # Aerosandbox uses north-east-down. JSBSim ICs use north-east-up attitudes.
-    x_body_neu = np.asarray([x_body_earth[0], x_body_earth[1], -x_body_earth[2]], dtype=np.float64)
-    y_body_neu = np.asarray([y_body_earth[0], y_body_earth[1], -y_body_earth[2]], dtype=np.float64)
-    z_body_neu = np.asarray([z_body_earth[0], z_body_earth[1], -z_body_earth[2]], dtype=np.float64)
+    x_body_neu = x_body_earth.copy().astype(np.float64)
+    y_body_neu = y_body_earth.copy().astype(np.float64)
+    z_body_neu = z_body_earth.copy().astype(np.float64)
+    x_body_neu[:, 2] *= -1.0
+    y_body_neu[:, 2] *= -1.0
+    z_body_neu[:, 2] *= -1.0
 
-    pitch_deg = float(np.degrees(np.arctan2(x_body_neu[2], np.hypot(x_body_neu[0], x_body_neu[1]))))
-    heading_deg = _wrap_heading_deg(np.degrees(np.arctan2(x_body_neu[1], x_body_neu[0])))
-    roll_deg = float(np.degrees(np.arctan2(y_body_neu[2], -z_body_neu[2])))
-    return roll_deg, pitch_deg, heading_deg
+    pitch_deg = np.degrees(np.arctan2(x_body_neu[:, 2], np.hypot(x_body_neu[:, 0], x_body_neu[:, 1])))
+    heading_deg = np.mod(np.degrees(np.arctan2(x_body_neu[:, 1], x_body_neu[:, 0])), 360.0)
+    roll_deg = np.degrees(np.arctan2(y_body_neu[:, 2], -z_body_neu[:, 2]))
+    return (
+        np.asarray(roll_deg, dtype=np.float64),
+        np.asarray(pitch_deg, dtype=np.float64),
+        np.asarray(heading_deg, dtype=np.float64),
+    )
 
 
 def load_nominal_initial_conditions_from_dyn(
@@ -182,7 +189,10 @@ def load_nominal_initial_conditions_from_dyn(
     else:
         terrain_msl_ft = float(canyon.get_pixel_info(pixel_x, pixel_y)["elevation_msl_ft"])
 
-    roll_deg, pitch_deg, heading_deg = _body_euler_deg_from_dyn(dyn)
+    roll_deg_series, pitch_deg_series, heading_deg_series = _body_euler_deg_series_from_dyn(dyn)
+    roll_deg = float(roll_deg_series[0])
+    pitch_deg = float(pitch_deg_series[0])
+    heading_deg = float(heading_deg_series[0])
 
     return {
         "start_pixel": (pixel_x, pixel_y),
@@ -231,6 +241,14 @@ def build_nominal_reference_from_dyn(
     east_m = np.asarray(dyn.y_e, dtype=np.float64).reshape(-1)
     altitude_msl_ft = -np.asarray(dyn.z_e, dtype=np.float64).reshape(-1) * M_TO_FT
     speed_fps = np.asarray(dyn.speed, dtype=np.float64).reshape(-1) * M_TO_FT
+    time_s = np.asarray(dyn.other_fields.get("time", np.arange(north_m.size, dtype=np.float64) / 30.0), dtype=np.float64)
+    if time_s.shape != north_m.shape:
+        raise ValueError("Offline nominal trajectory time samples must match the position sample count.")
+
+    roll_deg, pitch_deg, heading_deg = _body_euler_deg_series_from_dyn(dyn)
+    roll_rad = np.unwrap(np.deg2rad(roll_deg))
+    pitch_rad = np.unwrap(np.deg2rad(pitch_deg))
+    heading_rad = np.unwrap(np.deg2rad(heading_deg))
 
     lat_deg, lon_deg = _north_east_m_to_lat_lon(
         north_m,
@@ -259,29 +277,18 @@ def build_nominal_reference_from_dyn(
         spacing_ft=resample_spacing_ft,
     )
 
-    (
-        local_north_ft,
-        local_east_ft,
-        altitude_rel_ft,
-        speed_fps,
-    ) = _sorted_unique_samples(
-        local_north_ft,
-        local_east_ft,
-        altitude_rel_ft,
-        speed_fps,
-    )
+    reference_dt_s = 1.0 / 30.0
+    sample_time_s = np.arange(float(time_s[0]), float(time_s[-1]) + 0.5 * reference_dt_s, reference_dt_s)
+    if sample_time_s.size < 2:
+        sample_time_s = np.asarray([float(time_s[0]), float(time_s[-1])], dtype=np.float64)
 
-    spacing_ft = float(max(resample_spacing_ft, 1.0))
-    sample_north_ft = np.arange(local_north_ft[0], local_north_ft[-1] + 0.5 * spacing_ft, spacing_ft)
-    if sample_north_ft.size < 2:
-        sample_north_ft = np.asarray([local_north_ft[0], local_north_ft[-1]], dtype=np.float64)
-
-    sample_east_ft = np.interp(sample_north_ft, local_north_ft, local_east_ft)
-    sample_altitude_ft = np.interp(sample_north_ft, local_north_ft, altitude_rel_ft)
-    sample_speed_fps = np.interp(sample_north_ft, local_north_ft, speed_fps)
-
-    east_slope = np.gradient(sample_east_ft, sample_north_ft, edge_order=1)
-    sample_heading_rad = np.arctan2(east_slope, 1.0)
+    sample_north_ft = np.interp(sample_time_s, time_s, local_north_ft)
+    sample_east_ft = np.interp(sample_time_s, time_s, local_east_ft)
+    sample_altitude_ft = np.interp(sample_time_s, time_s, altitude_rel_ft)
+    sample_speed_fps = np.interp(sample_time_s, time_s, speed_fps)
+    sample_phi_rad = np.interp(sample_time_s, time_s, roll_rad)
+    sample_theta_rad = np.interp(sample_time_s, time_s, pitch_rad)
+    sample_psi_rad = np.interp(sample_time_s, time_s, heading_rad)
 
     canyon_north = np.asarray(canyon.north_samples_ft, dtype=np.float64)
     canyon_center = np.asarray(canyon.center_east_samples_ft, dtype=np.float64)
@@ -313,12 +320,26 @@ def build_nominal_reference_from_dyn(
     sample_width_ft = 2.0 * symmetric_half_width_ft
 
     return {
+        "time_s": sample_time_s.astype(np.float32),
         "north_ft": sample_north_ft.astype(np.float32),
         "east_ft": sample_east_ft.astype(np.float32),
-        "heading_rad": sample_heading_rad.astype(np.float32),
+        "heading_rad": sample_psi_rad.astype(np.float32),
         "width_ft": sample_width_ft.astype(np.float32),
         "altitude_ft": sample_altitude_ft.astype(np.float32),
         "speed_fps": sample_speed_fps.astype(np.float32),
+        "phi_rad": sample_phi_rad.astype(np.float32),
+        "theta_rad": sample_theta_rad.astype(np.float32),
+        "psi_rad": sample_psi_rad.astype(np.float32),
+        "reference_states_ft_rad": np.column_stack(
+            [
+                sample_north_ft,
+                sample_east_ft,
+                sample_altitude_ft,
+                sample_phi_rad,
+                sample_theta_rad,
+                sample_psi_rad,
+            ]
+        ).astype(np.float32),
         "display_north_ft": display_north_ft.astype(np.float32),
         "display_east_ft": display_east_ft.astype(np.float32),
         "display_altitude_ft": display_altitude_ft.astype(np.float32),

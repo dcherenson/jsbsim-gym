@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -12,35 +13,51 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
-from jsbsim_gym.mppi_jax import JaxMPPIConfig, JaxMPPIController
-from jsbsim_gym.smooth_mppi_jax import JaxSmoothMPPIConfig, JaxSmoothMPPIController
-from run_scenario import to_mppi_state
+import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0.
+from jsbsim_gym.canyon import DEMCanyon
+from jsbsim_gym.mppi_run_config import (
+    MPPI_TUNING_JSON_PATH,
+    MPPI_TUNING_STORAGE,
+    MPPI_TUNING_STUDY_NAME,
+    apply_mppi_optuna_params,
+    build_mppi_base_config_kwargs,
+    build_mppi_controller,
+)
+from jsbsim_gym.nominal_trajectory import (
+    build_nominal_reference_from_dyn,
+    load_nominal_initial_conditions_from_dyn,
+)
 
-DEM_PATH = REPO_ROOT / "data/dem/black-canyon-gunnison_USGS10m.tif"
+DEM_PATH = REPO_ROOT / "data" / "dem" / "black-canyon-gunnison_USGS10m.tif"
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)
 DEM_START_PIXEL = (1400, 950)
-
-KTS_TO_FPS = 1.68781
-DEFAULT_STORAGE = f"sqlite:///{(REPO_ROOT / 'optuna' / 'mppi_tuning.db').as_posix()}"
-LOW_FLIGHT_REFERENCE_FT = 100.0
+M_TO_FT = 3.28084
+SAFE_CLEARANCE_FT = 40.0 * M_TO_FT
+ALPHA_LIMIT_DEG = 25.0
+NZ_LIMIT_G = 9.0
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Tune MPPI gains with Optuna.",
+        description="Tune the offline-reference MPPI controller with Optuna.",
     )
-    parser.add_argument("--trials", type=int, default=80, help="Number of Optuna trials.")
+    parser.add_argument(
+        "--nominal-dyn-path",
+        type=Path,
+        required=True,
+        help="Offline dyn.asb trajectory used as the MPPI nominal reference.",
+    )
+    parser.add_argument("--trials", type=int, default=60, help="Number of Optuna trials.")
     parser.add_argument(
         "--study-name",
         type=str,
-        default="mppi_canyon_tuning",
+        default=MPPI_TUNING_STUDY_NAME,
         help="Optuna study name.",
     )
     parser.add_argument(
         "--storage",
         type=str,
-        default=DEFAULT_STORAGE,
+        default=MPPI_TUNING_STORAGE,
         help="Optuna storage URL.",
     )
     parser.add_argument(
@@ -52,41 +69,10 @@ def parse_args():
     )
     parser.add_argument("--max-steps", type=int, default=1200, help="Max steps per episode.")
     parser.add_argument(
-        "--mppi-controller",
-        type=str,
-        choices=["smooth_mppi", "mppi"],
-        default="mppi",
-        help="Which MPPI variant to tune.",
-    )
-    parser.add_argument(
-        "--target-speed-kts",
-        type=float,
-        default=700.0,
-        help="Entry speed in knots for the evaluation scenario.",
-    )
-    parser.add_argument(
-        "--centerline-error-scale-ft",
-        type=float,
-        default=200.0,
-        help="Normalization scale in feet for centerline tracking penalties.",
-    )
-    parser.add_argument(
-        "--altitude-error-scale-ft",
-        type=float,
-        default=150.0,
-        help="Normalization scale in feet for altitude tracking penalties.",
-    )
-    parser.add_argument(
         "--wind-sigma",
         type=float,
-        default=0.6,
-        help="Wind sigma in the environment for robustness.",
-    )
-    parser.add_argument(
-        "--robustness-weight",
-        type=float,
-        default=0.20,
-        help="Penalty weight on per-seed score stddev.",
+        default=0.0,
+        help="Wind sigma used in the evaluation environment.",
     )
     parser.add_argument("--jobs", type=int, default=-1, help="Parallel Optuna jobs.")
     parser.add_argument(
@@ -99,31 +85,102 @@ def parse_args():
         "--sampler-seed",
         type=int,
         default=123,
-        help="Random seed for Optuna sampler.",
+        help="Random seed for the Optuna sampler.",
     )
     parser.add_argument(
         "--output-json",
         type=Path,
-        default=REPO_ROOT / "output/canyon_mppi/mppi_optuna_best.json",
+        default=MPPI_TUNING_JSON_PATH,
         help="Path to write the best-parameter JSON summary.",
     )
-
     return parser.parse_args()
 
 
-def _base_mppi_config(args):
+def _wrap_angle_rad(angle_rad: float) -> float:
+    return float(np.arctan2(np.sin(float(angle_rad)), np.cos(float(angle_rad))))
+
+
+def _to_mppi_state(env, state_dict, altitude_ref_ft):
+    p_n_ft = float(state_dict["p_N"])
+    p_e_ft = float(state_dict["p_E"])
+
+    canyon = getattr(env.unwrapped, "canyon", None)
+    if canyon is not None and hasattr(canyon, "get_local_from_latlon"):
+        lat_deg = float(env.unwrapped.simulation.get_property_value("position/lat-gc-deg"))
+        lon_deg = float(env.unwrapped.simulation.get_property_value("position/long-gc-deg"))
+        p_n_ft, p_e_ft = canyon.get_local_from_latlon(lat_deg, lon_deg)
+
     return {
-        "mppi_controller": str(args.mppi_controller),
-        "entry_speed_fps": float(args.target_speed_kts) * KTS_TO_FPS,
-        "low_flight_reference_ft": float(LOW_FLIGHT_REFERENCE_FT),
+        "p_N": float(p_n_ft),
+        "p_E": float(p_e_ft),
+        "h": float(state_dict["h"] - altitude_ref_ft),
+        "u": float(state_dict["u"]),
+        "v": float(state_dict["v"]),
+        "w": float(state_dict["w"]),
+        "p": float(state_dict["p"]),
+        "q": float(state_dict["q"]),
+        "r": float(state_dict["r"]),
+        "phi": float(state_dict["phi"]),
+        "theta": float(state_dict["theta"]),
+        "psi": float(state_dict["psi"]),
+        "beta": float(state_dict.get("beta", 0.0)),
+        "ny": float(state_dict.get("ny", 0.0)),
+        "nz": float(state_dict.get("nz", 1.0)),
     }
 
 
-def _make_env(args, target_speed_kts):
-    target_altitude_ft = 500.0
-    entry_altitude_ft = 500.0
-    max_altitude_ft = 1500.0
+def _load_nominal_bundle(nominal_dyn_path: Path):
+    nominal_canyon = DEMCanyon(
+        dem_path=DEM_PATH,
+        south=DEM_BBOX[0],
+        north=DEM_BBOX[1],
+        west=DEM_BBOX[2],
+        east=DEM_BBOX[3],
+        valley_rel_elev=0.08,
+        smoothing_window=11,
+        min_width_ft=140.0,
+        max_width_ft=2200.0,
+        fly_direction="south_to_north",
+        dem_start_pixel=DEM_START_PIXEL,
+    )
+    initial_conditions = load_nominal_initial_conditions_from_dyn(
+        nominal_dyn_path,
+        canyon=nominal_canyon,
+    )
+    runtime_canyon = DEMCanyon(
+        dem_path=DEM_PATH,
+        south=DEM_BBOX[0],
+        north=DEM_BBOX[1],
+        west=DEM_BBOX[2],
+        east=DEM_BBOX[3],
+        valley_rel_elev=0.08,
+        smoothing_window=11,
+        min_width_ft=140.0,
+        max_width_ft=2200.0,
+        fly_direction="south_to_north",
+        dem_start_pixel=tuple(initial_conditions["start_pixel"]),
+    )
+    start_info = runtime_canyon.get_pixel_info(*tuple(initial_conditions["start_pixel"]))
+    altitude_ref_ft = float(start_info["elevation_msl_ft"])
+    reference_trajectory = build_nominal_reference_from_dyn(
+        nominal_dyn_path,
+        canyon=runtime_canyon,
+        altitude_ref_ft=altitude_ref_ft,
+        resample_spacing_ft=12.0,
+    )
+    return {
+        "initial_conditions": initial_conditions,
+        "reference_trajectory": reference_trajectory,
+        "terrain_north_samples_ft": np.asarray(runtime_canyon.north_samples_ft, dtype=np.float32),
+        "terrain_east_samples_ft": np.asarray(runtime_canyon.east_samples_ft, dtype=np.float32),
+        "terrain_elevation_ft": np.asarray(runtime_canyon.ordered_dem_msl_m, dtype=np.float32) * M_TO_FT
+        - altitude_ref_ft,
+        "altitude_ref_ft": altitude_ref_ft,
+    }
 
+
+def _make_env(nominal_bundle, *, max_steps: int, wind_sigma: float):
+    ic = nominal_bundle["initial_conditions"]
     return gym.make(
         "JSBSimCanyon-v0",
         render_mode=None,
@@ -134,300 +191,265 @@ def _make_env(args, target_speed_kts):
         dem_smoothing_window=11,
         dem_min_width_ft=140.0,
         dem_max_width_ft=2200.0,
-        dem_start_pixel=DEM_START_PIXEL,
+        dem_start_pixel=tuple(ic["start_pixel"]),
         dem_start_heading_mode="follow_canyon",
-        dem_render_mesh=True,
+        dem_start_heading_deg=float(ic["heading_deg"]),
+        dem_render_mesh=False,
         dem_use_proxy_canyon_bounds=False,
         wall_margin_ft=30.0,
         wall_visual_offset_ft=40.0,
         wall_radius_ft=8.0,
         wall_height_ft=500.0,
-        target_altitude_ft=target_altitude_ft,
-        entry_altitude_ft=entry_altitude_ft,
+        target_altitude_ft=500.0,
+        entry_altitude_ft=float(ic["entry_altitude_ft"]),
         min_altitude_ft=-500.0,
-        max_altitude_ft=max_altitude_ft,
-        max_episode_steps=int(args.max_steps),
+        max_altitude_ft=3000.0,
+        max_episode_steps=int(max_steps),
         terrain_collision_buffer_ft=10.0,
-        wind_sigma=float(args.wind_sigma),
+        entry_speed_kts=float(ic["speed_kts"]),
+        entry_roll_deg=float(ic["roll_deg"]),
+        entry_pitch_deg=float(ic["pitch_deg"]),
+        entry_alpha_deg=float(ic["alpha_deg"]),
+        entry_beta_deg=float(ic["beta_deg"]),
+        wind_sigma=float(wind_sigma),
+        canyon_span_ft=9000.0,
         canyon_segment_spacing_ft=12.0,
-        entry_speed_kts=float(target_speed_kts),
     )
 
 
-def _sample_mppi_params(trial, args):
-    params = {
-        "lambda_": trial.suggest_float("lambda_", 0.01, 20.0, log=True),
-        "gamma_": trial.suggest_float("gamma_", 0.001, 2.0, log=True),
-        "action_diff_weight": trial.suggest_float("action_diff_weight", 0.0, 5.0),
-        "action_l2_weight": trial.suggest_float("action_l2_weight", 0.0, 2.0),
-        "low_altitude_gain": trial.suggest_float("low_altitude_gain", 0.0, 15.0),
-        "centerline_gain": trial.suggest_float("centerline_gain", 0.0, 5.0),
-        "offcenter_penalty_gain": trial.suggest_float("offcenter_penalty_gain", 0.0, 5.0),
-        "progress_gain": trial.suggest_float("progress_gain", 0.0, 0.0),
-        "speed_gain": trial.suggest_float("speed_gain", 0.0, 20.0),
-        "terrain_crash_penalty": trial.suggest_float("terrain_crash_penalty", 100.0, 600.0),
-        "action_noise_std_roll": trial.suggest_float("action_noise_std_roll", 0.05, 1.00),
-        "action_noise_std_pitch": trial.suggest_float("action_noise_std_pitch", 0.05, 1.00),
-        "action_noise_std_yaw": trial.suggest_float("action_noise_std_yaw", 0.02, 1.00),
-        "action_noise_std_throttle": trial.suggest_float("action_noise_std_throttle", 0.02, 1.00),
+def _sample_controller_overrides(trial):
+    return {
+        "lambda_": trial.suggest_float("lambda_", 0.10, 10.0, log=True),
+        "gamma_": trial.suggest_float("gamma_", 0.002, 0.50, log=True),
+        "action_noise_std": (
+            trial.suggest_float("action_noise_std_aileron", 0.02, 0.80, log=True),
+            trial.suggest_float("action_noise_std_elevator", 0.02, 0.80, log=True),
+            trial.suggest_float("action_noise_std_rudder", 0.01, 0.50, log=True),
+            trial.suggest_float("action_noise_std_throttle", 0.005, 0.25, log=True),
+        ),
+        "state_tracking_weights": (
+            trial.suggest_float("state_tracking_weight_north", 1.0e-4, 50.0, log=True),
+            trial.suggest_float("state_tracking_weight_east", 1.0e-4, 50.0, log=True),
+            trial.suggest_float("state_tracking_weight_altitude", 1.0e-4, 50.0, log=True),
+            trial.suggest_float("state_tracking_weight_phi", 0.01, 50.0, log=True),
+            trial.suggest_float("state_tracking_weight_theta", 0.01, 50.0, log=True),
+            trial.suggest_float("state_tracking_weight_psi", 0.01, 50.0, log=True),
+        ),
+        "terrain_collision_penalty": trial.suggest_float("terrain_collision_penalty", 1.0e0, 1.0e4, log=True),
+        "terrain_repulsion_scale": trial.suggest_float("terrain_repulsion_scale", 1.0e0, 1.0e4, log=True),
+        "control_rate_weights": (
+            trial.suggest_float("control_rate_weight_aileron", 0.1, 500.0, log=True),
+            trial.suggest_float("control_rate_weight_elevator", 0.1, 500.0, log=True),
+            trial.suggest_float("control_rate_weight_rudder", 0.01, 100.0, log=True),
+            trial.suggest_float("control_rate_weight_throttle", 0.01, 50.0, log=True),
+        ),
     }
 
-    if args.mppi_controller == "smooth_mppi":
-        params["smoothness_penalty_weight"] = trial.suggest_float("smoothness_penalty_weight", 0.05, 3.0)
 
-    return params
-
-
-def _run_episode(args, mppi_params, seed):
-    env = _make_env(args=args, target_speed_kts=args.target_speed_kts)
-
-    total_abs_lateral_ft = 0.0
-    total_altitude_above_min_ft = 0.0
-    total_abs_lateral_norm = 0.0
-    total_altitude_above_min_norm = 0.0
-    total_speed_fps = 0.0
-    max_abs_lateral_ft = 0.0
-    max_altitude_above_min_ft = 0.0
-    lateral_abs_samples_ft = []
-    altitude_above_min_samples_ft = []
-    steps = 0
+def _episode_cost_summary(
+    config_base_kwargs,
+    nominal_bundle,
+    *,
+    seed: int,
+    max_steps: int,
+    wind_sigma: float,
+):
+    env = _make_env(nominal_bundle, max_steps=max_steps, wind_sigma=wind_sigma)
+    prev_action = np.asarray([0.0, 0.0, 0.0, 0.55], dtype=np.float32)
     termination_reason = "running"
 
+    position_errors_ft = []
+    altitude_errors_ft = []
+    heading_errors_deg = []
+    clearance_shortfalls = []
+    action_rates = []
+    alpha_excess_deg = []
+    nz_excess_g = []
+    min_clearance_ft = np.inf
+    steps = 0
+
     try:
+        np.random.seed(int(seed))
         _, _ = env.reset(seed=int(seed))
+        altitude_ref_ft = float(nominal_bundle["altitude_ref_ft"])
         state = env.unwrapped.get_full_state_dict()
+        controller_state = _to_mppi_state(env, state, altitude_ref_ft)
 
-        altitude_ref_ft = float(getattr(env.unwrapped, "dem_start_elev_ft", 0.0))
-        initial_controller_state = to_mppi_state(env, state, altitude_ref_ft)
-
-        min_altitude_ft = float(env.unwrapped.min_altitude_ft - altitude_ref_ft)
-        max_altitude_ft = float(env.unwrapped.max_altitude_ft - altitude_ref_ft)
-        low_flight_altitude_ft = float(
-            np.clip(
-                float(LOW_FLIGHT_REFERENCE_FT),
-                min_altitude_ft + 40.0,
-                max_altitude_ft,
-            )
+        controller, _ = build_mppi_controller(
+            "mppi",
+            config_base_kwargs=config_base_kwargs,
+            reference_trajectory=nominal_bundle["reference_trajectory"],
+            terrain_north_samples_ft=nominal_bundle["terrain_north_samples_ft"],
+            terrain_east_samples_ft=nominal_bundle["terrain_east_samples_ft"],
+            terrain_elevation_ft=nominal_bundle["terrain_elevation_ft"],
         )
+        controller.reset(seed=int(seed))
 
-        canyon = env.unwrapped.canyon
-        if hasattr(canyon, "north_samples_ft") and hasattr(canyon, "width_samples_ft"):
-            north_samples_ft = canyon.north_samples_ft
-            width_samples_ft = canyon.width_samples_ft
-            center_east_samples_ft = canyon.center_east_samples_ft
-            centerline_heading_samples_rad = getattr(
-                canyon,
-                "centerline_heading_samples_rad",
-                np.zeros_like(center_east_samples_ft),
-            )
-        else:
-            north_samples_ft = np.linspace(0.0, 24000.0, 256, dtype=np.float32)
-            width_samples_ft = np.ones(256, dtype=np.float32) * 1000.0
-            center_east_samples_ft = np.zeros(256, dtype=np.float32)
-            centerline_heading_samples_rad = np.zeros(256, dtype=np.float32)
-
-        common_config_kwargs = dict(
-            horizon=40,
-            num_samples=4000,
-            optimization_steps=3,
-            lambda_=mppi_params["lambda_"],
-            gamma_=mppi_params["gamma_"],
-            progress_gain=mppi_params["progress_gain"],
-            speed_gain=mppi_params["speed_gain"],
-            low_altitude_gain=mppi_params["low_altitude_gain"],
-            centerline_gain=mppi_params["centerline_gain"],
-            offcenter_penalty_gain=mppi_params["offcenter_penalty_gain"],
-            target_altitude_ft=low_flight_altitude_ft,
-            min_altitude_ft=min_altitude_ft,
-            max_altitude_ft=max_altitude_ft,
-            terrain_collision_height_ft=max(min_altitude_ft + 40.0, 160.0),
-            wall_margin_ft=float(env.unwrapped.wall_margin_ft),
-            terrain_crash_penalty=mppi_params["terrain_crash_penalty"],
-            early_termination_penalty_gain=120.0,
-            max_step_reward_abs=15.0,
-            target_speed_fps=float(args.target_speed_kts) * KTS_TO_FPS,
-            action_noise_std=(
-                mppi_params["action_noise_std_roll"],
-                mppi_params["action_noise_std_pitch"],
-                mppi_params["action_noise_std_yaw"],
-                mppi_params["action_noise_std_throttle"],
-            ),
-            action_diff_weight=mppi_params["action_diff_weight"],
-            action_l2_weight=mppi_params["action_l2_weight"],
-            debug_render_plans=False,
-        )
-
-        if args.mppi_controller == "mppi":
-            config = JaxMPPIConfig(**common_config_kwargs)
-            controller = JaxMPPIController(
-                config=config,
-                canyon_north_samples_ft=north_samples_ft,
-                canyon_width_samples_ft=width_samples_ft,
-                canyon_center_east_samples_ft=center_east_samples_ft,
-                canyon_centerline_heading_rad_samples=centerline_heading_samples_rad,
-            )
-        else:
-            config = JaxSmoothMPPIConfig(
-                **common_config_kwargs,
-                delta_noise_std=(
-                    mppi_params["action_noise_std_roll"] * 0.6,
-                    mppi_params["action_noise_std_pitch"] * 0.6,
-                    mppi_params["action_noise_std_yaw"] * 0.6,
-                    mppi_params["action_noise_std_throttle"] * 0.6,
-                ),
-                delta_action_bounds=(
-                    mppi_params["action_noise_std_roll"],
-                    mppi_params["action_noise_std_pitch"],
-                    mppi_params["action_noise_std_yaw"],
-                    mppi_params["action_noise_std_throttle"],
-                ),
-                noise_smoothing_kernel=(0.10, 0.20, 0.40, 0.20, 0.10),
-                smoothness_penalty_weight=mppi_params["smoothness_penalty_weight"],
-            )
-            controller = JaxSmoothMPPIController(
-                config=config,
-                canyon_north_samples_ft=north_samples_ft,
-                canyon_width_samples_ft=width_samples_ft,
-                canyon_center_east_samples_ft=center_east_samples_ft,
-                canyon_centerline_heading_rad_samples=centerline_heading_samples_rad,
-            )
-
-        _ = controller.get_action(initial_controller_state)
-
-        for _ in range(int(args.max_steps)):
-            controller_state = to_mppi_state(env, state, altitude_ref_ft)
-            action = controller.get_action(controller_state)
-
-            if not np.isfinite(action).all():
+        for step in range(int(max_steps)):
+            action = np.asarray(controller.get_action(controller_state), dtype=np.float32)
+            if not np.all(np.isfinite(action)):
                 termination_reason = "invalid_action"
                 break
 
-            p_n_ft = float(controller_state["p_N"])
-            p_e_ft = float(controller_state["p_E"])
-            width_ft = float(np.interp(p_n_ft, north_samples_ft, width_samples_ft))
-            center_east_ft = float(np.interp(p_n_ft, north_samples_ft, center_east_samples_ft))
-            lateral_ft = p_e_ft - center_east_ft
-
             _, _, terminated, truncated, info = env.step(action)
-            state = env.unwrapped.get_full_state_dict()
             steps += 1
+            state = env.unwrapped.get_full_state_dict()
+            post_state = _to_mppi_state(env, state, altitude_ref_ft)
+            reference_state = np.asarray(controller.get_reference_state(step + 1), dtype=np.float32)
 
-            h_ft = float(controller_state["h"])
-            speed_fps = float(np.sqrt(float(state["u"]) ** 2 + float(state["v"]) ** 2 + float(state["w"]) ** 2))
-            altitude_above_min_ft = max(h_ft - min_altitude_ft, 0.0)
-            abs_lateral_ft = abs(lateral_ft)
+            north_error_ft = float(post_state["p_N"] - reference_state[0])
+            east_error_ft = float(post_state["p_E"] - reference_state[1])
+            altitude_error_ft = float(post_state["h"] - reference_state[2])
+            psi_error_deg = abs(
+                np.degrees(_wrap_angle_rad(float(post_state["psi"]) - float(reference_state[5])))
+            )
 
-            lateral_norm = abs_lateral_ft / max(width_ft * 0.5, 1.0)
-            altitude_above_min_norm = altitude_above_min_ft / max(float(args.altitude_error_scale_ft), 1.0)
-            total_abs_lateral_norm += float(lateral_norm)
-            total_altitude_above_min_norm += float(altitude_above_min_norm)
-            total_speed_fps += float(speed_fps)
-            total_abs_lateral_ft += float(abs_lateral_ft)
-            total_altitude_above_min_ft += float(altitude_above_min_ft)
-            lateral_abs_samples_ft.append(float(abs_lateral_ft))
-            altitude_above_min_samples_ft.append(float(altitude_above_min_ft))
-            max_abs_lateral_ft = max(max_abs_lateral_ft, float(abs_lateral_ft))
-            max_altitude_above_min_ft = max(max_altitude_above_min_ft, float(altitude_above_min_ft))
+            clearance_ft = float(info.get("terrain_clearance_ft", np.nan))
+            min_clearance_ft = min(min_clearance_ft, clearance_ft)
+            clearance_shortfall = 0.0
+            if np.isfinite(clearance_ft):
+                clearance_shortfall = max(SAFE_CLEARANCE_FT - clearance_ft, 0.0) / max(SAFE_CLEARANCE_FT, 1.0)
+
+            action_rate = np.abs(action - prev_action)
+            prev_action = action.copy()
+
+            alpha_deg = float(np.degrees(np.arctan2(float(post_state["w"]), max(float(post_state["u"]), 1.0))))
+            alpha_excess = max(alpha_deg - ALPHA_LIMIT_DEG, 0.0)
+            nz_excess = max(abs(float(post_state.get("nz", 1.0))) - NZ_LIMIT_G, 0.0)
+
+            position_errors_ft.append(float(np.hypot(north_error_ft, east_error_ft)))
+            altitude_errors_ft.append(abs(altitude_error_ft))
+            heading_errors_deg.append(float(psi_error_deg))
+            clearance_shortfalls.append(float(clearance_shortfall))
+            action_rates.append(action_rate.astype(np.float64, copy=False))
+            alpha_excess_deg.append(float(alpha_excess))
+            nz_excess_g.append(float(nz_excess))
+
+            controller_state = post_state
 
             if terminated or truncated:
                 termination_reason = info.get("termination_reason", "time_limit" if truncated else "terminated")
                 break
 
-        survival_frac = float(steps) / max(float(args.max_steps), 1.0)
+        survival_frac = float(steps) / max(float(max_steps), 1.0)
     finally:
         env.close()
 
-    denom = max(float(steps), 1.0)
-    lateral_arr = np.asarray(lateral_abs_samples_ft, dtype=np.float64)
-    altitude_arr = np.asarray(altitude_above_min_samples_ft, dtype=np.float64)
+    position_arr = np.asarray(position_errors_ft, dtype=np.float64)
+    altitude_arr = np.asarray(altitude_errors_ft, dtype=np.float64)
+    heading_arr = np.asarray(heading_errors_deg, dtype=np.float64)
+    clearance_shortfall_arr = np.asarray(clearance_shortfalls, dtype=np.float64)
+    action_rate_arr = np.asarray(action_rates, dtype=np.float64).reshape(-1, 4) if action_rates else np.zeros((0, 4))
+    alpha_excess_arr = np.asarray(alpha_excess_deg, dtype=np.float64)
+    nz_excess_arr = np.asarray(nz_excess_g, dtype=np.float64)
 
-    if lateral_arr.size > 0:
-        rms_lateral_ft = float(np.sqrt(np.mean(np.square(lateral_arr))))
-        p95_abs_lateral_ft = float(np.percentile(lateral_arr, 95.0))
-    else:
-        rms_lateral_ft = 0.0
-        p95_abs_lateral_ft = 0.0
-
-    if altitude_arr.size > 0:
-        rms_altitude_above_min_ft = float(np.sqrt(np.mean(np.square(altitude_arr))))
-        p95_altitude_above_min_ft = float(np.percentile(altitude_arr, 95.0))
-    else:
-        rms_altitude_above_min_ft = 0.0
-        p95_altitude_above_min_ft = 0.0
-
-    mean_abs_lateral_ft = float(total_abs_lateral_ft / denom)
-    mean_altitude_above_min_ft = float(total_altitude_above_min_ft / denom)
-    centerline_scale_ft = max(float(args.centerline_error_scale_ft), 1.0)
-    altitude_scale_ft = max(float(args.altitude_error_scale_ft), 1.0)
-
-    centerline_cost = (
-        1.00 * (mean_abs_lateral_ft / centerline_scale_ft)
-        + 1.50 * (rms_lateral_ft / centerline_scale_ft)
-        + 0.50 * (p95_abs_lateral_ft / centerline_scale_ft)
+    mean_pos_ft = float(np.mean(position_arr)) if position_arr.size else 1.0e4
+    rms_pos_ft = float(np.sqrt(np.mean(np.square(position_arr)))) if position_arr.size else 1.0e4
+    p95_pos_ft = float(np.percentile(position_arr, 95.0)) if position_arr.size else 1.0e4
+    mean_altitude_ft = float(np.mean(altitude_arr)) if altitude_arr.size else 1.0e4
+    mean_heading_deg = float(np.mean(heading_arr)) if heading_arr.size else 180.0
+    mean_clearance_shortfall = float(np.mean(clearance_shortfall_arr)) if clearance_shortfall_arr.size else 1.0
+    max_clearance_shortfall = float(np.max(clearance_shortfall_arr)) if clearance_shortfall_arr.size else 1.0
+    mean_action_rate = (
+        np.mean(np.abs(action_rate_arr), axis=0) if action_rate_arr.size else np.asarray([1.0, 1.0, 1.0, 1.0])
     )
-    altitude_cost = (
-        1.00 * (mean_altitude_above_min_ft / altitude_scale_ft)
-        + 1.50 * (rms_altitude_above_min_ft / altitude_scale_ft)
-        + 0.50 * (p95_altitude_above_min_ft / altitude_scale_ft)
-    )
-    mean_speed_fps = float(total_speed_fps / denom)
-    speed_reward = mean_speed_fps / 200.0
+    mean_alpha_excess_deg = float(np.mean(alpha_excess_arr)) if alpha_excess_arr.size else 25.0
+    mean_nz_excess_g = float(np.mean(nz_excess_arr)) if nz_excess_arr.size else 5.0
+    if not np.isfinite(min_clearance_ft):
+        min_clearance_ft = np.nan
 
-    termination_penalty = 0.0
+    track_cost = (
+        1.00 * (mean_pos_ft / 150.0)
+        + 1.50 * (rms_pos_ft / 150.0)
+        + 0.75 * (p95_pos_ft / 250.0)
+        + 0.75 * (mean_altitude_ft / 100.0)
+        + 0.25 * (mean_heading_deg / 25.0)
+    )
+    terrain_cost = 8.0 * mean_clearance_shortfall + 15.0 * max_clearance_shortfall
+    rate_cost = (
+        0.80 * (mean_action_rate[0] / 0.12)
+        + 1.00 * (mean_action_rate[1] / 0.12)
+        + 0.25 * (mean_action_rate[2] / 0.08)
+        + 0.15 * (mean_action_rate[3] / 0.05)
+    )
+    limit_cost = 2.0 * (mean_alpha_excess_deg / 5.0) + 2.0 * mean_nz_excess_g
+
     if termination_reason in {"running", "time_limit"}:
         termination_penalty = 0.0
-    elif termination_reason in {"terrain_collision", "hit_canyon_wall", "ground_collision", "invalid_action"}:
-        termination_penalty = 400.0 + 600.0 * (1.0 - survival_frac)
-    elif termination_reason in {"altitude_out_of_bounds", "above_canyon_top"}:
-        termination_penalty = 220.0 + 320.0 * (1.0 - survival_frac)
+    elif termination_reason in {"terrain_collision", "ground_collision"}:
+        termination_penalty = 200.0 + 300.0 * (1.0 - survival_frac)
+    elif termination_reason in {"hit_canyon_wall", "altitude_out_of_bounds"}:
+        termination_penalty = 120.0 + 180.0 * (1.0 - survival_frac)
+    elif termination_reason == "invalid_action":
+        termination_penalty = 300.0
     else:
-        termination_penalty = 260.0
+        termination_penalty = 150.0
 
-    total_score = speed_reward - (centerline_cost + altitude_cost + termination_penalty)
-    episode_summary = {
-        "score": float(total_score),
+    total_cost = float(track_cost + terrain_cost + rate_cost + limit_cost + termination_penalty)
+    score = -total_cost
+
+    return float(score), {
+        "score": float(score),
         "steps": int(steps),
+        "survival_frac": float(survival_frac),
         "termination_reason": str(termination_reason),
-        "mean_abs_lateral_ft": float(mean_abs_lateral_ft),
-        "rms_lateral_ft": float(rms_lateral_ft),
-        "p95_abs_lateral_ft": float(p95_abs_lateral_ft),
-        "max_abs_lateral_ft": float(max_abs_lateral_ft),
-        "mean_altitude_above_min_ft": float(mean_altitude_above_min_ft),
-        "rms_altitude_above_min_ft": float(rms_altitude_above_min_ft),
-        "p95_altitude_above_min_ft": float(p95_altitude_above_min_ft),
-        "max_altitude_above_min_ft": float(max_altitude_above_min_ft),
-        "mean_abs_lateral_norm": float(total_abs_lateral_norm / denom),
-        "mean_altitude_above_min_norm": float(total_altitude_above_min_norm / denom),
-        "mean_speed_fps": float(mean_speed_fps),
+        "mean_position_error_ft": float(mean_pos_ft),
+        "rms_position_error_ft": float(rms_pos_ft),
+        "p95_position_error_ft": float(p95_pos_ft),
+        "mean_altitude_error_ft": float(mean_altitude_ft),
+        "mean_heading_error_deg": float(mean_heading_deg),
+        "min_terrain_clearance_ft": float(min_clearance_ft),
+        "mean_clearance_shortfall": float(mean_clearance_shortfall),
+        "max_clearance_shortfall": float(max_clearance_shortfall),
+        "mean_aileron_rate": float(mean_action_rate[0]),
+        "mean_elevator_rate": float(mean_action_rate[1]),
+        "mean_rudder_rate": float(mean_action_rate[2]),
+        "mean_throttle_rate": float(mean_action_rate[3]),
+        "mean_alpha_excess_deg": float(mean_alpha_excess_deg),
+        "mean_nz_excess_g": float(mean_nz_excess_g),
+        "track_cost": float(track_cost),
+        "terrain_cost": float(terrain_cost),
+        "rate_cost": float(rate_cost),
+        "limit_cost": float(limit_cost),
+        "termination_penalty": float(termination_penalty),
     }
-    return float(total_score), episode_summary
 
 
-def _objective(trial, args, base_config):
-    del base_config
-    mppi_params = _sample_mppi_params(trial, args)
-    trial.set_user_attr("mppi_controller", args.mppi_controller)
+def _objective(trial, args, nominal_bundle, base_config_kwargs):
+    effective_params = _sample_controller_overrides(trial)
+    config_kwargs, applied_keys = apply_mppi_optuna_params(base_config_kwargs, effective_params)
+    trial.set_user_attr("effective_params", {key: config_kwargs[key] for key in applied_keys})
 
     seed_scores = []
-    seed_summaries = []
     for idx, seed in enumerate(args.seeds):
-        score, summary = _run_episode(args=args, mppi_params=mppi_params, seed=seed)
+        score, summary = _episode_cost_summary(
+            config_kwargs,
+            nominal_bundle,
+            seed=int(seed),
+            max_steps=int(args.max_steps),
+            wind_sigma=float(args.wind_sigma),
+        )
         seed_scores.append(float(score))
-        seed_summaries.append((int(seed), summary))
 
         trial.set_user_attr(f"seed_{seed}_termination", summary["termination_reason"])
         trial.set_user_attr(f"seed_{seed}_steps", summary["steps"])
-        trial.set_user_attr(f"seed_{seed}_mean_abs_lateral_ft", summary["mean_abs_lateral_ft"])
-        trial.set_user_attr(f"seed_{seed}_rms_lateral_ft", summary["rms_lateral_ft"])
-        trial.set_user_attr(f"seed_{seed}_p95_abs_lateral_ft", summary["p95_abs_lateral_ft"])
-        trial.set_user_attr(f"seed_{seed}_max_abs_lateral_ft", summary["max_abs_lateral_ft"])
-        trial.set_user_attr(f"seed_{seed}_mean_altitude_above_min_ft", summary["mean_altitude_above_min_ft"])
-        trial.set_user_attr(f"seed_{seed}_rms_altitude_above_min_ft", summary["rms_altitude_above_min_ft"])
-        trial.set_user_attr(f"seed_{seed}_p95_altitude_above_min_ft", summary["p95_altitude_above_min_ft"])
-        trial.set_user_attr(f"seed_{seed}_max_altitude_above_min_ft", summary["max_altitude_above_min_ft"])
-        trial.set_user_attr(f"seed_{seed}_mean_abs_lateral_norm", summary["mean_abs_lateral_norm"])
-        trial.set_user_attr(f"seed_{seed}_mean_altitude_above_min_norm", summary["mean_altitude_above_min_norm"])
-        trial.set_user_attr(f"seed_{seed}_mean_speed_fps", summary["mean_speed_fps"])
+        trial.set_user_attr(f"seed_{seed}_survival_frac", summary["survival_frac"])
+        trial.set_user_attr(f"seed_{seed}_mean_position_error_ft", summary["mean_position_error_ft"])
+        trial.set_user_attr(f"seed_{seed}_rms_position_error_ft", summary["rms_position_error_ft"])
+        trial.set_user_attr(f"seed_{seed}_p95_position_error_ft", summary["p95_position_error_ft"])
+        trial.set_user_attr(f"seed_{seed}_mean_altitude_error_ft", summary["mean_altitude_error_ft"])
+        trial.set_user_attr(f"seed_{seed}_mean_heading_error_deg", summary["mean_heading_error_deg"])
+        trial.set_user_attr(f"seed_{seed}_min_terrain_clearance_ft", summary["min_terrain_clearance_ft"])
+        trial.set_user_attr(f"seed_{seed}_mean_aileron_rate", summary["mean_aileron_rate"])
+        trial.set_user_attr(f"seed_{seed}_mean_elevator_rate", summary["mean_elevator_rate"])
+        trial.set_user_attr(f"seed_{seed}_mean_rudder_rate", summary["mean_rudder_rate"])
+        trial.set_user_attr(f"seed_{seed}_mean_throttle_rate", summary["mean_throttle_rate"])
+        trial.set_user_attr(f"seed_{seed}_mean_alpha_excess_deg", summary["mean_alpha_excess_deg"])
+        trial.set_user_attr(f"seed_{seed}_mean_nz_excess_g", summary["mean_nz_excess_g"])
+        trial.set_user_attr(f"seed_{seed}_track_cost", summary["track_cost"])
+        trial.set_user_attr(f"seed_{seed}_terrain_cost", summary["terrain_cost"])
+        trial.set_user_attr(f"seed_{seed}_rate_cost", summary["rate_cost"])
+        trial.set_user_attr(f"seed_{seed}_limit_cost", summary["limit_cost"])
 
         running_mean = float(np.mean(seed_scores))
         trial.report(running_mean, step=idx)
@@ -436,50 +458,30 @@ def _objective(trial, args, base_config):
 
     mean_score = float(np.mean(seed_scores))
     std_score = float(np.std(seed_scores))
-    robust_score = mean_score - float(args.robustness_weight) * std_score
+    robust_score = mean_score - 0.15 * std_score
 
     trial.set_user_attr("mean_seed_score", mean_score)
     trial.set_user_attr("std_seed_score", std_score)
-
-    for seed, summary in seed_summaries:
-        print(
-            f"Trial {trial.number:4d} | seed {seed:>3d} | "
-            f"score {summary['score']:8.2f} | "
-            f"term {summary['termination_reason']:<20} | "
-            f"steps {summary['steps']:4d} | "
-            f"speed {summary['mean_speed_fps']:7.1f} | "
-            f"lat {summary['mean_abs_lateral_ft']:7.1f} | "
-            f"alt {summary['mean_altitude_above_min_ft']:7.1f}"
-        )
-
-    print(
-        f"Trial {trial.number:4d} | aggregate | "
-        f"mean {mean_score:8.2f} | std {std_score:7.2f} | robust {robust_score:8.2f}"
-    )
-    return robust_score
+    return float(robust_score)
 
 
-def _save_best_summary(args, study, base_config):
+def _save_best_summary(args, study, base_config_kwargs):
     output_path = Path(args.output_json)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    best_trial = study.best_trial
 
     payload = {
         "study_name": str(study.study_name),
         "storage": str(args.storage),
-        "best_trial_number": int(study.best_trial.number),
-        "best_value": float(study.best_value),
-        "best_params": dict(study.best_params),
-        "base_config": dict(base_config),
+        "best_trial_number": int(best_trial.number),
+        "best_value": float(best_trial.value),
+        "best_params": dict(best_trial.user_attrs.get("effective_params", {})),
+        "base_config": dict(base_config_kwargs),
         "evaluation": {
+            "nominal_dyn_path": str(Path(args.nominal_dyn_path).expanduser()),
             "seeds": [int(s) for s in args.seeds],
             "max_steps": int(args.max_steps),
-            "mppi_controller": str(args.mppi_controller),
-            "entry_speed_kts": float(args.target_speed_kts),
-            "low_flight_reference_ft": float(LOW_FLIGHT_REFERENCE_FT),
-            "centerline_error_scale_ft": float(args.centerline_error_scale_ft),
-            "altitude_error_scale_ft": float(args.altitude_error_scale_ft),
             "wind_sigma": float(args.wind_sigma),
-            "robustness_weight": float(args.robustness_weight),
         },
     }
 
@@ -489,7 +491,8 @@ def _save_best_summary(args, study, base_config):
 
 def main():
     args = parse_args()
-    base_config = _base_mppi_config(args)
+    nominal_bundle = _load_nominal_bundle(Path(args.nominal_dyn_path).expanduser())
+    base_config_kwargs = build_mppi_base_config_kwargs()
 
     sampler = optuna.samplers.TPESampler(seed=int(args.sampler_seed))
     pruner = optuna.pruners.MedianPruner(
@@ -511,29 +514,28 @@ def main():
     print(f"Storage: {args.storage}")
     print(
         "Evaluation setup: "
+        f"nominal_dyn_path={Path(args.nominal_dyn_path).expanduser()}, "
         f"seeds={args.seeds}, "
         f"max_steps={args.max_steps}, "
-        f"mppi_controller={args.mppi_controller}, "
-        f"entry_speed_kts={args.target_speed_kts:.1f}, "
-        f"low_flight_reference_ft={LOW_FLIGHT_REFERENCE_FT:.1f}, "
         f"wind_sigma={args.wind_sigma:.2f}"
     )
 
     study.optimize(
-        lambda trial: _objective(trial, args, base_config),
+        lambda trial: _objective(trial, args, nominal_bundle, base_config_kwargs),
         n_trials=int(args.trials),
         n_jobs=int(args.jobs),
         timeout=args.timeout,
     )
 
-    summary_path = _save_best_summary(args, study, base_config)
+    best_trial = study.best_trial
+    summary_path = _save_best_summary(args, study, base_config_kwargs)
 
     print("\n==============================")
     print("Optimization finished")
-    print(f"Best trial: #{study.best_trial.number}")
-    print(f"Best robust score: {study.best_value:.3f}")
+    print(f"Best trial: #{best_trial.number}")
+    print(f"Best robust score: {float(best_trial.value):.3f}")
     print("Best parameters:")
-    for key, value in study.best_params.items():
+    for key, value in dict(best_trial.user_attrs.get("effective_params", {})).items():
         print(f"  {key}: {value}")
     print(f"Saved summary JSON: {summary_path}")
     print("==============================")

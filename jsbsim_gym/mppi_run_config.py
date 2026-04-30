@@ -7,16 +7,160 @@ from jsbsim_gym.mppi_jax import JaxMPPIConfig, JaxMPPIController
 from jsbsim_gym.smooth_mppi_jax import JaxSmoothMPPIConfig, JaxSmoothMPPIController
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_ROOT = REPO_ROOT / "output"
-MPPI_TUNING_JSON_PATH = OUTPUT_ROOT / "canyon_mppi" / "mppi_optuna_best.json"
 KTS_TO_FPS = 1.68781
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MPPI_TUNING_JSON_PATH = REPO_ROOT / "output" / "canyon_mppi" / "mppi_optuna_best.json"
+MPPI_TUNING_STUDY_NAME = "mppi_nominal_tracking_tuning"
+MPPI_TUNING_STORAGE = f"sqlite:///{(REPO_ROOT / 'optuna' / 'mppi_tuning.db').as_posix()}"
+MPPI_TUNING_STORAGE_FALLBACKS = (
+    MPPI_TUNING_STORAGE,
+    f"sqlite:///{(REPO_ROOT / 'mppi_tuning.db').as_posix()}",
+    "sqlite:///mppi_tuning.db",
+)
+MPPI_TUNABLE_TUPLE_SPECS = {
+    "action_noise_std": 4,
+    "state_tracking_weights": 6,
+    "control_rate_weights": 4,
+}
+MPPI_TUNABLE_SCALAR_KEYS = frozenset(
+    {
+        "lambda_",
+        "gamma_",
+        "terrain_collision_penalty",
+        "terrain_repulsion_scale",
+    }
+)
+MPPI_TUNABLE_KEYS = frozenset(MPPI_TUNABLE_SCALAR_KEYS | set(MPPI_TUNABLE_TUPLE_SPECS))
+
+
+def build_mppi_base_config_kwargs(
+    *,
+    horizon=40,
+    num_samples=4000,
+    optimization_steps=3,
+):
+    return dict(
+        horizon=int(horizon),
+        num_samples=int(num_samples),
+        optimization_steps=int(optimization_steps),
+        lambda_=1.0,
+        gamma_=0.05,
+        action_noise_std=(0.5, 0.5, 0.5, 0.5),
+        state_tracking_weights=(0.05, 0.05, 0.05, 10.0, 10.0, 8.0),
+        terrain_collision_penalty=0.0*1.0e6,
+        terrain_repulsion_scale=0.0*1.0e5,
+        terrain_decay_rate_ft_inv=0.03,
+        terrain_safe_clearance_ft=40.0 * 3.28084,
+        control_rate_weights=(15.0, 20.0, 5.0, 2.0),
+        nz_limit_g=9.0,
+        nz_penalty_weight=0.0*1.0e4,
+        alpha_limit_rad=25.0 * 3.141592653589793 / 180.0,
+        alpha_penalty_weight=0.0*1.0e6,
+    )
+
+
+def build_mppi_controller(
+    controller_tag,
+    *,
+    config_base_kwargs,
+    reference_trajectory,
+    terrain_north_samples_ft,
+    terrain_east_samples_ft,
+    terrain_elevation_ft,
+):
+    if controller_tag == "smooth_mppi":
+        config = JaxSmoothMPPIConfig(**config_base_kwargs)
+        controller_cls = JaxSmoothMPPIController
+    elif controller_tag == "mppi":
+        config = JaxMPPIConfig(**config_base_kwargs)
+        controller_cls = JaxMPPIController
+    else:
+        raise ValueError(f"Unsupported MPPI controller tag: {controller_tag}")
+
+    controller = controller_cls(
+        config=config,
+        reference_trajectory=reference_trajectory,
+        terrain_north_samples_ft=terrain_north_samples_ft,
+        terrain_east_samples_ft=terrain_east_samples_ft,
+        terrain_elevation_ft=terrain_elevation_ft,
+    )
+    return controller, config
+
+
+def _sqlite_storage_to_path(storage_url: str):
+    prefix = "sqlite:///"
+    if not isinstance(storage_url, str) or not storage_url.startswith(prefix):
+        return None
+    return Path(storage_url[len(prefix):])
+
+
+def _normalize_mppi_tunable_value(key: str, value):
+    if key in MPPI_TUNABLE_TUPLE_SPECS:
+        try:
+            values = tuple(float(v) for v in value)
+        except TypeError:
+            return None
+        if len(values) != MPPI_TUNABLE_TUPLE_SPECS[key]:
+            return None
+        return values
+    if key in MPPI_TUNABLE_SCALAR_KEYS:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _trial_params_to_effective_mppi_params(params: dict) -> dict:
+    if not isinstance(params, dict):
+        return {}
+
+    def _maybe_tuple(prefix: str, names: tuple[str, ...]):
+        values = []
+        for suffix in names:
+            key = f"{prefix}_{suffix}"
+            if key not in params:
+                return None
+            values.append(float(params[key]))
+        return tuple(values)
+
+    effective = {}
+    if "lambda_" in params:
+        effective["lambda_"] = float(params["lambda_"])
+    if "gamma_" in params:
+        effective["gamma_"] = float(params["gamma_"])
+    if "terrain_collision_penalty" in params:
+        effective["terrain_collision_penalty"] = float(params["terrain_collision_penalty"])
+    if "terrain_repulsion_scale" in params:
+        effective["terrain_repulsion_scale"] = float(params["terrain_repulsion_scale"])
+
+    action_noise_std = _maybe_tuple("action_noise_std", ("aileron", "elevator", "rudder", "throttle"))
+    if action_noise_std is not None:
+        effective["action_noise_std"] = action_noise_std
+
+    state_tracking_weights = _maybe_tuple(
+        "state_tracking_weight",
+        ("north", "east", "altitude", "phi", "theta", "psi"),
+    )
+    if state_tracking_weights is not None:
+        effective["state_tracking_weights"] = state_tracking_weights
+
+    control_rate_weights = _maybe_tuple(
+        "control_rate_weight",
+        ("aileron", "elevator", "rudder", "throttle"),
+    )
+    if control_rate_weights is not None:
+        effective["control_rate_weights"] = control_rate_weights
+
+    return effective
 
 
 def load_mppi_optuna_params(
     summary_json_path: Path = MPPI_TUNING_JSON_PATH,
-    study_name: str = "mppi_canyon_tuning",
+    study_name: str = MPPI_TUNING_STUDY_NAME,
+    storage: str = MPPI_TUNING_STORAGE,
 ):
+    """Load best tuned MPPI params from JSON, then Optuna SQLite fallback."""
     params = {}
     source = None
 
@@ -34,150 +178,62 @@ def load_mppi_optuna_params(
     if params:
         return params, source
 
-    tuning_db_candidates = [
-        REPO_ROOT / "optuna" / "mppi_tuning.db",
-        REPO_ROOT / "mppi_tuning.db",
-    ]
-    tuning_db_path = next((candidate for candidate in tuning_db_candidates if candidate.exists()), None)
-    if tuning_db_path is None:
-        return {}, None
+    storage_candidates = []
+    if isinstance(storage, str) and storage:
+        storage_candidates.append(storage)
+    for fallback in MPPI_TUNING_STORAGE_FALLBACKS:
+        if fallback not in storage_candidates:
+            storage_candidates.append(fallback)
 
-    try:
-        import optuna
+    for storage_url in storage_candidates:
+        sqlite_path = _sqlite_storage_to_path(storage_url)
+        if sqlite_path is None or not sqlite_path.exists():
+            continue
 
-        storage = f"sqlite:///{tuning_db_path.as_posix()}"
-        study = optuna.load_study(study_name=study_name, storage=storage)
-        return dict(study.best_params), f"{tuning_db_path}::{study_name}"
-    except Exception:
-        return {}, None
+        try:
+            import optuna
+
+            study = optuna.load_study(study_name=study_name, storage=storage_url)
+            best_trial = study.best_trial
+            effective = best_trial.user_attrs.get("effective_params")
+            if not isinstance(effective, dict) or not effective:
+                effective = _trial_params_to_effective_mppi_params(best_trial.params)
+            if isinstance(effective, dict) and effective:
+                return dict(effective), f"{storage_url}::{study_name}"
+        except Exception:
+            continue
+
+    return {}, None
 
 
-def build_mppi_base_config_kwargs(
-    *,
-    optuna_params,
-    target_speed_fps,
-    target_altitude_ft,
-    min_altitude_ft,
-    max_altitude_ft,
-    wall_margin_ft,
-    horizon=40,
-    num_samples=4000,
-    optimization_steps=3,
-    terrain_collision_height_ft=None,
+def apply_mppi_optuna_params(config_base_kwargs: dict, params: dict):
+    """Apply tuned Optuna params onto MPPI config kwargs and return applied keys."""
+    updated = dict(config_base_kwargs)
+    applied = []
+
+    if not isinstance(params, dict) or not params:
+        return updated, applied
+
+    for key, value in params.items():
+        normalized = _normalize_mppi_tunable_value(key, value)
+        if normalized is None:
+            continue
+        updated[key] = normalized
+        applied.append(key)
+
+    return updated, applied
+
+
+def with_default_mppi_optuna_params(
+    config_base_kwargs: dict,
+    summary_json_path: Path = MPPI_TUNING_JSON_PATH,
+    study_name: str = MPPI_TUNING_STUDY_NAME,
+    storage: str = MPPI_TUNING_STORAGE,
 ):
-    min_altitude_ft = float(min_altitude_ft)
-    max_altitude_ft = float(max_altitude_ft)
-    if terrain_collision_height_ft is None:
-        terrain_collision_height_ft = max(min_altitude_ft + 40.0, 160.0)
-
-    # Manual runtime baseline (intentionally not driven by Optuna trial output).
-    return dict(
-        horizon=int(horizon),
-        num_samples=int(num_samples),
-        optimization_steps=int(optimization_steps),
-        lambda_=1.15,
-        gamma_=0.06,
-        progress_gain=0.70,
-        speed_gain=0.0,
-        low_altitude_gain=0.0,
-        altitude_target_gain=0.0,
-        altitude_target_scale_ft=450.0,
-        centerline_gain=7.0,
-        offcenter_penalty_gain=12.0,
-        heading_alignment_gain=4.0,
-        heading_alignment_scale_rad=0.45,
-        alive_bonus=0.05,
-        target_speed_fps=float(target_speed_fps),
-        speed_target_gain=0.0,
-        speed_target_scale_fps=140.0,
-        target_altitude_ft=float(target_altitude_ft),
-        min_altitude_ft=min_altitude_ft,
-        max_altitude_ft=max_altitude_ft,
-        terrain_collision_height_ft=float(terrain_collision_height_ft),
-        wall_margin_ft=float(wall_margin_ft),
-        terrain_crash_penalty=700.0,
-        wall_crash_penalty=55.0,
-        altitude_violation_penalty=14.0,
-        early_termination_penalty_gain=130.0,
-        max_step_reward_abs=15.0,
-        angular_rate_penalty_gain=1.2,
-        angular_rate_threshold_deg_s=40.0,
-        bank_angle_penalty_gain=2.0,
-        bank_angle_threshold_deg=80.0,
+    params, source = load_mppi_optuna_params(
+        summary_json_path=summary_json_path,
+        study_name=study_name,
+        storage=storage,
     )
-
-
-def build_mppi_controller(
-    controller_tag,
-    *,
-    optuna_params,
-    config_base_kwargs,
-    reference_trajectory=None,
-    canyon_north_samples_ft=None,
-    canyon_width_samples_ft=None,
-    canyon_center_east_samples_ft=None,
-    canyon_centerline_heading_rad_samples=None,
-    reference_altitude_samples_ft=None,
-    reference_speed_samples_fps=None,
-):
-    if controller_tag == "smooth_mppi":
-        action_noise_std_roll = optuna_params.get("action_noise_std_roll", optuna_params.get("delta_roll_bound", 0.14))
-        action_noise_std_pitch = optuna_params.get("action_noise_std_pitch", optuna_params.get("delta_pitch_bound", 0.22))
-        action_noise_std_yaw = optuna_params.get("action_noise_std_yaw", 0.12)
-        action_noise_std_throttle = optuna_params.get("action_noise_std_throttle", 0.10)
-        config = JaxSmoothMPPIConfig(
-            **config_base_kwargs,
-            action_noise_std=(
-                action_noise_std_roll,
-                action_noise_std_pitch,
-                action_noise_std_yaw,
-                action_noise_std_throttle,
-            ),
-            delta_noise_std=(
-                action_noise_std_roll * 0.6,
-                action_noise_std_pitch * 0.6,
-                action_noise_std_yaw * 0.6,
-                action_noise_std_throttle * 0.6,
-            ),
-            delta_action_bounds=(
-                action_noise_std_roll,
-                action_noise_std_pitch,
-                action_noise_std_yaw,
-                action_noise_std_throttle,
-            ),
-            noise_smoothing_kernel=(0.10, 0.20, 0.40, 0.20, 0.10),
-            smoothness_penalty_weight=optuna_params.get("smoothness_penalty_weight", 0.35),
-            action_diff_weight=optuna_params.get("action_diff_weight", 0.8),
-            action_l2_weight=optuna_params.get("action_l2_weight", 0.1),
-        )
-        controller_cls = JaxSmoothMPPIController
-    elif controller_tag == "mppi":
-        action_noise_std_roll = 0.12
-        action_noise_std_pitch = 0.14
-        action_noise_std_yaw = 0.06
-        action_noise_std_throttle = 0.04
-        config = JaxMPPIConfig(
-            **config_base_kwargs,
-            action_noise_std=(
-                action_noise_std_roll,
-                action_noise_std_pitch,
-                action_noise_std_yaw,
-                action_noise_std_throttle,
-            ),
-            action_diff_weight=1.0,
-            action_l2_weight=0.10,
-        )
-        controller_cls = JaxMPPIController
-    else:
-        raise ValueError(f"Unsupported MPPI controller tag: {controller_tag}")
-
-    controller = controller_cls(
-        config=config,
-        canyon_north_samples_ft=canyon_north_samples_ft,
-        canyon_width_samples_ft=canyon_width_samples_ft,
-        canyon_center_east_samples_ft=canyon_center_east_samples_ft,
-        canyon_centerline_heading_rad_samples=canyon_centerline_heading_rad_samples,
-        reference_altitude_samples_ft=reference_altitude_samples_ft,
-        reference_speed_samples_fps=reference_speed_samples_fps,
-    )
-    return controller, config
+    updated, applied = apply_mppi_optuna_params(config_base_kwargs, params)
+    return updated, source, applied

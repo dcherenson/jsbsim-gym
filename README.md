@@ -80,6 +80,20 @@ uv run python run_scenario.py --controller mppi
 uv run python run_scenario.py --controller mppi --gatekeeper
 ```
 
+To tune the new offline-reference MPPI controller with Optuna:
+
+```
+uv run python optuna/tune_mppi.py --nominal-dyn-path air-racing-optimization/final_results/dyn.asb
+```
+
+This writes the best-parameter summary to:
+
+```
+output/canyon_mppi/mppi_optuna_best.json
+```
+
+`run_scenario.py --controller mppi` will auto-load that summary when it exists.
+
 If you regenerate `f16_dataset.parquet`, rerun `jsbsim_gym.calibration` so MPPI
 and the gatekeeper use artifacts fit from the current dataset.
 
