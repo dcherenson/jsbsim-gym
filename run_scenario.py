@@ -68,10 +68,6 @@ def _wrap_heading_deg(angle_rad):
     return float(np.mod(np.degrees(float(angle_rad)), 360.0))
 
 
-def _wrap_angle_rad(angle_rad):
-    return float(np.arctan2(np.sin(float(angle_rad)), np.cos(float(angle_rad))))
-
-
 def _print_mppi_config(controller_tag, config):
     if not is_dataclass(config):
         print(f"{controller_tag.upper()} config: {config}")
@@ -154,15 +150,14 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
         writer.writerows(rows)
 
     time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
+    progress_s_ft = np.asarray([row["progress_s_ft"] for row in rows], dtype=np.float64)
+    virtual_speed_fps = np.asarray([row["virtual_speed_fps"] for row in rows], dtype=np.float64)
+    contour_error_ft = np.asarray([row["contour_error_ft"] for row in rows], dtype=np.float64)
+    lag_error_ft = np.asarray([row["lag_error_ft"] for row in rows], dtype=np.float64)
     position_error_ft = np.asarray([row["position_error_ft"] for row in rows], dtype=np.float64)
-    north_error_ft = np.asarray([row["north_error_ft"] for row in rows], dtype=np.float64)
-    east_error_ft = np.asarray([row["east_error_ft"] for row in rows], dtype=np.float64)
     altitude_error_ft = np.asarray([row["altitude_error_ft"] for row in rows], dtype=np.float64)
     terrain_clearance_ft = np.asarray([row.get("terrain_clearance_ft", np.nan) for row in rows], dtype=np.float64)
     terrain_safe_clearance_ft = np.asarray([row.get("terrain_safe_clearance_ft", np.nan) for row in rows], dtype=np.float64)
-    phi_error_deg = np.asarray([row.get("phi_error_deg", np.nan) for row in rows], dtype=np.float64)
-    theta_error_deg = np.asarray([row.get("theta_error_deg", np.nan) for row in rows], dtype=np.float64)
-    psi_error_deg = np.asarray([row.get("psi_error_deg", np.nan) for row in rows], dtype=np.float64)
     alpha_deg = np.asarray([row.get("alpha_deg", np.nan) for row in rows], dtype=np.float64)
     alpha_limit_deg = np.asarray([row.get("alpha_limit_deg", np.nan) for row in rows], dtype=np.float64)
     nz_g = np.asarray([row.get("nz_g", np.nan) for row in rows], dtype=np.float64)
@@ -175,7 +170,11 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
     elevator_rate = np.asarray([row.get("elevator_rate", np.nan) for row in rows], dtype=np.float64)
     rudder_rate = np.asarray([row.get("rudder_rate", np.nan) for row in rows], dtype=np.float64)
     throttle_rate = np.asarray([row.get("throttle_rate", np.nan) for row in rows], dtype=np.float64)
-    state_cost_est = np.asarray([row.get("state_cost_est", np.nan) for row in rows], dtype=np.float64)
+    contour_cost_est = np.asarray([row.get("contour_cost_est", np.nan) for row in rows], dtype=np.float64)
+    lag_cost_est = np.asarray([row.get("lag_cost_est", np.nan) for row in rows], dtype=np.float64)
+    progress_reward_est = np.asarray([row.get("progress_reward_est", np.nan) for row in rows], dtype=np.float64)
+    virtual_speed_cost_est = np.asarray([row.get("virtual_speed_cost_est", np.nan) for row in rows], dtype=np.float64)
+    contouring_cost_est = np.asarray([row.get("contouring_cost_est", np.nan) for row in rows], dtype=np.float64)
     terrain_cost_est = np.asarray([row.get("terrain_cost_est", np.nan) for row in rows], dtype=np.float64)
     rate_cost_est = np.asarray([row.get("rate_cost_est", np.nan) for row in rows], dtype=np.float64)
     limit_cost_est = np.asarray([row.get("limit_cost_est", np.nan) for row in rows], dtype=np.float64)
@@ -184,21 +183,19 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
     fig, axs = plt.subplots(4, 2, figsize=(14, 13), sharex=True, constrained_layout=True)
     axs = axs.reshape(-1)
 
-    axs[0].plot(time_s, position_error_ft, color="tab:blue", linewidth=2.0, label="position")
-    axs[0].plot(time_s, np.abs(north_error_ft), color="tab:orange", linewidth=1.4, alpha=0.9, label="|north|")
-    axs[0].plot(time_s, np.abs(east_error_ft), color="tab:green", linewidth=1.4, alpha=0.9, label="|east|")
+    axs[0].plot(time_s, contour_error_ft, color="tab:blue", linewidth=2.0, label="contour")
+    axs[0].plot(time_s, np.abs(lag_error_ft), color="tab:orange", linewidth=1.5, alpha=0.9, label="|lag|")
+    axs[0].plot(time_s, position_error_ft, color="tab:green", linewidth=1.2, alpha=0.9, label="position")
     axs[0].set_ylabel("Feet")
-    axs[0].set_title("Reference Position Error")
+    axs[0].set_title("Contouring Errors")
     axs[0].legend(loc="best")
     axs[0].grid(True, alpha=0.25)
 
-    axs[1].plot(time_s, altitude_error_ft, color="tab:red", linewidth=2.0, label="altitude")
-    axs[1].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
-    axs[1].plot(time_s, phi_error_deg, color="tab:purple", linewidth=1.3, alpha=0.9, label="phi")
-    axs[1].plot(time_s, theta_error_deg, color="tab:brown", linewidth=1.3, alpha=0.9, label="theta")
-    axs[1].plot(time_s, psi_error_deg, color="tab:cyan", linewidth=1.3, alpha=0.9, label="psi")
-    axs[1].set_ylabel("Feet / Deg")
-    axs[1].set_title("Altitude / Attitude Errors")
+    axs[1].plot(time_s, progress_s_ft, color="tab:purple", linewidth=2.0, label="s")
+    axs[1].plot(time_s, virtual_speed_fps, color="tab:brown", linewidth=1.5, alpha=0.9, label="v_s")
+    axs[1].plot(time_s, altitude_error_ft, color="tab:red", linewidth=1.2, alpha=0.8, label="altitude err")
+    axs[1].set_ylabel("Feet / ft/s")
+    axs[1].set_title("Virtual Progress")
     axs[1].legend(loc="best")
     axs[1].grid(True, alpha=0.25)
 
@@ -230,13 +227,13 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
     axs[3].legend(loc="best")
     axs[3].grid(True, alpha=0.25)
 
-    axs[4].plot(time_s, state_cost_est, color="tab:blue", linewidth=1.6, label="state")
-    axs[4].plot(time_s, terrain_cost_est, color="tab:green", linewidth=1.6, label="terrain")
-    axs[4].plot(time_s, rate_cost_est, color="tab:orange", linewidth=1.6, label="rate")
-    axs[4].plot(time_s, limit_cost_est, color="tab:red", linewidth=1.6, label="limit")
-    axs[4].plot(time_s, total_stage_cost_est, color="black", linewidth=1.8, alpha=0.9, label="total")
+    axs[4].plot(time_s, contour_cost_est, color="tab:blue", linewidth=1.6, label="contour")
+    axs[4].plot(time_s, lag_cost_est, color="tab:orange", linewidth=1.6, label="lag")
+    axs[4].plot(time_s, progress_reward_est, color="tab:green", linewidth=1.6, label="-w_v v_s")
+    axs[4].plot(time_s, virtual_speed_cost_est, color="tab:purple", linewidth=1.6, label="R_vs v_s^2")
+    axs[4].plot(time_s, contouring_cost_est, color="black", linewidth=1.8, alpha=0.9, label="L_cont")
     axs[4].set_ylabel("Cost")
-    axs[4].set_title("Stage Cost Terms")
+    axs[4].set_title("Contouring Cost Terms")
     axs[4].legend(loc="best")
     axs[4].grid(True, alpha=0.25)
 
@@ -259,12 +256,13 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
     axs[6].legend(loc="best")
     axs[6].grid(True, alpha=0.25)
 
-    axs[7].plot(time_s, north_error_ft, color="tab:blue", linewidth=1.6, label="north")
-    axs[7].plot(time_s, east_error_ft, color="tab:orange", linewidth=1.6, label="east")
-    axs[7].plot(time_s, altitude_error_ft, color="tab:green", linewidth=1.6, label="altitude")
+    axs[7].plot(time_s, terrain_cost_est, color="tab:green", linewidth=1.6, label="terrain")
+    axs[7].plot(time_s, rate_cost_est, color="tab:orange", linewidth=1.6, label="rate")
+    axs[7].plot(time_s, limit_cost_est, color="tab:red", linewidth=1.6, label="limit")
+    axs[7].plot(time_s, total_stage_cost_est, color="black", linewidth=1.8, alpha=0.9, label="total")
     axs[7].set_xlabel("Time (s)")
-    axs[7].set_ylabel("Feet")
-    axs[7].set_title("Signed Reference Errors")
+    axs[7].set_ylabel("Cost")
+    axs[7].set_title("Stage Cost Terms")
     axs[7].legend(loc="best")
     axs[7].grid(True, alpha=0.25)
 
@@ -890,6 +888,7 @@ def main():
     if controller_tag in {"mppi", "smooth_mppi"}:
         print("Compiling JAX JIT... (this takes a moment)", flush=True)
         _ = controller.get_action(initial_controller_state)
+        controller.reset(seed=3)
         print("JIT compilation finished.", flush=True)
         if args.gatekeeper:
             if not UNCERTAINTY_ARTIFACT_PATH.exists():
@@ -918,6 +917,7 @@ def main():
             )
             gatekeeper.reset(controller_state_to_gatekeeper_flat(initial_controller_state), t=0)
             gatekeeper_prev_using_backup = False
+            controller.reset(seed=3)
             print("Gatekeeper JIT compilation finished.", flush=True)
 
     print("\nStarting Canyon Flight...")
@@ -933,10 +933,10 @@ def main():
     )
     if controller_tag in {"mppi", "smooth_mppi"}:
         print(
-            f"{'Step':<5} | {'Ref':<5} | {'PosErr':<8} | {'dN':<8} | {'dE':<8} | {'dH':<8} | "
-            f"{'dPsi':<7} | {'Clr':<7} | {'Cost':<10} | {'Mode':<6} | {'Plan(ms)':<8} | {'gk(ms)':<8}"
+            f"{'Step':<5} | {'Prog':<8} | {'CErr':<8} | {'Lag':<8} | {'PosErr':<8} | {'dH':<8} | "
+            f"{'Clr':<7} | {'Cost':<10} | {'Mode':<6} | {'Plan(ms)':<8} | {'gk(ms)':<8}"
         )
-        print("-" * 124)
+        print("-" * 117)
     else:
         print(
             f"{'Step':<5} | {'p_N_rel':<8} | {'LatErr':<8} | {'h_rel':<8} | "
@@ -1170,31 +1170,21 @@ def main():
                 mppi_cfg = getattr(controller, "config", None)
                 if mppi_cfg is None:
                     raise RuntimeError("MPPI controller missing config while collecting debug diagnostics.")
-                reference_state = np.asarray(controller.get_reference_state(step + 1), dtype=np.float32)
-                state_weights = np.asarray(mppi_cfg.state_tracking_weights, dtype=np.float64)
+                tracking_metrics = dict(controller.get_tracking_metrics(post_controller_state))
                 action_vec = np.asarray(action, dtype=np.float32)
                 action_rate = action_vec - prev_applied_action
 
-                north_error_ft = float(post_controller_state["p_N"] - reference_state[0])
-                east_error_ft = float(post_controller_state["p_E"] - reference_state[1])
-                altitude_error_ft = float(post_controller_state["h"] - reference_state[2])
-                phi_error_rad = _wrap_angle_rad(float(post_controller_state["phi"]) - float(reference_state[3]))
-                theta_error_rad = _wrap_angle_rad(float(post_controller_state["theta"]) - float(reference_state[4]))
-                psi_error_rad = _wrap_angle_rad(float(post_controller_state["psi"]) - float(reference_state[5]))
-                position_error_ft = float(np.hypot(north_error_ft, east_error_ft))
-
-                state_error_vec = np.asarray(
-                    [
-                        north_error_ft,
-                        east_error_ft,
-                        altitude_error_ft,
-                        phi_error_rad,
-                        theta_error_rad,
-                        psi_error_rad,
-                    ],
-                    dtype=np.float64,
-                )
-                state_cost_est = float(np.sum(state_weights * np.square(state_error_vec)))
+                progress_s_ft = float(tracking_metrics["progress_s_ft"])
+                virtual_speed_fps = float(tracking_metrics["virtual_speed_fps"])
+                contour_error_ft = float(tracking_metrics["contour_error_ft"])
+                lag_error_ft = float(tracking_metrics["lag_error_ft"])
+                position_error_ft = float(tracking_metrics["position_error_ft"])
+                altitude_error_ft = float(tracking_metrics["altitude_error_ft"])
+                contour_cost_est = float(tracking_metrics["contour_cost_est"])
+                lag_cost_est = float(tracking_metrics["lag_cost_est"])
+                progress_reward_est = float(tracking_metrics["progress_reward_est"])
+                virtual_speed_cost_est = float(tracking_metrics["virtual_speed_cost_est"])
+                contouring_cost_est = float(tracking_metrics["contouring_cost_est"])
 
                 terrain_clearance_ft = float(info.get("terrain_clearance_ft", np.nan))
                 terrain_safe_clearance_ft = float(mppi_cfg.terrain_safe_clearance_ft)
@@ -1228,30 +1218,35 @@ def main():
                     float(mppi_cfg.nz_penalty_weight) * (nz_excess_g ** 2)
                     + float(mppi_cfg.alpha_penalty_weight) * (alpha_excess_rad ** 2)
                 )
-                total_stage_cost_est = float(state_cost_est + terrain_cost_est + rate_cost_est + limit_cost_est)
+                total_stage_cost_est = float(
+                    contouring_cost_est + terrain_cost_est + rate_cost_est + limit_cost_est
+                )
 
                 mppi_tracking_rows.append(
                     {
                         "step": int(step),
                         "time_s": float(step / 30.0),
-                        "reference_index": int(step + 1),
-                        "reference_north_ft": float(reference_state[0]),
-                        "reference_east_ft": float(reference_state[1]),
-                        "reference_altitude_ft": float(reference_state[2]),
-                        "north_error_ft": float(north_error_ft),
-                        "east_error_ft": float(east_error_ft),
+                        "progress_s_ft": float(progress_s_ft),
+                        "virtual_speed_fps": float(virtual_speed_fps),
+                        "reference_north_ft": float(tracking_metrics["reference_north_ft"]),
+                        "reference_east_ft": float(tracking_metrics["reference_east_ft"]),
+                        "reference_altitude_ft": float(tracking_metrics["reference_altitude_ft"]),
+                        "reference_heading_deg": float(np.degrees(float(tracking_metrics["reference_heading_rad"]))),
+                        "contour_error_ft": float(contour_error_ft),
+                        "lag_error_ft": float(lag_error_ft),
                         "position_error_ft": float(position_error_ft),
                         "altitude_error_ft": float(altitude_error_ft),
-                        "phi_error_deg": float(np.degrees(phi_error_rad)),
-                        "theta_error_deg": float(np.degrees(theta_error_rad)),
-                        "psi_error_deg": float(np.degrees(psi_error_rad)),
                         "terrain_clearance_ft": float(terrain_clearance_ft),
                         "terrain_safe_clearance_ft": float(terrain_safe_clearance_ft),
                         "nz_g": float(nz_g),
                         "nz_limit_g": float(mppi_cfg.nz_limit_g),
                         "alpha_deg": float(alpha_deg),
                         "alpha_limit_deg": float(alpha_limit_deg),
-                        "state_cost_est": float(state_cost_est),
+                        "contour_cost_est": float(contour_cost_est),
+                        "lag_cost_est": float(lag_cost_est),
+                        "progress_reward_est": float(progress_reward_est),
+                        "virtual_speed_cost_est": float(virtual_speed_cost_est),
+                        "contouring_cost_est": float(contouring_cost_est),
                         "terrain_cost_est": float(terrain_cost_est),
                         "rate_cost_est": float(rate_cost_est),
                         "limit_cost_est": float(limit_cost_est),
@@ -1301,9 +1296,9 @@ def main():
                     if gatekeeper_state is not None and bool(gatekeeper_state.using_backup):
                         mode_label = "BACKUP"
                     print(
-                        f"{step:<5} | {step + 1:<5d} | {position_error_ft:<8.1f} | {north_error_ft:<8.1f} | "
-                        f"{east_error_ft:<8.1f} | {altitude_error_ft:<8.1f} | {np.degrees(psi_error_rad):<7.1f} | "
-                        f"{terrain_clearance_ft:<7.1f} | {total_stage_cost_est:<10.1f} | {mode_label:<6} | "
+                        f"{step:<5} | {progress_s_ft:<8.0f} | {contour_error_ft:<8.1f} | {lag_error_ft:<8.1f} | "
+                        f"{position_error_ft:<8.1f} | {altitude_error_ft:<8.1f} | {terrain_clearance_ft:<7.1f} | "
+                        f"{total_stage_cost_est:<10.1f} | {mode_label:<6} | "
                         f"{plan_ms:<8.1f} | {gk_ms:<8.1f}"
                     )
                 else:
@@ -1350,6 +1345,14 @@ def main():
             print(f"Saved tracking diagnostics CSV: {diag_csv_path}")
             print(f"Saved tracking diagnostics plot: {diag_plot_path}")
         if mppi_tracking_rows:
+            contour_error_ft = np.asarray(
+                [float(row.get("contour_error_ft", np.nan)) for row in mppi_tracking_rows],
+                dtype=np.float64,
+            )
+            lag_error_ft = np.asarray(
+                [float(row.get("lag_error_ft", np.nan)) for row in mppi_tracking_rows],
+                dtype=np.float64,
+            )
             position_error_ft = np.asarray(
                 [float(row.get("position_error_ft", np.nan)) for row in mppi_tracking_rows],
                 dtype=np.float64,
@@ -1368,6 +1371,8 @@ def main():
             )
             print(
                 "MPPI debug summary: "
+                f"mean(contour_error_ft)={np.nanmean(contour_error_ft):.1f}, "
+                f"mean(|lag_error_ft|)={np.nanmean(np.abs(lag_error_ft)):.1f}, "
                 f"mean(position_error_ft)={np.nanmean(position_error_ft):.1f}, "
                 f"max(position_error_ft)={np.nanmax(position_error_ft):.1f}, "
                 f"min(terrain_clearance_ft)={np.nanmin(terrain_clearance_ft):.1f}, "

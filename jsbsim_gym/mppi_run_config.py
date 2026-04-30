@@ -10,7 +10,7 @@ from jsbsim_gym.smooth_mppi_jax import JaxSmoothMPPIConfig, JaxSmoothMPPIControl
 KTS_TO_FPS = 1.68781
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MPPI_TUNING_JSON_PATH = REPO_ROOT / "output" / "canyon_mppi" / "mppi_optuna_best.json"
-MPPI_TUNING_STUDY_NAME = "mppi_nominal_tracking_tuning"
+MPPI_TUNING_STUDY_NAME = "mppi_nominal_contouring_tuning"
 MPPI_TUNING_STORAGE = f"sqlite:///{(REPO_ROOT / 'optuna' / 'mppi_tuning.db').as_posix()}"
 MPPI_TUNING_STORAGE_FALLBACKS = (
     MPPI_TUNING_STORAGE,
@@ -19,18 +19,29 @@ MPPI_TUNING_STORAGE_FALLBACKS = (
 )
 MPPI_TUNABLE_TUPLE_SPECS = {
     "action_noise_std": 4,
-    "state_tracking_weights": 6,
     "control_rate_weights": 4,
 }
 MPPI_TUNABLE_SCALAR_KEYS = frozenset(
     {
         "lambda_",
         "gamma_",
+        "contour_weight",
+        "lag_weight",
+        "progress_reward_weight",
+        "virtual_speed_weight",
         "terrain_collision_penalty",
         "terrain_repulsion_scale",
     }
 )
 MPPI_TUNABLE_KEYS = frozenset(MPPI_TUNABLE_SCALAR_KEYS | set(MPPI_TUNABLE_TUPLE_SPECS))
+MPPI_REQUIRED_CONTOURING_KEYS = frozenset(
+    {
+        "contour_weight",
+        "lag_weight",
+        "progress_reward_weight",
+        "virtual_speed_weight",
+    }
+)
 
 
 def build_mppi_base_config_kwargs(
@@ -46,16 +57,19 @@ def build_mppi_base_config_kwargs(
         lambda_=1.0,
         gamma_=0.05,
         action_noise_std=(0.5, 0.5, 0.5, 0.5),
-        state_tracking_weights=(0.05, 0.05, 0.05, 10.0, 10.0, 8.0),
-        terrain_collision_penalty=0.0*1.0e6,
-        terrain_repulsion_scale=0.0*1.0e5,
+        contour_weight=1.0,
+        lag_weight=0.05,
+        progress_reward_weight=25.0,
+        virtual_speed_weight=0.015,
+        terrain_collision_penalty=1.0e6,
+        terrain_repulsion_scale=1.0e5,
         terrain_decay_rate_ft_inv=0.03,
         terrain_safe_clearance_ft=40.0 * 3.28084,
         control_rate_weights=(15.0, 20.0, 5.0, 2.0),
         nz_limit_g=9.0,
-        nz_penalty_weight=0.0*1.0e4,
+        nz_penalty_weight=1.0e4,
         alpha_limit_rad=25.0 * 3.141592653589793 / 180.0,
-        alpha_penalty_weight=0.0*1.0e6,
+        alpha_penalty_weight=1.0e4,
     )
 
 
@@ -111,6 +125,10 @@ def _normalize_mppi_tunable_value(key: str, value):
     return None
 
 
+def _is_valid_contouring_tuning_params(params: dict) -> bool:
+    return isinstance(params, dict) and MPPI_REQUIRED_CONTOURING_KEYS.issubset(params.keys())
+
+
 def _trial_params_to_effective_mppi_params(params: dict) -> dict:
     if not isinstance(params, dict):
         return {}
@@ -129,6 +147,16 @@ def _trial_params_to_effective_mppi_params(params: dict) -> dict:
         effective["lambda_"] = float(params["lambda_"])
     if "gamma_" in params:
         effective["gamma_"] = float(params["gamma_"])
+    if "contour_weight" in params:
+        effective["contour_weight"] = float(params["contour_weight"])
+    if "lag_weight" in params:
+        effective["lag_weight"] = float(params["lag_weight"])
+    elif "contour_weight" in params and "lag_ratio" in params:
+        effective["lag_weight"] = float(params["contour_weight"]) * float(params["lag_ratio"])
+    if "progress_reward_weight" in params:
+        effective["progress_reward_weight"] = float(params["progress_reward_weight"])
+    if "virtual_speed_weight" in params:
+        effective["virtual_speed_weight"] = float(params["virtual_speed_weight"])
     if "terrain_collision_penalty" in params:
         effective["terrain_collision_penalty"] = float(params["terrain_collision_penalty"])
     if "terrain_repulsion_scale" in params:
@@ -137,13 +165,6 @@ def _trial_params_to_effective_mppi_params(params: dict) -> dict:
     action_noise_std = _maybe_tuple("action_noise_std", ("aileron", "elevator", "rudder", "throttle"))
     if action_noise_std is not None:
         effective["action_noise_std"] = action_noise_std
-
-    state_tracking_weights = _maybe_tuple(
-        "state_tracking_weight",
-        ("north", "east", "altitude", "phi", "theta", "psi"),
-    )
-    if state_tracking_weights is not None:
-        effective["state_tracking_weights"] = state_tracking_weights
 
     control_rate_weights = _maybe_tuple(
         "control_rate_weight",
@@ -169,7 +190,7 @@ def load_mppi_optuna_params(
         try:
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
             best_params = payload.get("best_params", {}) if isinstance(payload, dict) else {}
-            if isinstance(best_params, dict) and best_params:
+            if _is_valid_contouring_tuning_params(best_params):
                 params = dict(best_params)
                 source = str(summary_path)
         except Exception:
@@ -196,9 +217,9 @@ def load_mppi_optuna_params(
             study = optuna.load_study(study_name=study_name, storage=storage_url)
             best_trial = study.best_trial
             effective = best_trial.user_attrs.get("effective_params")
-            if not isinstance(effective, dict) or not effective:
+            if not _is_valid_contouring_tuning_params(effective):
                 effective = _trial_params_to_effective_mppi_params(best_trial.params)
-            if isinstance(effective, dict) and effective:
+            if _is_valid_contouring_tuning_params(effective):
                 return dict(effective), f"{storage_url}::{study_name}"
         except Exception:
             continue

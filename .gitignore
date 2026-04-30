@@ -146,3 +146,4 @@ models/
 uncertain_racecar_gym/
 *.svg
 *.csv
+.codex

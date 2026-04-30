@@ -56,7 +56,10 @@ class JaxMPPIConfig:
     action_noise_std: tuple = (0.16, 0.14, 0.12, 0.08)
     action_low: tuple = (-1.0, -1.0, -1.0, 0.0)
     action_high: tuple = (1.0, 1.0, 1.0, 1.0)
-    state_tracking_weights: tuple = (0.05, 0.05, 0.05, 10.0, 10.0, 8.0)
+    contour_weight: float = 1.0
+    lag_weight: float = 0.05
+    progress_reward_weight: float = 25.0
+    virtual_speed_weight: float = 0.015
     terrain_collision_penalty: float = 1.0e6
     terrain_repulsion_scale: float = 1.0e5
     terrain_decay_rate_ft_inv: float = 0.03
@@ -65,7 +68,7 @@ class JaxMPPIConfig:
     nz_limit_g: float = 9.0
     nz_penalty_weight: float = 1.0e4
     alpha_limit_rad: float = np.deg2rad(25.0)
-    alpha_penalty_weight: float = 1.0e6
+    alpha_penalty_weight: float = 1.0e4
     debug_render_plans: bool = True
     debug_num_trajectories: int = 96
     seed: int = 42
@@ -77,7 +80,10 @@ class JaxMPPIConfig:
             self.action_noise_std,
             self.action_low,
             self.action_high,
-            self.state_tracking_weights,
+            self.contour_weight,
+            self.lag_weight,
+            self.progress_reward_weight,
+            self.virtual_speed_weight,
             self.terrain_collision_penalty,
             self.terrain_repulsion_scale,
             self.terrain_decay_rate_ft_inv,
@@ -107,7 +113,10 @@ class JaxMPPIConfig:
             action_noise_std,
             action_low,
             action_high,
-            state_tracking_weights,
+            contour_weight,
+            lag_weight,
+            progress_reward_weight,
+            virtual_speed_weight,
             terrain_collision_penalty,
             terrain_repulsion_scale,
             terrain_decay_rate_ft_inv,
@@ -137,7 +146,10 @@ class JaxMPPIConfig:
             action_noise_std=action_noise_std,
             action_low=action_low,
             action_high=action_high,
-            state_tracking_weights=state_tracking_weights,
+            contour_weight=contour_weight,
+            lag_weight=lag_weight,
+            progress_reward_weight=progress_reward_weight,
+            virtual_speed_weight=virtual_speed_weight,
             terrain_collision_penalty=terrain_collision_penalty,
             terrain_repulsion_scale=terrain_repulsion_scale,
             terrain_decay_rate_ft_inv=terrain_decay_rate_ft_inv,
@@ -556,21 +568,31 @@ def _terrain_elevation_ft_at(p_n_ft, p_e_ft, north_axis_ft, east_axis_ft, terrai
     return (1.0 - dn) * z0 + dn * z1
 
 
-def _reference_window(reference_states_ft_rad, start_index, horizon):
-    indices = jnp.minimum(
-        jnp.asarray(start_index, dtype=jnp.int32) + jnp.arange(1, horizon + 1, dtype=jnp.int32),
-        reference_states_ft_rad.shape[0] - 1,
-    )
-    return reference_states_ft_rad[indices]
+def _path_reference_at_s(s_ft, path_s_ft, path_positions_ft, path_tangents_ft):
+    idx_hi = jnp.clip(jnp.searchsorted(path_s_ft, s_ft, side="right"), 1, path_s_ft.shape[0] - 1)
+    idx_lo = idx_hi - 1
+
+    s0 = path_s_ft[idx_lo]
+    s1 = path_s_ft[idx_hi]
+    tau = jnp.where(jnp.abs(s1 - s0) > 1e-6, (s_ft - s0) / (s1 - s0), 0.0)
+    tau = jnp.clip(tau, 0.0, 1.0)
+
+    position_ft = (1.0 - tau) * path_positions_ft[idx_lo] + tau * path_positions_ft[idx_hi]
+    tangent_ft = (1.0 - tau) * path_tangents_ft[idx_lo] + tau * path_tangents_ft[idx_hi]
+    tangent_ft = tangent_ft / jnp.maximum(jnp.linalg.norm(tangent_ft), 1e-6)
+    return position_ft, tangent_ft
 
 
 def single_rollout_cost_from_states(
     initial_state,
     state_seq,
     action_seq,
+    virtual_speed_seq,
     initial_prev_action,
-    reference_start_index,
-    reference_states_ft_rad,
+    initial_progress_s_ft,
+    path_s_ft,
+    path_positions_ft,
+    path_tangents_ft,
     terrain_north_samples_ft,
     terrain_east_samples_ft,
     terrain_elevation_ft,
@@ -585,21 +607,26 @@ def single_rollout_cost_from_states(
     initial_prev_action = clip_action(initial_prev_action, low, high)
     prev_actions = jnp.concatenate([initial_prev_action[None, :], bounded_actions[:-1, :]], axis=0)
 
-    ref_seq = _reference_window(reference_states_ft_rad, reference_start_index, horizon)
+    s_seq = initial_progress_s_ft + DT * jnp.cumsum(virtual_speed_seq, axis=0)
+    s_seq = jnp.clip(s_seq, path_s_ft[0], path_s_ft[-1])
+    path_pos_seq_ft, path_tangent_seq_ft = jax.vmap(
+        lambda progress_s_ft: _path_reference_at_s(progress_s_ft, path_s_ft, path_positions_ft, path_tangents_ft)
+    )(s_seq)
 
-    state_errors = jnp.stack(
+    position_errors_ft = jnp.stack(
         [
-            state_seq[:, 0] - ref_seq[:, 0],
-            state_seq[:, 1] - ref_seq[:, 1],
-            state_seq[:, 2] - ref_seq[:, 2],
-            wrap_angle_rad(state_seq[:, 9] - ref_seq[:, 3]),
-            wrap_angle_rad(state_seq[:, 10] - ref_seq[:, 4]),
-            wrap_angle_rad(state_seq[:, 11] - ref_seq[:, 5]),
+            state_seq[:, 0] - path_pos_seq_ft[:, 0],
+            state_seq[:, 1] - path_pos_seq_ft[:, 1],
+            state_seq[:, 2] - path_pos_seq_ft[:, 2],
         ],
         axis=1,
     )
-    state_weights = jnp.asarray(config.state_tracking_weights, dtype=jnp.float32)
-    state_cost = jnp.sum(state_weights[None, :] * jnp.square(state_errors), axis=1)
+    lag_error_ft = jnp.sum(position_errors_ft * path_tangent_seq_ft, axis=1)
+    contour_error_vec_ft = position_errors_ft - lag_error_ft[:, None] * path_tangent_seq_ft
+    contour_error_sq_ft = jnp.sum(jnp.square(contour_error_vec_ft), axis=1)
+    contour_cost = config.contour_weight * contour_error_sq_ft
+    lag_cost = config.lag_weight * jnp.square(lag_error_ft)
+    progress_cost = -config.progress_reward_weight * virtual_speed_seq + config.virtual_speed_weight * jnp.square(virtual_speed_seq)
 
     terrain_elevation_seq_ft = jax.vmap(
         lambda p_n_ft, p_e_ft: _terrain_elevation_ft_at(
@@ -632,7 +659,7 @@ def single_rollout_cost_from_states(
         + config.alpha_penalty_weight * jnp.square(alpha_excess)
     )
 
-    stage_cost = state_cost + terrain_cost + rate_cost + limit_cost
+    stage_cost = contour_cost + lag_cost + progress_cost + terrain_cost + rate_cost + limit_cost
     terrain_collision = hagl_ft <= 0.0
     prior_collision = jnp.concatenate([jnp.asarray([False]), terrain_collision[:-1]], axis=0)
     active = jnp.cumsum(prior_collision.astype(jnp.int32)) == 0
@@ -648,27 +675,39 @@ def build_rollout_state_batch_fn(W, B, poly_powers):
 
 
 def build_rollout_cost_from_states_fn(
-    reference_states_ft_rad,
+    path_s_ft,
+    path_positions_ft,
+    path_tangents_ft,
     terrain_north_samples_ft,
     terrain_east_samples_ft,
     terrain_elevation_ft,
     config: JaxMPPIConfig,
 ):
-    def rollout_costs_from_states(initial_state, state_batch, action_batch, initial_prev_action, reference_start_index):
+    def rollout_costs_from_states(
+        initial_state,
+        state_batch,
+        action_batch,
+        virtual_speed_batch,
+        initial_prev_action,
+        initial_progress_s_ft,
+    ):
         return jax.vmap(
-            lambda state_seq, action_seq: single_rollout_cost_from_states(
+            lambda state_seq, action_seq, virtual_speed_seq: single_rollout_cost_from_states(
                 initial_state,
                 state_seq,
                 action_seq,
+                virtual_speed_seq,
                 initial_prev_action,
-                reference_start_index,
-                reference_states_ft_rad,
+                initial_progress_s_ft,
+                path_s_ft,
+                path_positions_ft,
+                path_tangents_ft,
                 terrain_north_samples_ft,
                 terrain_east_samples_ft,
                 terrain_elevation_ft,
                 config,
             )
-        )(state_batch, action_batch)
+        )(state_batch, action_batch, virtual_speed_batch)
 
     return jax.jit(rollout_costs_from_states)
 

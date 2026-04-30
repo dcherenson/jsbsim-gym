@@ -39,7 +39,7 @@ NZ_LIMIT_G = 9.0
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Tune the offline-reference MPPI controller with Optuna.",
+        description="Tune the contouring MPPI controller against an offline nominal trajectory.",
     )
     parser.add_argument(
         "--nominal-dyn-path",
@@ -94,10 +94,6 @@ def parse_args():
         help="Path to write the best-parameter JSON summary.",
     )
     return parser.parse_args()
-
-
-def _wrap_angle_rad(angle_rad: float) -> float:
-    return float(np.arctan2(np.sin(float(angle_rad)), np.cos(float(angle_rad))))
 
 
 def _to_mppi_state(env, state_dict, altitude_ref_ft):
@@ -218,6 +214,8 @@ def _make_env(nominal_bundle, *, max_steps: int, wind_sigma: float):
 
 
 def _sample_controller_overrides(trial):
+    contour_weight = trial.suggest_float("contour_weight", 0.05, 20.0, log=True)
+    lag_ratio = trial.suggest_float("lag_ratio", 1.0e-3, 0.25, log=True)
     return {
         "lambda_": trial.suggest_float("lambda_", 0.10, 10.0, log=True),
         "gamma_": trial.suggest_float("gamma_", 0.002, 0.50, log=True),
@@ -227,19 +225,15 @@ def _sample_controller_overrides(trial):
             trial.suggest_float("action_noise_std_rudder", 0.01, 0.50, log=True),
             trial.suggest_float("action_noise_std_throttle", 0.005, 0.25, log=True),
         ),
-        "state_tracking_weights": (
-            trial.suggest_float("state_tracking_weight_north", 1.0e-4, 50.0, log=True),
-            trial.suggest_float("state_tracking_weight_east", 1.0e-4, 50.0, log=True),
-            trial.suggest_float("state_tracking_weight_altitude", 1.0e-4, 50.0, log=True),
-            trial.suggest_float("state_tracking_weight_phi", 0.01, 50.0, log=True),
-            trial.suggest_float("state_tracking_weight_theta", 0.01, 50.0, log=True),
-            trial.suggest_float("state_tracking_weight_psi", 0.01, 50.0, log=True),
-        ),
-        "terrain_collision_penalty": trial.suggest_float("terrain_collision_penalty", 1.0e0, 1.0e4, log=True),
-        "terrain_repulsion_scale": trial.suggest_float("terrain_repulsion_scale", 1.0e0, 1.0e4, log=True),
+        "contour_weight": contour_weight,
+        "lag_weight": contour_weight * lag_ratio,
+        "progress_reward_weight": trial.suggest_float("progress_reward_weight", 1.0, 200.0, log=True),
+        "virtual_speed_weight": trial.suggest_float("virtual_speed_weight", 1.0e-4, 0.5, log=True),
+        "terrain_collision_penalty": trial.suggest_float("terrain_collision_penalty", 1.0e5, 1.0e7, log=True),
+        "terrain_repulsion_scale": trial.suggest_float("terrain_repulsion_scale", 1.0e3, 1.0e6, log=True),
         "control_rate_weights": (
-            trial.suggest_float("control_rate_weight_aileron", 0.1, 500.0, log=True),
-            trial.suggest_float("control_rate_weight_elevator", 0.1, 500.0, log=True),
+            trial.suggest_float("control_rate_weight_aileron", 1.0, 500.0, log=True),
+            trial.suggest_float("control_rate_weight_elevator", 1.0, 700.0, log=True),
             trial.suggest_float("control_rate_weight_rudder", 0.01, 100.0, log=True),
             trial.suggest_float("control_rate_weight_throttle", 0.01, 50.0, log=True),
         ),
@@ -258,13 +252,19 @@ def _episode_cost_summary(
     prev_action = np.asarray([0.0, 0.0, 0.0, 0.55], dtype=np.float32)
     termination_reason = "running"
 
+    contour_errors_ft = []
+    lag_errors_ft = []
     position_errors_ft = []
     altitude_errors_ft = []
-    heading_errors_deg = []
     clearance_shortfalls = []
     action_rates = []
     alpha_excess_deg = []
     nz_excess_g = []
+    contouring_costs = []
+    terrain_costs = []
+    rate_costs = []
+    limit_costs = []
+    total_stage_costs = []
     min_clearance_ft = np.inf
     steps = 0
 
@@ -295,14 +295,7 @@ def _episode_cost_summary(
             steps += 1
             state = env.unwrapped.get_full_state_dict()
             post_state = _to_mppi_state(env, state, altitude_ref_ft)
-            reference_state = np.asarray(controller.get_reference_state(step + 1), dtype=np.float32)
-
-            north_error_ft = float(post_state["p_N"] - reference_state[0])
-            east_error_ft = float(post_state["p_E"] - reference_state[1])
-            altitude_error_ft = float(post_state["h"] - reference_state[2])
-            psi_error_deg = abs(
-                np.degrees(_wrap_angle_rad(float(post_state["psi"]) - float(reference_state[5])))
-            )
+            tracking = dict(controller.get_tracking_metrics(post_state))
 
             clearance_ft = float(info.get("terrain_clearance_ft", np.nan))
             min_clearance_ft = min(min_clearance_ft, clearance_ft)
@@ -310,20 +303,58 @@ def _episode_cost_summary(
             if np.isfinite(clearance_ft):
                 clearance_shortfall = max(SAFE_CLEARANCE_FT - clearance_ft, 0.0) / max(SAFE_CLEARANCE_FT, 1.0)
 
-            action_rate = np.abs(action - prev_action)
-            prev_action = action.copy()
+            action_rate = action - prev_action
 
+            terrain_cost_est = float(controller.config.terrain_collision_penalty)
+            if np.isfinite(clearance_ft):
+                if clearance_ft <= 0.0:
+                    terrain_cost_est = float(controller.config.terrain_collision_penalty)
+                else:
+                    terrain_cost_est = float(
+                        min(
+                            float(controller.config.terrain_collision_penalty),
+                            float(controller.config.terrain_repulsion_scale)
+                            * np.exp(
+                                -float(controller.config.terrain_decay_rate_ft_inv)
+                                * (clearance_ft - float(controller.config.terrain_safe_clearance_ft))
+                            ),
+                        )
+                    )
+
+            rate_cost_est = float(
+                np.sum(
+                    np.asarray(controller.config.control_rate_weights, dtype=np.float64)
+                    * np.square(action_rate)
+                )
+            )
+            prev_action = action.copy()
             alpha_deg = float(np.degrees(np.arctan2(float(post_state["w"]), max(float(post_state["u"]), 1.0))))
             alpha_excess = max(alpha_deg - ALPHA_LIMIT_DEG, 0.0)
             nz_excess = max(abs(float(post_state.get("nz", 1.0))) - NZ_LIMIT_G, 0.0)
+            alpha_excess_rad = max(
+                np.deg2rad(alpha_deg) - float(controller.config.alpha_limit_rad),
+                0.0,
+            )
+            limit_cost_est = float(
+                float(controller.config.nz_penalty_weight) * (nz_excess ** 2)
+                + float(controller.config.alpha_penalty_weight) * (alpha_excess_rad ** 2)
+            )
+            contouring_cost_est = float(tracking["contouring_cost_est"])
+            total_stage_cost_est = float(contouring_cost_est + terrain_cost_est + rate_cost_est + limit_cost_est)
 
-            position_errors_ft.append(float(np.hypot(north_error_ft, east_error_ft)))
-            altitude_errors_ft.append(abs(altitude_error_ft))
-            heading_errors_deg.append(float(psi_error_deg))
+            contour_errors_ft.append(float(tracking["contour_error_ft"]))
+            lag_errors_ft.append(float(tracking["lag_error_ft"]))
+            position_errors_ft.append(float(tracking["position_error_ft"]))
+            altitude_errors_ft.append(abs(float(tracking["altitude_error_ft"])))
             clearance_shortfalls.append(float(clearance_shortfall))
-            action_rates.append(action_rate.astype(np.float64, copy=False))
+            action_rates.append(np.abs(action_rate).astype(np.float64, copy=False))
             alpha_excess_deg.append(float(alpha_excess))
             nz_excess_g.append(float(nz_excess))
+            contouring_costs.append(float(contouring_cost_est))
+            terrain_costs.append(float(terrain_cost_est))
+            rate_costs.append(float(rate_cost_est))
+            limit_costs.append(float(limit_cost_est))
+            total_stage_costs.append(float(total_stage_cost_est))
 
             controller_state = post_state
 
@@ -335,19 +366,27 @@ def _episode_cost_summary(
     finally:
         env.close()
 
+    contour_arr = np.asarray(contour_errors_ft, dtype=np.float64)
+    lag_arr = np.asarray(lag_errors_ft, dtype=np.float64)
     position_arr = np.asarray(position_errors_ft, dtype=np.float64)
     altitude_arr = np.asarray(altitude_errors_ft, dtype=np.float64)
-    heading_arr = np.asarray(heading_errors_deg, dtype=np.float64)
     clearance_shortfall_arr = np.asarray(clearance_shortfalls, dtype=np.float64)
     action_rate_arr = np.asarray(action_rates, dtype=np.float64).reshape(-1, 4) if action_rates else np.zeros((0, 4))
     alpha_excess_arr = np.asarray(alpha_excess_deg, dtype=np.float64)
     nz_excess_arr = np.asarray(nz_excess_g, dtype=np.float64)
+    contouring_cost_arr = np.asarray(contouring_costs, dtype=np.float64)
+    terrain_cost_arr = np.asarray(terrain_costs, dtype=np.float64)
+    rate_cost_arr = np.asarray(rate_costs, dtype=np.float64)
+    limit_cost_arr = np.asarray(limit_costs, dtype=np.float64)
+    total_stage_cost_arr = np.asarray(total_stage_costs, dtype=np.float64)
 
+    mean_contour_ft = float(np.mean(contour_arr)) if contour_arr.size else 1.0e4
+    rms_contour_ft = float(np.sqrt(np.mean(np.square(contour_arr)))) if contour_arr.size else 1.0e4
+    p95_contour_ft = float(np.percentile(contour_arr, 95.0)) if contour_arr.size else 1.0e4
+    mean_abs_lag_ft = float(np.mean(np.abs(lag_arr))) if lag_arr.size else 1.0e4
+    p95_abs_lag_ft = float(np.percentile(np.abs(lag_arr), 95.0)) if lag_arr.size else 1.0e4
     mean_pos_ft = float(np.mean(position_arr)) if position_arr.size else 1.0e4
-    rms_pos_ft = float(np.sqrt(np.mean(np.square(position_arr)))) if position_arr.size else 1.0e4
-    p95_pos_ft = float(np.percentile(position_arr, 95.0)) if position_arr.size else 1.0e4
     mean_altitude_ft = float(np.mean(altitude_arr)) if altitude_arr.size else 1.0e4
-    mean_heading_deg = float(np.mean(heading_arr)) if heading_arr.size else 180.0
     mean_clearance_shortfall = float(np.mean(clearance_shortfall_arr)) if clearance_shortfall_arr.size else 1.0
     max_clearance_shortfall = float(np.max(clearance_shortfall_arr)) if clearance_shortfall_arr.size else 1.0
     mean_action_rate = (
@@ -355,37 +394,40 @@ def _episode_cost_summary(
     )
     mean_alpha_excess_deg = float(np.mean(alpha_excess_arr)) if alpha_excess_arr.size else 25.0
     mean_nz_excess_g = float(np.mean(nz_excess_arr)) if nz_excess_arr.size else 5.0
+    mean_contouring_cost = float(np.mean(contouring_cost_arr)) if contouring_cost_arr.size else 1.0e6
+    mean_terrain_cost = float(np.mean(terrain_cost_arr)) if terrain_cost_arr.size else 1.0e6
+    mean_rate_cost = float(np.mean(rate_cost_arr)) if rate_cost_arr.size else 1.0e4
+    mean_limit_cost = float(np.mean(limit_cost_arr)) if limit_cost_arr.size else 1.0e6
+    mean_total_stage_cost = float(np.mean(total_stage_cost_arr)) if total_stage_cost_arr.size else 1.0e6
+    p95_total_stage_cost = (
+        float(np.percentile(total_stage_cost_arr, 95.0)) if total_stage_cost_arr.size else 1.0e6
+    )
     if not np.isfinite(min_clearance_ft):
         min_clearance_ft = np.nan
 
-    track_cost = (
-        1.00 * (mean_pos_ft / 150.0)
-        + 1.50 * (rms_pos_ft / 150.0)
-        + 0.75 * (p95_pos_ft / 250.0)
-        + 0.75 * (mean_altitude_ft / 100.0)
-        + 0.25 * (mean_heading_deg / 25.0)
+    contour_track_cost = (
+        1.00 * mean_contour_ft
+        + 0.75 * rms_contour_ft
+        + 0.50 * p95_contour_ft
+        + 0.20 * mean_abs_lag_ft
+        + 0.10 * p95_abs_lag_ft
+        + 0.20 * mean_altitude_ft
     )
-    terrain_cost = 8.0 * mean_clearance_shortfall + 15.0 * max_clearance_shortfall
-    rate_cost = (
-        0.80 * (mean_action_rate[0] / 0.12)
-        + 1.00 * (mean_action_rate[1] / 0.12)
-        + 0.25 * (mean_action_rate[2] / 0.08)
-        + 0.15 * (mean_action_rate[3] / 0.05)
-    )
-    limit_cost = 2.0 * (mean_alpha_excess_deg / 5.0) + 2.0 * mean_nz_excess_g
+    stage_cost_term = mean_total_stage_cost + 0.25 * p95_total_stage_cost
+    terrain_margin_cost = 100.0 * mean_clearance_shortfall + 150.0 * max_clearance_shortfall
 
     if termination_reason in {"running", "time_limit"}:
         termination_penalty = 0.0
     elif termination_reason in {"terrain_collision", "ground_collision"}:
-        termination_penalty = 200.0 + 300.0 * (1.0 - survival_frac)
+        termination_penalty = 2.0e4 + 3.0e4 * (1.0 - survival_frac)
     elif termination_reason in {"hit_canyon_wall", "altitude_out_of_bounds"}:
-        termination_penalty = 120.0 + 180.0 * (1.0 - survival_frac)
+        termination_penalty = 1.0e4 + 1.5e4 * (1.0 - survival_frac)
     elif termination_reason == "invalid_action":
-        termination_penalty = 300.0
+        termination_penalty = 4.0e4
     else:
-        termination_penalty = 150.0
+        termination_penalty = 1.2e4
 
-    total_cost = float(track_cost + terrain_cost + rate_cost + limit_cost + termination_penalty)
+    total_cost = float(contour_track_cost + stage_cost_term + terrain_margin_cost + termination_penalty)
     score = -total_cost
 
     return float(score), {
@@ -393,11 +435,13 @@ def _episode_cost_summary(
         "steps": int(steps),
         "survival_frac": float(survival_frac),
         "termination_reason": str(termination_reason),
+        "mean_contour_error_ft": float(mean_contour_ft),
+        "rms_contour_error_ft": float(rms_contour_ft),
+        "p95_contour_error_ft": float(p95_contour_ft),
+        "mean_abs_lag_error_ft": float(mean_abs_lag_ft),
+        "p95_abs_lag_error_ft": float(p95_abs_lag_ft),
         "mean_position_error_ft": float(mean_pos_ft),
-        "rms_position_error_ft": float(rms_pos_ft),
-        "p95_position_error_ft": float(p95_pos_ft),
         "mean_altitude_error_ft": float(mean_altitude_ft),
-        "mean_heading_error_deg": float(mean_heading_deg),
         "min_terrain_clearance_ft": float(min_clearance_ft),
         "mean_clearance_shortfall": float(mean_clearance_shortfall),
         "max_clearance_shortfall": float(max_clearance_shortfall),
@@ -407,10 +451,15 @@ def _episode_cost_summary(
         "mean_throttle_rate": float(mean_action_rate[3]),
         "mean_alpha_excess_deg": float(mean_alpha_excess_deg),
         "mean_nz_excess_g": float(mean_nz_excess_g),
-        "track_cost": float(track_cost),
-        "terrain_cost": float(terrain_cost),
-        "rate_cost": float(rate_cost),
-        "limit_cost": float(limit_cost),
+        "mean_contouring_cost": float(mean_contouring_cost),
+        "mean_terrain_cost": float(mean_terrain_cost),
+        "mean_rate_cost": float(mean_rate_cost),
+        "mean_limit_cost": float(mean_limit_cost),
+        "mean_total_stage_cost": float(mean_total_stage_cost),
+        "p95_total_stage_cost": float(p95_total_stage_cost),
+        "contour_track_cost": float(contour_track_cost),
+        "stage_cost_term": float(stage_cost_term),
+        "terrain_margin_cost": float(terrain_margin_cost),
         "termination_penalty": float(termination_penalty),
     }
 
@@ -434,11 +483,13 @@ def _objective(trial, args, nominal_bundle, base_config_kwargs):
         trial.set_user_attr(f"seed_{seed}_termination", summary["termination_reason"])
         trial.set_user_attr(f"seed_{seed}_steps", summary["steps"])
         trial.set_user_attr(f"seed_{seed}_survival_frac", summary["survival_frac"])
+        trial.set_user_attr(f"seed_{seed}_mean_contour_error_ft", summary["mean_contour_error_ft"])
+        trial.set_user_attr(f"seed_{seed}_rms_contour_error_ft", summary["rms_contour_error_ft"])
+        trial.set_user_attr(f"seed_{seed}_p95_contour_error_ft", summary["p95_contour_error_ft"])
+        trial.set_user_attr(f"seed_{seed}_mean_abs_lag_error_ft", summary["mean_abs_lag_error_ft"])
+        trial.set_user_attr(f"seed_{seed}_p95_abs_lag_error_ft", summary["p95_abs_lag_error_ft"])
         trial.set_user_attr(f"seed_{seed}_mean_position_error_ft", summary["mean_position_error_ft"])
-        trial.set_user_attr(f"seed_{seed}_rms_position_error_ft", summary["rms_position_error_ft"])
-        trial.set_user_attr(f"seed_{seed}_p95_position_error_ft", summary["p95_position_error_ft"])
         trial.set_user_attr(f"seed_{seed}_mean_altitude_error_ft", summary["mean_altitude_error_ft"])
-        trial.set_user_attr(f"seed_{seed}_mean_heading_error_deg", summary["mean_heading_error_deg"])
         trial.set_user_attr(f"seed_{seed}_min_terrain_clearance_ft", summary["min_terrain_clearance_ft"])
         trial.set_user_attr(f"seed_{seed}_mean_aileron_rate", summary["mean_aileron_rate"])
         trial.set_user_attr(f"seed_{seed}_mean_elevator_rate", summary["mean_elevator_rate"])
@@ -446,10 +497,12 @@ def _objective(trial, args, nominal_bundle, base_config_kwargs):
         trial.set_user_attr(f"seed_{seed}_mean_throttle_rate", summary["mean_throttle_rate"])
         trial.set_user_attr(f"seed_{seed}_mean_alpha_excess_deg", summary["mean_alpha_excess_deg"])
         trial.set_user_attr(f"seed_{seed}_mean_nz_excess_g", summary["mean_nz_excess_g"])
-        trial.set_user_attr(f"seed_{seed}_track_cost", summary["track_cost"])
-        trial.set_user_attr(f"seed_{seed}_terrain_cost", summary["terrain_cost"])
-        trial.set_user_attr(f"seed_{seed}_rate_cost", summary["rate_cost"])
-        trial.set_user_attr(f"seed_{seed}_limit_cost", summary["limit_cost"])
+        trial.set_user_attr(f"seed_{seed}_mean_contouring_cost", summary["mean_contouring_cost"])
+        trial.set_user_attr(f"seed_{seed}_mean_terrain_cost", summary["mean_terrain_cost"])
+        trial.set_user_attr(f"seed_{seed}_mean_rate_cost", summary["mean_rate_cost"])
+        trial.set_user_attr(f"seed_{seed}_mean_limit_cost", summary["mean_limit_cost"])
+        trial.set_user_attr(f"seed_{seed}_mean_total_stage_cost", summary["mean_total_stage_cost"])
+        trial.set_user_attr(f"seed_{seed}_p95_total_stage_cost", summary["p95_total_stage_cost"])
 
         running_mean = float(np.mean(seed_scores))
         trial.report(running_mean, step=idx)
