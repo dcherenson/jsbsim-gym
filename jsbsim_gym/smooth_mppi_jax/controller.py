@@ -6,17 +6,24 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from jsbsim_gym.mppi_defaults import (
+    MPPI_SMOOTH_DEFAULT_ACTION_NOISE_STD,
+    MPPI_SMOOTH_DEFAULT_DELTA_ACTION_BOUNDS,
+    MPPI_SMOOTH_DEFAULT_DELTA_NOISE_STD,
+    MPPI_SMOOTH_DEFAULT_NOISE_SMOOTHING_KERNEL,
+    MPPI_SMOOTH_DEFAULT_SEED,
+)
 from jsbsim_gym.mppi_jax.controller import JaxMPPIConfig, JaxMPPIController
 from jsbsim_gym.mppi_support import clip_action, smooth_noise_batch, softmax_weights
 
 
 @dataclass(slots=True)
 class JaxSmoothMPPIConfig(JaxMPPIConfig):
-    action_noise_std: tuple[float, float, float, float] = (0.14, 0.22, 0.12, 0.10)
-    delta_noise_std: tuple[float, float, float, float] = (0.08, 0.12, 0.08, 0.06)
-    delta_action_bounds: tuple[float, float, float, float] = (0.18, 0.26, 0.14, 0.10)
-    noise_smoothing_kernel: tuple[float, float, float, float, float] = (0.10, 0.20, 0.40, 0.20, 0.10)
-    seed: int = 101
+    action_noise_std: tuple[float, float, float, float] = MPPI_SMOOTH_DEFAULT_ACTION_NOISE_STD
+    delta_noise_std: tuple[float, float, float, float] = MPPI_SMOOTH_DEFAULT_DELTA_NOISE_STD
+    delta_action_bounds: tuple[float, float, float, float] = MPPI_SMOOTH_DEFAULT_DELTA_ACTION_BOUNDS
+    noise_smoothing_kernel: tuple[float, float, float, float, float] = MPPI_SMOOTH_DEFAULT_NOISE_SMOOTHING_KERNEL
+    seed: int = MPPI_SMOOTH_DEFAULT_SEED
 
 
 class JaxSmoothMPPIController(JaxMPPIController):

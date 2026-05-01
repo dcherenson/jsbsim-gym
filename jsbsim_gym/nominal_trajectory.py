@@ -13,6 +13,24 @@ METERS_PER_DEG_LAT = 1e6 / 9.0
 FPS_PER_KT = 1.68781
 
 
+def _progress_fraction_to_sample_index(progress_fraction: float, sample_count: int) -> int:
+    """Map a [0, 1] progress fraction to a discrete trajectory sample index."""
+
+    if int(sample_count) < 1:
+        raise ValueError("sample_count must be >= 1.")
+
+    progress = float(progress_fraction)
+    if not np.isfinite(progress):
+        raise ValueError("progress_fraction must be finite.")
+    if progress < 0.0 or progress > 1.0:
+        raise ValueError("progress_fraction must be within [0.0, 1.0].")
+    if int(sample_count) == 1:
+        return 0
+
+    max_index = int(sample_count) - 1
+    return int(np.clip(np.rint(progress * float(max_index)), 0, max_index))
+
+
 def _load_aerosandbox_dyn(dyn_path: Path):
     import aerosandbox as asb
 
@@ -140,6 +158,7 @@ def load_nominal_initial_conditions_from_dyn(
     dyn_path: str | Path,
     *,
     canyon: Any,
+    progress_fraction: float = 0.0,
 ) -> dict[str, float | int | tuple[int, int]]:
     """Extract JSBSim-friendly initial conditions from an offline `dyn.asb`."""
 
@@ -149,15 +168,52 @@ def load_nominal_initial_conditions_from_dyn(
     if not all(hasattr(canyon, attr) for attr in ("south", "north", "west", "east", "get_local_from_latlon")):
         raise TypeError("canyon must provide DEM bounds and get_local_from_latlon().")
 
-    north_m = float(np.asarray(dyn.x_e, dtype=np.float64).reshape(-1)[0])
-    east_m = float(np.asarray(dyn.y_e, dtype=np.float64).reshape(-1)[0])
-    altitude_msl_ft = float(-np.asarray(dyn.z_e, dtype=np.float64).reshape(-1)[0] * M_TO_FT)
-    speed_fps = float(np.asarray(dyn.speed, dtype=np.float64).reshape(-1)[0] * M_TO_FT)
-    alpha_deg = float(np.asarray(dyn.alpha, dtype=np.float64).reshape(-1)[0])
-    beta_deg = float(np.asarray(dyn.beta, dtype=np.float64).reshape(-1)[0])
-    gamma_deg = float(np.degrees(np.asarray(dyn.gamma, dtype=np.float64).reshape(-1)[0]))
-    track_deg = _wrap_heading_deg(np.degrees(np.asarray(dyn.track, dtype=np.float64).reshape(-1)[0]))
-    bank_deg = float(np.degrees(np.asarray(dyn.bank, dtype=np.float64).reshape(-1)[0]))
+    north_m_series = np.asarray(dyn.x_e, dtype=np.float64).reshape(-1)
+    east_m_series = np.asarray(dyn.y_e, dtype=np.float64).reshape(-1)
+    altitude_msl_ft_series = -np.asarray(dyn.z_e, dtype=np.float64).reshape(-1) * M_TO_FT
+    speed_fps_series = np.asarray(dyn.speed, dtype=np.float64).reshape(-1) * M_TO_FT
+    alpha_deg_series = np.asarray(dyn.alpha, dtype=np.float64).reshape(-1)
+    beta_deg_series = np.asarray(dyn.beta, dtype=np.float64).reshape(-1)
+    gamma_deg_series = np.degrees(np.asarray(dyn.gamma, dtype=np.float64).reshape(-1))
+    track_deg_series = np.mod(np.degrees(np.asarray(dyn.track, dtype=np.float64).reshape(-1)), 360.0)
+    bank_deg_series = np.degrees(np.asarray(dyn.bank, dtype=np.float64).reshape(-1))
+
+    sample_count = int(north_m_series.size)
+    if sample_count < 1:
+        raise ValueError("Offline nominal trajectory must contain at least one sample.")
+    _ = _progress_fraction_to_sample_index(progress_fraction, sample_count)
+    progress_fraction = float(progress_fraction)
+
+    for arr in (
+        east_m_series,
+        altitude_msl_ft_series,
+        speed_fps_series,
+        alpha_deg_series,
+        beta_deg_series,
+        gamma_deg_series,
+        track_deg_series,
+        bank_deg_series,
+    ):
+        if arr.shape != north_m_series.shape:
+            raise ValueError("Offline nominal trajectory fields must have consistent sample counts.")
+
+    path_step_m = np.hypot(np.diff(north_m_series), np.diff(east_m_series))
+    path_step_m = np.where(np.isfinite(path_step_m), np.maximum(path_step_m, 0.0), 0.0)
+    path_s_m = np.concatenate([[0.0], np.cumsum(path_step_m, dtype=np.float64)])
+    if float(path_s_m[-1]) > 1e-9:
+        target_s_m = float(np.clip(progress_fraction, 0.0, 1.0)) * float(path_s_m[-1])
+        sample_index = int(np.clip(np.searchsorted(path_s_m, target_s_m, side="left"), 0, sample_count - 1))
+    else:
+        sample_index = _progress_fraction_to_sample_index(progress_fraction, sample_count)
+    north_m = float(north_m_series[sample_index])
+    east_m = float(east_m_series[sample_index])
+    altitude_msl_ft = float(altitude_msl_ft_series[sample_index])
+    speed_fps = float(speed_fps_series[sample_index])
+    alpha_deg = float(alpha_deg_series[sample_index])
+    beta_deg = float(beta_deg_series[sample_index])
+    gamma_deg = float(gamma_deg_series[sample_index])
+    track_deg = _wrap_heading_deg(track_deg_series[sample_index])
+    bank_deg = float(bank_deg_series[sample_index])
 
     lat_deg_arr, lon_deg_arr = _north_east_m_to_lat_lon(
         np.asarray([north_m], dtype=np.float64),
@@ -190,9 +246,11 @@ def load_nominal_initial_conditions_from_dyn(
         terrain_msl_ft = float(canyon.get_pixel_info(pixel_x, pixel_y)["elevation_msl_ft"])
 
     roll_deg_series, pitch_deg_series, heading_deg_series = _body_euler_deg_series_from_dyn(dyn)
-    roll_deg = float(roll_deg_series[0])
-    pitch_deg = float(pitch_deg_series[0])
-    heading_deg = float(heading_deg_series[0])
+    if roll_deg_series.shape != north_m_series.shape:
+        raise ValueError("Recovered body Euler angle series length does not match trajectory samples.")
+    roll_deg = float(roll_deg_series[sample_index])
+    pitch_deg = float(pitch_deg_series[sample_index])
+    heading_deg = float(heading_deg_series[sample_index])
 
     return {
         "start_pixel": (pixel_x, pixel_y),
@@ -213,6 +271,9 @@ def load_nominal_initial_conditions_from_dyn(
         "gamma_deg": gamma_deg,
         "track_deg": track_deg,
         "bank_deg": bank_deg,
+        "sample_index": int(sample_index),
+        "sample_count": int(sample_count),
+        "progress_fraction": float(progress_fraction),
         "source_dyn_path": str(dyn_path),
     }
 

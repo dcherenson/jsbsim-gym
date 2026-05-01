@@ -53,6 +53,35 @@ DEFAULT_INITIAL_PITCH_DEG = None
 DEFAULT_INITIAL_ALPHA_DEG = None
 DEFAULT_INITIAL_BETA_DEG = None
 
+
+def _fraction_0_to_1(value: str) -> float:
+    try:
+        fraction = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"Expected a floating-point value in [0, 1], got {value!r}.") from exc
+    if not np.isfinite(fraction) or fraction < 0.0 or fraction > 1.0:
+        raise argparse.ArgumentTypeError(f"Expected a floating-point value in [0, 1], got {value!r}.")
+    return fraction
+
+
+def _set_mppi_nominal_start_progress(controller, progress_fraction: float) -> float | None:
+    params = getattr(controller, "params", None)
+    if params is None or not hasattr(params, "path_s_np"):
+        return None
+    if not hasattr(controller, "_progress_s_ft"):
+        return None
+
+    path_s = np.asarray(params.path_s_np, dtype=np.float64).reshape(-1)
+    if path_s.size < 1:
+        return None
+
+    s0 = float(path_s[0])
+    s1 = float(path_s[-1])
+    progress_s_ft = float(s0 + float(np.clip(progress_fraction, 0.0, 1.0)) * (s1 - s0))
+    controller._progress_s_ft = progress_s_ft
+    return progress_s_ft
+
+
 def render_state(lateral_error_ft, width_ft):
     y_norm = 2.0 * lateral_error_ft / max(width_ft, 1.0)
 
@@ -680,12 +709,21 @@ def parse_args():
         default=None,
         help="Optional Aerosandbox dyn.asb path to use as the MPPI nominal reference trajectory.",
     )
+    parser.add_argument(
+        "--nominal-start-fraction",
+        type=_fraction_0_to_1,
+        default=0.0,
+        help="Start at this fraction of nominal dyn trajectory progress in [0,1] (0=start, 1=end).",
+    )
     return parser.parse_args()
 
 def main():
     args = parse_args()
     if args.gatekeeper and args.controller not in {"mppi", "smooth_mppi"}:
         raise ValueError("--gatekeeper currently requires --controller mppi or --controller smooth_mppi.")
+    nominal_start_fraction = float(args.nominal_start_fraction)
+    if args.nominal_dyn_path is None and nominal_start_fraction > 0.0:
+        raise ValueError("--nominal-start-fraction requires --nominal-dyn-path.")
     initial_speed_kts = float(DEFAULT_INITIAL_SPEED_KTS)
     initial_altitude_ft = float(DEFAULT_INITIAL_ALTITUDE_FT)
     dem_start_pixel = DEM_START_PIXEL
@@ -712,6 +750,7 @@ def main():
         nominal_initial_conditions = load_nominal_initial_conditions_from_dyn(
             args.nominal_dyn_path,
             canyon=nominal_canyon,
+            progress_fraction=nominal_start_fraction,
         )
         dem_start_pixel = tuple(nominal_initial_conditions["start_pixel"])
         initial_speed_kts = float(nominal_initial_conditions["speed_kts"])
@@ -730,7 +769,10 @@ def main():
             f"roll={initial_roll_deg:.1f} deg, "
             f"pitch={initial_pitch_deg:.1f} deg, "
             f"alpha={initial_alpha_deg:.1f} deg, "
-            f"beta={initial_beta_deg:.1f} deg."
+            f"beta={initial_beta_deg:.1f} deg, "
+            f"progress={float(nominal_initial_conditions['progress_fraction']):.3f} "
+            f"(sample {int(nominal_initial_conditions['sample_index']) + 1}/"
+            f"{int(nominal_initial_conditions['sample_count'])})."
         )
 
     output_subdirs = {
@@ -856,6 +898,12 @@ def main():
             terrain_elevation_ft=np.asarray(canyon.ordered_dem_msl_m, dtype=np.float32) * M_TO_FT - altitude_ref_ft,
         )
         _print_mppi_config(controller_tag, config)
+        start_progress_s_ft = _set_mppi_nominal_start_progress(controller, nominal_start_fraction)
+        if start_progress_s_ft is not None:
+            print(
+                "Initialized MPPI nominal progress at "
+                f"{start_progress_s_ft:.1f} ft (fraction={nominal_start_fraction:.3f})."
+            )
 
     recorder = CanyonRunRecorder(
         env=env,
@@ -887,8 +935,10 @@ def main():
     print(f"Initializing {controller_tag} canyon controller...")
     if controller_tag in {"mppi", "smooth_mppi"}:
         print("Compiling JAX JIT... (this takes a moment)", flush=True)
+        _set_mppi_nominal_start_progress(controller, nominal_start_fraction)
         _ = controller.get_action(initial_controller_state)
         controller.reset(seed=3)
+        _set_mppi_nominal_start_progress(controller, nominal_start_fraction)
         print("JIT compilation finished.", flush=True)
         if args.gatekeeper:
             if not UNCERTAINTY_ARTIFACT_PATH.exists():
@@ -918,6 +968,7 @@ def main():
             gatekeeper.reset(controller_state_to_gatekeeper_flat(initial_controller_state), t=0)
             gatekeeper_prev_using_backup = False
             controller.reset(seed=3)
+            _set_mppi_nominal_start_progress(controller, nominal_start_fraction)
             print("Gatekeeper JIT compilation finished.", flush=True)
 
     print("\nStarting Canyon Flight...")

@@ -3,6 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from jsbsim_gym.mppi_defaults import (
+    MPPI_DEFAULT_HORIZON,
+    MPPI_DEFAULT_NUM_SAMPLES,
+    MPPI_DEFAULT_OPTIMIZATION_STEPS,
+    default_mppi_config_kwargs,
+)
 from jsbsim_gym.mppi_jax import JaxMPPIConfig, JaxMPPIController
 from jsbsim_gym.smooth_mppi_jax import JaxSmoothMPPIConfig, JaxSmoothMPPIController
 
@@ -31,6 +37,12 @@ MPPI_TUNABLE_SCALAR_KEYS = frozenset(
         "virtual_speed_weight",
         "terrain_collision_penalty",
         "terrain_repulsion_scale",
+        "terrain_decay_rate_ft_inv",
+        "terrain_safe_clearance_ft",
+        "nz_limit_g",
+        "nz_penalty_weight",
+        "alpha_limit_rad",
+        "alpha_penalty_weight",
     }
 )
 MPPI_TUNABLE_KEYS = frozenset(MPPI_TUNABLE_SCALAR_KEYS | set(MPPI_TUNABLE_TUPLE_SPECS))
@@ -45,32 +57,9 @@ MPPI_REQUIRED_CONTOURING_KEYS = frozenset(
 
 
 def build_mppi_base_config_kwargs(
-    *,
-    horizon=40,
-    num_samples=4000,
-    optimization_steps=3,
 ):
-    return dict(
-        horizon=int(horizon),
-        num_samples=int(num_samples),
-        optimization_steps=int(optimization_steps),
-        lambda_=1.0,
-        gamma_=0.05,
-        action_noise_std=(0.5, 0.5, 0.5, 0.5),
-        contour_weight=1.0,
-        lag_weight=0.05,
-        progress_reward_weight=25.0,
-        virtual_speed_weight=0.015,
-        terrain_collision_penalty=1.0e6,
-        terrain_repulsion_scale=1.0e5,
-        terrain_decay_rate_ft_inv=0.03,
-        terrain_safe_clearance_ft=40.0 * 3.28084,
-        control_rate_weights=(15.0, 20.0, 5.0, 2.0),
-        nz_limit_g=9.0,
-        nz_penalty_weight=1.0e4,
-        alpha_limit_rad=25.0 * 3.141592653589793 / 180.0,
-        alpha_penalty_weight=1.0e4,
-    )
+    return default_mppi_config_kwargs()
+
 
 
 def build_mppi_controller(
@@ -161,6 +150,18 @@ def _trial_params_to_effective_mppi_params(params: dict) -> dict:
         effective["terrain_collision_penalty"] = float(params["terrain_collision_penalty"])
     if "terrain_repulsion_scale" in params:
         effective["terrain_repulsion_scale"] = float(params["terrain_repulsion_scale"])
+    if "terrain_decay_rate_ft_inv" in params:
+        effective["terrain_decay_rate_ft_inv"] = float(params["terrain_decay_rate_ft_inv"])
+    if "terrain_safe_clearance_ft" in params:
+        effective["terrain_safe_clearance_ft"] = float(params["terrain_safe_clearance_ft"])
+    if "nz_limit_g" in params:
+        effective["nz_limit_g"] = float(params["nz_limit_g"])
+    if "nz_penalty_weight" in params:
+        effective["nz_penalty_weight"] = float(params["nz_penalty_weight"])
+    if "alpha_limit_rad" in params:
+        effective["alpha_limit_rad"] = float(params["alpha_limit_rad"])
+    if "alpha_penalty_weight" in params:
+        effective["alpha_penalty_weight"] = float(params["alpha_penalty_weight"])
 
     action_noise_std = _maybe_tuple("action_noise_std", ("aileron", "elevator", "rudder", "throttle"))
     if action_noise_std is not None:

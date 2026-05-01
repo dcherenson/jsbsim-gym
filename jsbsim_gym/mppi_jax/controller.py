@@ -6,19 +6,38 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from jsbsim_gym.mppi_defaults import (
+    MPPI_DEFAULT_ACTION_HIGH,
+    MPPI_DEFAULT_ACTION_LOW,
+    MPPI_DEFAULT_ACTION_NOISE_STD,
+    MPPI_DEFAULT_ALPHA_LIMIT_RAD,
+    MPPI_DEFAULT_ALPHA_PENALTY_WEIGHT,
+    MPPI_DEFAULT_CONTOUR_WEIGHT,
+    MPPI_DEFAULT_CONTROL_RATE_WEIGHTS,
+    MPPI_DEFAULT_DEBUG_NUM_TRAJECTORIES,
+    MPPI_DEFAULT_DEBUG_RENDER_PLANS,
+    MPPI_DEFAULT_GAMMA,
+    MPPI_DEFAULT_HORIZON,
+    MPPI_DEFAULT_LAG_WEIGHT,
+    MPPI_DEFAULT_LAMBDA,
+    MPPI_DEFAULT_NZ_LIMIT_G,
+    MPPI_DEFAULT_NZ_PENALTY_WEIGHT,
+    MPPI_DEFAULT_NUM_SAMPLES,
+    MPPI_DEFAULT_OPTIMIZATION_STEPS,
+    MPPI_DEFAULT_PROGRESS_REWARD_WEIGHT,
+    MPPI_DEFAULT_REPLAN_INTERVAL,
+    MPPI_DEFAULT_SEED,
+    MPPI_DEFAULT_TERRAIN_COLLISION_PENALTY,
+    MPPI_DEFAULT_TERRAIN_DECAY_RATE_FT_INV,
+    MPPI_DEFAULT_TERRAIN_REPULSION_SCALE,
+    MPPI_DEFAULT_TERRAIN_SAFE_CLEARANCE_FT,
+    MPPI_DEFAULT_VIRTUAL_SPEED_MAX_FPS,
+    MPPI_DEFAULT_VIRTUAL_SPEED_MIN_FPS,
+    MPPI_DEFAULT_VIRTUAL_SPEED_NOISE_STD_FPS,
+    MPPI_DEFAULT_VIRTUAL_SPEED_TRIM_FPS,
+    MPPI_DEFAULT_VIRTUAL_SPEED_WEIGHT,
+)
 from jsbsim_gym.mppi_support import (
-    DEFAULT_ACTION_HIGH,
-    DEFAULT_ACTION_LOW,
-    DEFAULT_CONTOUR_WEIGHT,
-    DEFAULT_CONTROL_RATE_WEIGHTS,
-    DEFAULT_LAG_WEIGHT,
-    DEFAULT_PROGRESS_REWARD_WEIGHT,
-    DEFAULT_TERRAIN_SAFE_CLEARANCE_FT,
-    DEFAULT_VIRTUAL_SPEED_MAX_FPS,
-    DEFAULT_VIRTUAL_SPEED_MIN_FPS,
-    DEFAULT_VIRTUAL_SPEED_NOISE_STD_FPS,
-    DEFAULT_VIRTUAL_SPEED_TRIM_FPS,
-    DEFAULT_VIRTUAL_SPEED_WEIGHT,
     MPPICostConfig,
     build_nominal_params,
     build_rollout_cost_fn,
@@ -38,35 +57,35 @@ from jsbsim_gym.mppi_support import (
 
 @dataclass(slots=True)
 class JaxMPPIConfig:
-    horizon: int = 40
-    num_samples: int = 4000
-    optimization_steps: int = 2
-    replan_interval: int = 1
-    lambda_: float = 1.0
-    gamma_: float = 0.05
-    action_noise_std: tuple[float, float, float, float] = (0.5, 0.5, 0.5, 0.5)
-    action_low: tuple[float, float, float, float] = DEFAULT_ACTION_LOW
-    action_high: tuple[float, float, float, float] = DEFAULT_ACTION_HIGH
-    contour_weight: float = DEFAULT_CONTOUR_WEIGHT
-    lag_weight: float = DEFAULT_LAG_WEIGHT
-    progress_reward_weight: float = DEFAULT_PROGRESS_REWARD_WEIGHT
-    virtual_speed_weight: float = DEFAULT_VIRTUAL_SPEED_WEIGHT
-    terrain_collision_penalty: float = 1.0e6
-    terrain_repulsion_scale: float = 1.0e5
-    terrain_decay_rate_ft_inv: float = 0.03
-    terrain_safe_clearance_ft: float = DEFAULT_TERRAIN_SAFE_CLEARANCE_FT
-    control_rate_weights: tuple[float, float, float, float] = DEFAULT_CONTROL_RATE_WEIGHTS
-    nz_limit_g: float = 9.0
-    nz_penalty_weight: float = 1.0e4
-    alpha_limit_rad: float = float(np.deg2rad(25.0))
-    alpha_penalty_weight: float = 1.0e4
-    virtual_speed_noise_std_fps: float = DEFAULT_VIRTUAL_SPEED_NOISE_STD_FPS
-    virtual_speed_min_fps: float = DEFAULT_VIRTUAL_SPEED_MIN_FPS
-    virtual_speed_max_fps: float = DEFAULT_VIRTUAL_SPEED_MAX_FPS
-    virtual_speed_trim_fps: float = DEFAULT_VIRTUAL_SPEED_TRIM_FPS
-    debug_render_plans: bool = True
-    debug_num_trajectories: int = 96
-    seed: int = 42
+    horizon: int = MPPI_DEFAULT_HORIZON
+    num_samples: int = MPPI_DEFAULT_NUM_SAMPLES
+    optimization_steps: int = MPPI_DEFAULT_OPTIMIZATION_STEPS
+    replan_interval: int = MPPI_DEFAULT_REPLAN_INTERVAL
+    lambda_: float = MPPI_DEFAULT_LAMBDA
+    gamma_: float = MPPI_DEFAULT_GAMMA
+    action_noise_std: tuple[float, float, float, float] = MPPI_DEFAULT_ACTION_NOISE_STD
+    action_low: tuple[float, float, float, float] = MPPI_DEFAULT_ACTION_LOW
+    action_high: tuple[float, float, float, float] = MPPI_DEFAULT_ACTION_HIGH
+    contour_weight: float = MPPI_DEFAULT_CONTOUR_WEIGHT
+    lag_weight: float = MPPI_DEFAULT_LAG_WEIGHT
+    progress_reward_weight: float = MPPI_DEFAULT_PROGRESS_REWARD_WEIGHT
+    virtual_speed_weight: float = MPPI_DEFAULT_VIRTUAL_SPEED_WEIGHT
+    terrain_collision_penalty: float = MPPI_DEFAULT_TERRAIN_COLLISION_PENALTY
+    terrain_repulsion_scale: float = MPPI_DEFAULT_TERRAIN_REPULSION_SCALE
+    terrain_decay_rate_ft_inv: float = MPPI_DEFAULT_TERRAIN_DECAY_RATE_FT_INV
+    terrain_safe_clearance_ft: float = MPPI_DEFAULT_TERRAIN_SAFE_CLEARANCE_FT
+    control_rate_weights: tuple[float, float, float, float] = MPPI_DEFAULT_CONTROL_RATE_WEIGHTS
+    nz_limit_g: float = MPPI_DEFAULT_NZ_LIMIT_G
+    nz_penalty_weight: float = MPPI_DEFAULT_NZ_PENALTY_WEIGHT
+    alpha_limit_rad: float = MPPI_DEFAULT_ALPHA_LIMIT_RAD
+    alpha_penalty_weight: float = MPPI_DEFAULT_ALPHA_PENALTY_WEIGHT
+    virtual_speed_noise_std_fps: float = MPPI_DEFAULT_VIRTUAL_SPEED_NOISE_STD_FPS
+    virtual_speed_min_fps: float = MPPI_DEFAULT_VIRTUAL_SPEED_MIN_FPS
+    virtual_speed_max_fps: float = MPPI_DEFAULT_VIRTUAL_SPEED_MAX_FPS
+    virtual_speed_trim_fps: float = MPPI_DEFAULT_VIRTUAL_SPEED_TRIM_FPS
+    debug_render_plans: bool = MPPI_DEFAULT_DEBUG_RENDER_PLANS
+    debug_num_trajectories: int = MPPI_DEFAULT_DEBUG_NUM_TRAJECTORIES
+    seed: int = MPPI_DEFAULT_SEED
 
 
 class JaxMPPIController:

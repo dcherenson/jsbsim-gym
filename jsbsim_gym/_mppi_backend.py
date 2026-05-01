@@ -4,6 +4,38 @@ import numpy as np
 from dataclasses import dataclass
 from itertools import combinations_with_replacement
 
+from jsbsim_gym.mppi_defaults import (
+    MPPI_DEFAULT_ACTION_HIGH,
+    MPPI_DEFAULT_ACTION_LOW,
+    MPPI_DEFAULT_ACTION_NOISE_STD,
+    MPPI_DEFAULT_ALPHA_LIMIT_RAD,
+    MPPI_DEFAULT_ALPHA_PENALTY_WEIGHT,
+    MPPI_DEFAULT_CONTOUR_WEIGHT,
+    MPPI_DEFAULT_CONTROL_RATE_WEIGHTS,
+    MPPI_DEFAULT_DEBUG_NUM_TRAJECTORIES,
+    MPPI_DEFAULT_DEBUG_RENDER_PLANS,
+    MPPI_DEFAULT_GAMMA,
+    MPPI_DEFAULT_HORIZON,
+    MPPI_DEFAULT_LAG_WEIGHT,
+    MPPI_DEFAULT_LAMBDA,
+    MPPI_DEFAULT_NUM_SAMPLES,
+    MPPI_DEFAULT_NZ_LIMIT_G,
+    MPPI_DEFAULT_NZ_PENALTY_WEIGHT,
+    MPPI_DEFAULT_OPTIMIZATION_STEPS,
+    MPPI_DEFAULT_PROGRESS_REWARD_WEIGHT,
+    MPPI_DEFAULT_REPLAN_INTERVAL,
+    MPPI_DEFAULT_SEED,
+    MPPI_DEFAULT_TERRAIN_COLLISION_PENALTY,
+    MPPI_DEFAULT_TERRAIN_DECAY_RATE_FT_INV,
+    MPPI_DEFAULT_TERRAIN_REPULSION_SCALE,
+    MPPI_DEFAULT_TERRAIN_SAFE_CLEARANCE_FT,
+    MPPI_DEFAULT_VIRTUAL_SPEED_WEIGHT,
+    MPPI_SMOOTH_DEFAULT_DELTA_ACTION_BOUNDS,
+    MPPI_SMOOTH_DEFAULT_DELTA_NOISE_STD,
+    MPPI_SMOOTH_DEFAULT_NOISE_SMOOTHING_KERNEL,
+    MPPI_SMOOTH_DEFAULT_SEED,
+)
+
 
 MPPI_FEATURE_NAMES = (
     "alpha",
@@ -47,31 +79,31 @@ G_FTPS2 = 32.174
 
 @dataclass(frozen=True)
 class JaxMPPIConfig:
-    horizon: int = 40
-    num_samples: int = 4000
-    optimization_steps: int = 2
-    replan_interval: int = 1
-    lambda_: float = 1.0
-    gamma_: float = 0.05
-    action_noise_std: tuple = (0.16, 0.14, 0.12, 0.08)
-    action_low: tuple = (-1.0, -1.0, -1.0, 0.0)
-    action_high: tuple = (1.0, 1.0, 1.0, 1.0)
-    contour_weight: float = 1.0
-    lag_weight: float = 0.05
-    progress_reward_weight: float = 25.0
-    virtual_speed_weight: float = 0.015
-    terrain_collision_penalty: float = 1.0e6
-    terrain_repulsion_scale: float = 1.0e5
-    terrain_decay_rate_ft_inv: float = 0.03
-    terrain_safe_clearance_ft: float = 40.0 * 3.28084
-    control_rate_weights: tuple = (15.0, 20.0, 5.0, 2.0)
-    nz_limit_g: float = 9.0
-    nz_penalty_weight: float = 1.0e4
-    alpha_limit_rad: float = np.deg2rad(25.0)
-    alpha_penalty_weight: float = 1.0e4
-    debug_render_plans: bool = True
-    debug_num_trajectories: int = 96
-    seed: int = 42
+    horizon: int = MPPI_DEFAULT_HORIZON
+    num_samples: int = MPPI_DEFAULT_NUM_SAMPLES
+    optimization_steps: int = MPPI_DEFAULT_OPTIMIZATION_STEPS
+    replan_interval: int = MPPI_DEFAULT_REPLAN_INTERVAL
+    lambda_: float = MPPI_DEFAULT_LAMBDA
+    gamma_: float = MPPI_DEFAULT_GAMMA
+    action_noise_std: tuple = MPPI_DEFAULT_ACTION_NOISE_STD
+    action_low: tuple = MPPI_DEFAULT_ACTION_LOW
+    action_high: tuple = MPPI_DEFAULT_ACTION_HIGH
+    contour_weight: float = MPPI_DEFAULT_CONTOUR_WEIGHT
+    lag_weight: float = MPPI_DEFAULT_LAG_WEIGHT
+    progress_reward_weight: float = MPPI_DEFAULT_PROGRESS_REWARD_WEIGHT
+    virtual_speed_weight: float = MPPI_DEFAULT_VIRTUAL_SPEED_WEIGHT
+    terrain_collision_penalty: float = MPPI_DEFAULT_TERRAIN_COLLISION_PENALTY
+    terrain_repulsion_scale: float = MPPI_DEFAULT_TERRAIN_REPULSION_SCALE
+    terrain_decay_rate_ft_inv: float = MPPI_DEFAULT_TERRAIN_DECAY_RATE_FT_INV
+    terrain_safe_clearance_ft: float = MPPI_DEFAULT_TERRAIN_SAFE_CLEARANCE_FT
+    control_rate_weights: tuple = MPPI_DEFAULT_CONTROL_RATE_WEIGHTS
+    nz_limit_g: float = MPPI_DEFAULT_NZ_LIMIT_G
+    nz_penalty_weight: float = MPPI_DEFAULT_NZ_PENALTY_WEIGHT
+    alpha_limit_rad: float = MPPI_DEFAULT_ALPHA_LIMIT_RAD
+    alpha_penalty_weight: float = MPPI_DEFAULT_ALPHA_PENALTY_WEIGHT
+    debug_render_plans: bool = MPPI_DEFAULT_DEBUG_RENDER_PLANS
+    debug_num_trajectories: int = MPPI_DEFAULT_DEBUG_NUM_TRAJECTORIES
+    seed: int = MPPI_DEFAULT_SEED
 
     def tree_flatten(self):
         children = (
@@ -170,10 +202,10 @@ jax.tree_util.register_pytree_node_class(JaxMPPIConfig)
 
 @dataclass(frozen=True)
 class JaxSmoothMPPIConfig(JaxMPPIConfig):
-    delta_noise_std: tuple = (0.08, 0.12, 0.08, 0.06)
-    delta_action_bounds: tuple = (0.18, 0.26, 0.14, 0.10)
-    noise_smoothing_kernel: tuple = (0.10, 0.20, 0.40, 0.20, 0.10)
-    seed: int = 101
+    delta_noise_std: tuple = MPPI_SMOOTH_DEFAULT_DELTA_NOISE_STD
+    delta_action_bounds: tuple = MPPI_SMOOTH_DEFAULT_DELTA_ACTION_BOUNDS
+    noise_smoothing_kernel: tuple = MPPI_SMOOTH_DEFAULT_NOISE_SMOOTHING_KERNEL
+    seed: int = MPPI_SMOOTH_DEFAULT_SEED
 
     def tree_flatten(self):
         base_children, base_aux = super().tree_flatten()

@@ -3,6 +3,7 @@ import sys
 
 import gymnasium as gym
 import numpy as np
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -13,12 +14,31 @@ from jsbsim_gym.canyon import DEMCanyon
 from jsbsim_gym.canyon_artifacts import latlon_to_pixel
 from jsbsim_gym.mppi_run_config import build_mppi_base_config_kwargs, build_mppi_controller
 from jsbsim_gym.nominal_trajectory import (
+    _progress_fraction_to_sample_index,
     build_nominal_reference_from_dyn,
     load_nominal_initial_conditions_from_dyn,
 )
 
 DEM_PATH = REPO_ROOT / "data" / "dem" / "black-canyon-gunnison_USGS10m.tif"
 DYN_PATH = REPO_ROOT / "air-racing-optimization" / "final_results" / "dyn.asb"
+
+
+def test_progress_fraction_to_sample_index_bounds():
+    assert _progress_fraction_to_sample_index(0.0, 11) == 0
+    assert _progress_fraction_to_sample_index(0.5, 11) == 5
+    assert _progress_fraction_to_sample_index(1.0, 11) == 10
+    assert _progress_fraction_to_sample_index(1.0, 1) == 0
+
+
+def test_progress_fraction_to_sample_index_invalid():
+    with pytest.raises(ValueError):
+        _progress_fraction_to_sample_index(-0.1, 5)
+    with pytest.raises(ValueError):
+        _progress_fraction_to_sample_index(1.1, 5)
+    with pytest.raises(ValueError):
+        _progress_fraction_to_sample_index(np.nan, 5)
+    with pytest.raises(ValueError):
+        _progress_fraction_to_sample_index(0.5, 0)
 
 
 def test_build_nominal_reference_from_dyn():

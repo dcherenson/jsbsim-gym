@@ -47,7 +47,7 @@ def parse_args():
         required=True,
         help="Offline dyn.asb trajectory used as the MPPI nominal reference.",
     )
-    parser.add_argument("--trials", type=int, default=60, help="Number of Optuna trials.")
+    parser.add_argument("--trials", type=int, default=100, help="Number of Optuna trials.")
     parser.add_argument(
         "--study-name",
         type=str,
@@ -220,10 +220,10 @@ def _sample_controller_overrides(trial):
         "lambda_": trial.suggest_float("lambda_", 0.10, 10.0, log=True),
         "gamma_": trial.suggest_float("gamma_", 0.002, 0.50, log=True),
         "action_noise_std": (
-            trial.suggest_float("action_noise_std_aileron", 0.02, 0.80, log=True),
-            trial.suggest_float("action_noise_std_elevator", 0.02, 0.80, log=True),
-            trial.suggest_float("action_noise_std_rudder", 0.01, 0.50, log=True),
-            trial.suggest_float("action_noise_std_throttle", 0.005, 0.25, log=True),
+            trial.suggest_float("action_noise_std_aileron", 0.02, 1.0, log=True),
+            trial.suggest_float("action_noise_std_elevator", 0.02, 1.0, log=True),
+            trial.suggest_float("action_noise_std_rudder", 0.01, 1.0, log=True),
+            trial.suggest_float("action_noise_std_throttle", 0.005, 1.0, log=True),
         ),
         "contour_weight": contour_weight,
         "lag_weight": contour_weight * lag_ratio,
