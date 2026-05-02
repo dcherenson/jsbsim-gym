@@ -34,7 +34,6 @@ DEM_START_PIXEL = (1400, 950)
 M_TO_FT = 3.28084
 SAFE_CLEARANCE_FT = 40.0 * M_TO_FT
 ALPHA_LIMIT_DEG = 25.0
-NZ_LIMIT_G = 9.0
 
 
 def parse_args():
@@ -330,7 +329,12 @@ def _episode_cost_summary(
             prev_action = action.copy()
             alpha_deg = float(np.degrees(np.arctan2(float(post_state["w"]), max(float(post_state["u"]), 1.0))))
             alpha_excess = max(alpha_deg - ALPHA_LIMIT_DEG, 0.0)
-            nz_excess = max(abs(float(post_state.get("nz", 1.0))) - NZ_LIMIT_G, 0.0)
+            nz_g = float(post_state.get("nz", 1.0))
+            nz_excess = max(
+                float(controller.config.nz_min_g) - nz_g,
+                nz_g - float(controller.config.nz_max_g),
+                0.0,
+            )
             alpha_excess_rad = max(
                 np.deg2rad(alpha_deg) - float(controller.config.alpha_limit_rad),
                 0.0,

@@ -19,7 +19,8 @@ from jsbsim_gym.mppi_defaults import (
     MPPI_DEFAULT_LAG_WEIGHT,
     MPPI_DEFAULT_LAMBDA,
     MPPI_DEFAULT_NUM_SAMPLES,
-    MPPI_DEFAULT_NZ_LIMIT_G,
+    MPPI_DEFAULT_NZ_MAX_G,
+    MPPI_DEFAULT_NZ_MIN_G,
     MPPI_DEFAULT_NZ_PENALTY_WEIGHT,
     MPPI_DEFAULT_OPTIMIZATION_STEPS,
     MPPI_DEFAULT_PROGRESS_REWARD_WEIGHT,
@@ -44,7 +45,6 @@ MPPI_FEATURE_NAMES = (
     "p",
     "q",
     "r",
-    "delta_t",
     "delta_e",
     "delta_a",
     "delta_r",
@@ -97,7 +97,8 @@ class JaxMPPIConfig:
     terrain_decay_rate_ft_inv: float = MPPI_DEFAULT_TERRAIN_DECAY_RATE_FT_INV
     terrain_safe_clearance_ft: float = MPPI_DEFAULT_TERRAIN_SAFE_CLEARANCE_FT
     control_rate_weights: tuple = MPPI_DEFAULT_CONTROL_RATE_WEIGHTS
-    nz_limit_g: float = MPPI_DEFAULT_NZ_LIMIT_G
+    nz_min_g: float = MPPI_DEFAULT_NZ_MIN_G
+    nz_max_g: float = MPPI_DEFAULT_NZ_MAX_G
     nz_penalty_weight: float = MPPI_DEFAULT_NZ_PENALTY_WEIGHT
     alpha_limit_rad: float = MPPI_DEFAULT_ALPHA_LIMIT_RAD
     alpha_penalty_weight: float = MPPI_DEFAULT_ALPHA_PENALTY_WEIGHT
@@ -121,7 +122,8 @@ class JaxMPPIConfig:
             self.terrain_decay_rate_ft_inv,
             self.terrain_safe_clearance_ft,
             self.control_rate_weights,
-            self.nz_limit_g,
+            self.nz_min_g,
+            self.nz_max_g,
             self.nz_penalty_weight,
             self.alpha_limit_rad,
             self.alpha_penalty_weight,
@@ -154,7 +156,8 @@ class JaxMPPIConfig:
             terrain_decay_rate_ft_inv,
             terrain_safe_clearance_ft,
             control_rate_weights,
-            nz_limit_g,
+            nz_min_g,
+            nz_max_g,
             nz_penalty_weight,
             alpha_limit_rad,
             alpha_penalty_weight,
@@ -187,7 +190,8 @@ class JaxMPPIConfig:
             terrain_decay_rate_ft_inv=terrain_decay_rate_ft_inv,
             terrain_safe_clearance_ft=terrain_safe_clearance_ft,
             control_rate_weights=control_rate_weights,
-            nz_limit_g=nz_limit_g,
+            nz_min_g=nz_min_g,
+            nz_max_g=nz_max_g,
             nz_penalty_weight=nz_penalty_weight,
             alpha_limit_rad=alpha_limit_rad,
             alpha_penalty_weight=alpha_penalty_weight,
@@ -298,8 +302,24 @@ def load_nominal_weights():
         )
     if B.shape[0] != 6:
         raise ValueError(f"Expected 6 output channels in B, got shape {B.shape}")
+    if "throttle_force_coeffs" not in data:
+        raise ValueError(
+            "nominal_coeff_weights.npz missing required metadata 'throttle_force_coeffs'. "
+            "Regenerate weights via: uv run python -m jsbsim_gym.calibration"
+        )
+    throttle_force_coeffs = np.asarray(data["throttle_force_coeffs"], dtype=np.float32).reshape(-1)
+    if throttle_force_coeffs.size < 1:
+        raise ValueError(
+            "nominal_coeff_weights.npz has empty throttle_force_coeffs. "
+            "Regenerate weights via: uv run python -m jsbsim_gym.calibration"
+        )
 
-    return jnp.asarray(W), jnp.asarray(B), jnp.asarray(poly_powers, dtype=jnp.int32)
+    return (
+        jnp.asarray(W),
+        jnp.asarray(B),
+        jnp.asarray(poly_powers, dtype=jnp.int32),
+        jnp.asarray(throttle_force_coeffs, dtype=jnp.float32),
+    )
 
 
 def expand_poly(x, poly_powers):
@@ -322,6 +342,14 @@ def softmax_weights(costs, temperature):
     return weights / (jnp.sum(weights) + 1e-8)
 
 
+def throttle_force_term(delta_t, throttle_force_coeffs):
+    coeffs = jnp.asarray(throttle_force_coeffs, dtype=jnp.float32).reshape(-1)
+    term = jnp.asarray(0.0, dtype=jnp.float32)
+    for power in range(coeffs.shape[0]):
+        term = term + coeffs[power] * jnp.power(delta_t, power)
+    return term
+
+
 def moments_to_angular_rate_derivatives(p, q, r, L, M, N):
     h_x = IXX * p + IXZ * r
     h_y = IYY * q
@@ -341,7 +369,7 @@ def moments_to_angular_rate_derivatives(p, q, r, L, M, N):
     return p_dot, q_dot, r_dot
 
 
-def f16_kinematics_step(state, action, W, B, poly_powers):
+def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs):
     p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi = state
 
     delta_a = action[0]
@@ -355,7 +383,7 @@ def f16_kinematics_step(state, action, W, B, poly_powers):
     beta = jnp.arcsin(jnp.clip(v / V, -1.0, 1.0))
     mach = V / STANDARD_SPEED_OF_SOUND_FPS
 
-    features = jnp.array([alpha, beta, mach, p, q, r, delta_t, delta_e, delta_a, delta_r], dtype=jnp.float32)
+    features = jnp.array([alpha, beta, mach, p, q, r, delta_e, delta_a, delta_r], dtype=jnp.float32)
     phi_vec = expand_poly(features, poly_powers)
     preds = jnp.dot(phi_vec, W) + B
     C_X, C_Y, C_Z, C_L, C_M, C_N = preds
@@ -366,7 +394,7 @@ def f16_kinematics_step(state, action, W, B, poly_powers):
     pitch_moment_scale = qbar_psf * WING_AREA_FT2 * MEAN_AERODYNAMIC_CHORD_FT
     yaw_moment_scale = qbar_psf * WING_AREA_FT2 * WING_SPAN_FT
 
-    X = C_X * force_scale
+    X = C_X * force_scale + throttle_force_term(delta_t, throttle_force_coeffs)
     Y = C_Y * force_scale
     Z = C_Z * force_scale
     L = C_L * roll_moment_scale
@@ -437,7 +465,7 @@ def f16_kinematics_step(state, action, W, B, poly_powers):
     )
 
 
-def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers):
+def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, throttle_force_coeffs):
     state_core = state[:12]
     p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi = state_core
 
@@ -452,7 +480,7 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers):
     beta = jnp.arcsin(jnp.clip(v / V, -1.0, 1.0))
     mach = V / STANDARD_SPEED_OF_SOUND_FPS
 
-    features = jnp.array([alpha, beta, mach, p, q, r, delta_t, delta_e, delta_a, delta_r], dtype=jnp.float32)
+    features = jnp.array([alpha, beta, mach, p, q, r, delta_e, delta_a, delta_r], dtype=jnp.float32)
     phi_vec = expand_poly(features, poly_powers)
     preds = jnp.dot(phi_vec, W) + B
     C_X, C_Y, C_Z, C_L, C_M, C_N = preds
@@ -463,7 +491,7 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers):
     pitch_moment_scale = qbar_psf * WING_AREA_FT2 * MEAN_AERODYNAMIC_CHORD_FT
     yaw_moment_scale = qbar_psf * WING_AREA_FT2 * WING_SPAN_FT
 
-    X = C_X * force_scale
+    X = C_X * force_scale + throttle_force_term(delta_t, throttle_force_coeffs)
     Y = C_Y * force_scale
     Z = C_Z * force_scale
     L = C_L * roll_moment_scale
@@ -538,9 +566,16 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers):
     return jnp.concatenate([state_next_core, jnp.asarray([ny, nz], dtype=jnp.float32)], axis=0)
 
 
-def rollout_trajectory_with_load_factors(initial_state, action_seq, W, B, poly_powers):
+def rollout_trajectory_with_load_factors(initial_state, action_seq, W, B, poly_powers, throttle_force_coeffs):
     def step_fn(state, action):
-        next_state = f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers)
+        next_state = f16_kinematics_step_with_load_factors(
+            state,
+            action,
+            W,
+            B,
+            poly_powers,
+            throttle_force_coeffs,
+        )
         return next_state, next_state
 
     _, state_seq = jax.lax.scan(step_fn, initial_state, action_seq)
@@ -548,9 +583,16 @@ def rollout_trajectory_with_load_factors(initial_state, action_seq, W, B, poly_p
 
 
 @jax.jit
-def rollout_trajectory_batch_with_load_factors(initial_state, action_batch, W, B, poly_powers):
+def rollout_trajectory_batch_with_load_factors(initial_state, action_batch, W, B, poly_powers, throttle_force_coeffs):
     return jax.vmap(
-        lambda action_seq: rollout_trajectory_with_load_factors(initial_state, action_seq, W, B, poly_powers)
+        lambda action_seq: rollout_trajectory_with_load_factors(
+            initial_state,
+            action_seq,
+            W,
+            B,
+            poly_powers,
+            throttle_force_coeffs,
+        )
     )(action_batch)
 
 
@@ -684,7 +726,9 @@ def single_rollout_cost_from_states(
     rate_cost = jnp.sum(control_rate_weights[None, :] * jnp.square(action_rate), axis=1)
 
     alpha_rad = jnp.arctan2(state_seq[:, 5], jnp.maximum(state_seq[:, 3], 1.0))
-    nz_excess = jnp.maximum(jnp.abs(state_seq[:, 13]) - config.nz_limit_g, 0.0)
+    nz_low_excess = jnp.maximum(config.nz_min_g - state_seq[:, 13], 0.0)
+    nz_high_excess = jnp.maximum(state_seq[:, 13] - config.nz_max_g, 0.0)
+    nz_excess = nz_low_excess + nz_high_excess
     alpha_excess = jnp.maximum(alpha_rad - config.alpha_limit_rad, 0.0)
     limit_cost = (
         config.nz_penalty_weight * jnp.square(nz_excess)
@@ -699,9 +743,16 @@ def single_rollout_cost_from_states(
     return jnp.sum(stage_cost)
 
 
-def build_rollout_state_batch_fn(W, B, poly_powers):
+def build_rollout_state_batch_fn(W, B, poly_powers, throttle_force_coeffs):
     def rollout_states(initial_state, action_batch):
-        return rollout_trajectory_batch_with_load_factors(initial_state, action_batch, W, B, poly_powers)
+        return rollout_trajectory_batch_with_load_factors(
+            initial_state,
+            action_batch,
+            W,
+            B,
+            poly_powers,
+            throttle_force_coeffs,
+        )
 
     return jax.jit(rollout_states)
 
@@ -744,9 +795,16 @@ def build_rollout_cost_from_states_fn(
     return jax.jit(rollout_costs_from_states)
 
 
-def build_rollout_positions_fn(W, B, poly_powers):
+def build_rollout_positions_fn(W, B, poly_powers, throttle_force_coeffs):
     def rollout_positions(initial_state, action_batch):
-        state_seq = rollout_trajectory_batch_with_load_factors(initial_state, action_batch, W, B, poly_powers)
+        state_seq = rollout_trajectory_batch_with_load_factors(
+            initial_state,
+            action_batch,
+            W,
+            B,
+            poly_powers,
+            throttle_force_coeffs,
+        )
         initial_state_tiled = jnp.broadcast_to(
             initial_state[None, None, :],
             (action_batch.shape[0], 1, initial_state.shape[0]),

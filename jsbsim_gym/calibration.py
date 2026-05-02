@@ -27,6 +27,7 @@ DEFAULT_MASS_SLUGS = DEFAULT_MASS_LBS / G
 MIN_QBAR_PSF = 1.0
 STANDARD_SPEED_OF_SOUND_FPS = 1116.45
 NOMINAL_COEFF_WEIGHTS_OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "nominal_coeff_weights.npz")
+THROTTLE_FORCE_POLY_DEGREE = 2
 
 
 def angular_rate_derivatives_to_moments(p, q, r, p_dot, q_dot, r_dot):
@@ -136,6 +137,14 @@ def _collect_nominal_coefficient_weights(nom_model):
     return W, B
 
 
+def _throttle_force_basis(delta_t):
+    delta_t = np.asarray(delta_t, dtype=float).reshape(-1)
+    basis = [np.ones_like(delta_t)]
+    for power in range(1, THROTTLE_FORCE_POLY_DEGREE + 1):
+        basis.append(np.power(delta_t, power))
+    return np.column_stack(basis)
+
+
 def export_nominal_coefficient_weights(
     nom_model,
     output_path=NOMINAL_COEFF_WEIGHTS_OUTPUT_PATH,
@@ -151,10 +160,12 @@ def export_nominal_coefficient_weights(
         output_path,
         W=W,
         B=B,
+        throttle_force_coeffs=np.asarray(nom_model.throttle_force_coeffs, dtype=np.float32),
         feature_names=np.asarray(nom_model.features),
         target_names=np.asarray(nom_model.coeff_targets),
         poly_degree=np.asarray([int(nom_model.poly.degree)], dtype=np.int32),
         include_bias=np.asarray([int(bool(nom_model.poly.include_bias))], dtype=np.int32),
+        throttle_force_poly_degree=np.asarray([int(THROTTLE_FORCE_POLY_DEGREE)], dtype=np.int32),
         source_dataset=np.asarray([str(source_dataset)]),
         model_space=np.asarray(["aerodynamic_coefficients"]),
         wing_area_ft2=np.asarray([WING_AREA_FT2], dtype=np.float32),
@@ -167,23 +178,29 @@ class NominalModel:
     def __init__(self):
         self.poly = PolynomialFeatures(degree=3, include_bias=True)
         self.coeff_models = {}
-        self.features = ['alpha', 'beta', 'mach', 'p', 'q', 'r', 'delta_t', 'delta_e', 'delta_a', 'delta_r']
+        self.features = ['alpha', 'beta', 'mach', 'p', 'q', 'r', 'delta_e', 'delta_a', 'delta_r']
         self.coeff_targets = ['C_X', 'C_Y', 'C_Z', 'C_L', 'C_M', 'C_N']
         self.targets = ['X', 'Y', 'Z', 'L', 'M', 'N']
+        self.throttle_force_coeffs = np.zeros((THROTTLE_FORCE_POLY_DEGREE + 1,), dtype=float)
 
     def _build_feature_frame(self, df):
         feature_df = pd.DataFrame(index=df.index)
         feature_df['alpha'] = df['alpha'].to_numpy(dtype=float)
         feature_df['beta'] = df['beta'].to_numpy(dtype=float)
         feature_df['mach'] = _mach_from_dataframe(df)
-        for channel in ['p', 'q', 'r', 'delta_t', 'delta_e', 'delta_a', 'delta_r']:
+        for channel in ['p', 'q', 'r', 'delta_e', 'delta_a', 'delta_r']:
             feature_df[channel] = df[channel].to_numpy(dtype=float)
         return feature_df
+
+    def _throttle_force_term(self, delta_t):
+        basis = _throttle_force_basis(delta_t)
+        return basis @ np.asarray(self.throttle_force_coeffs, dtype=float)
 
     def _targets_to_coefficients(self, df, targets):
         scales = _aero_scales(df)
         coeffs = pd.DataFrame(index=df.index)
-        coeffs['C_X'] = targets['X'].to_numpy(dtype=float) / scales['force_scale']
+        x_target = targets['X'].to_numpy(dtype=float)
+        coeffs['C_X'] = (x_target - self._throttle_force_term(df['delta_t'])) / scales['force_scale']
         coeffs['C_Y'] = targets['Y'].to_numpy(dtype=float) / scales['force_scale']
         coeffs['C_Z'] = targets['Z'].to_numpy(dtype=float) / scales['force_scale']
         coeffs['C_L'] = targets['L'].to_numpy(dtype=float) / scales['roll_moment_scale']
@@ -194,7 +211,10 @@ class NominalModel:
     def _coefficients_to_targets(self, df, coeff_preds):
         scales = _aero_scales(df)
         targets = pd.DataFrame(index=df.index)
-        targets['X'] = coeff_preds['C_X'].to_numpy(dtype=float) * scales['force_scale']
+        targets['X'] = (
+            coeff_preds['C_X'].to_numpy(dtype=float) * scales['force_scale']
+            + self._throttle_force_term(df['delta_t'])
+        )
         targets['Y'] = coeff_preds['C_Y'].to_numpy(dtype=float) * scales['force_scale']
         targets['Z'] = coeff_preds['C_Z'].to_numpy(dtype=float) * scales['force_scale']
         targets['L'] = coeff_preds['C_L'].to_numpy(dtype=float) * scales['roll_moment_scale']
@@ -204,9 +224,34 @@ class NominalModel:
 
     def fit(self, df, targets):
         feature_df = self._build_feature_frame(df)
-        coeff_targets = self._targets_to_coefficients(df, targets)
         X_poly = self.poly.fit_transform(feature_df[self.features].values)
+        coeff_targets = self._targets_to_coefficients(df, targets)
+
+        delta_t = df['delta_t'].to_numpy(dtype=float)
+        throttle_basis = _throttle_force_basis(delta_t)
+        force_scale = _aero_scales(df)['force_scale']
+        x_target = targets['X'].to_numpy(dtype=float)
+        self.throttle_force_coeffs = np.zeros((throttle_basis.shape[1],), dtype=float)
+
+        cx_model = None
+        for _ in range(4):
+            cx_target = (x_target - (throttle_basis @ self.throttle_force_coeffs)) / force_scale
+            cx_model = Ridge(alpha=1.0)
+            cx_model.fit(X_poly, cx_target)
+            x_aero_pred = cx_model.predict(X_poly) * force_scale
+
+            thrust_model = Ridge(alpha=1e-3, fit_intercept=False)
+            thrust_model.fit(throttle_basis, x_target - x_aero_pred)
+            self.throttle_force_coeffs = thrust_model.coef_.astype(float)
+
+        if cx_model is None:
+            raise RuntimeError("Failed to fit C_X model.")
+        self.coeff_models['C_X'] = cx_model
+
+        coeff_targets = self._targets_to_coefficients(df, targets)
         for t in self.coeff_targets:
+            if t == 'C_X':
+                continue
             m = Ridge(alpha=1.0)
             m.fit(X_poly, coeff_targets[t].values)
             self.coeff_models[t] = m

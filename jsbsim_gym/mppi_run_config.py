@@ -39,7 +39,8 @@ MPPI_TUNABLE_SCALAR_KEYS = frozenset(
         "terrain_repulsion_scale",
         "terrain_decay_rate_ft_inv",
         "terrain_safe_clearance_ft",
-        "nz_limit_g",
+        "nz_min_g",
+        "nz_max_g",
         "nz_penalty_weight",
         "alpha_limit_rad",
         "alpha_penalty_weight",
@@ -154,8 +155,10 @@ def _trial_params_to_effective_mppi_params(params: dict) -> dict:
         effective["terrain_decay_rate_ft_inv"] = float(params["terrain_decay_rate_ft_inv"])
     if "terrain_safe_clearance_ft" in params:
         effective["terrain_safe_clearance_ft"] = float(params["terrain_safe_clearance_ft"])
-    if "nz_limit_g" in params:
-        effective["nz_limit_g"] = float(params["nz_limit_g"])
+    if "nz_min_g" in params:
+        effective["nz_min_g"] = float(params["nz_min_g"])
+    if "nz_max_g" in params:
+        effective["nz_max_g"] = float(params["nz_max_g"])
     if "nz_penalty_weight" in params:
         effective["nz_penalty_weight"] = float(params["nz_penalty_weight"])
     if "alpha_limit_rad" in params:

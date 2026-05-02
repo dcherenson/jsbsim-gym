@@ -52,6 +52,22 @@ DEFAULT_INITIAL_ROLL_DEG = None
 DEFAULT_INITIAL_PITCH_DEG = None
 DEFAULT_INITIAL_ALPHA_DEG = None
 DEFAULT_INITIAL_BETA_DEG = None
+MPPI_STATE_KEYS = (
+    "p_N",
+    "p_E",
+    "h",
+    "u",
+    "v",
+    "w",
+    "p",
+    "q",
+    "r",
+    "phi",
+    "theta",
+    "psi",
+    "ny",
+    "nz",
+)
 
 
 def _fraction_0_to_1(value: str) -> float:
@@ -79,6 +95,12 @@ def _set_mppi_nominal_start_progress(controller, progress_fraction: float) -> fl
     s1 = float(path_s[-1])
     progress_s_ft = float(s0 + float(np.clip(progress_fraction, 0.0, 1.0)) * (s1 - s0))
     controller._progress_s_ft = progress_s_ft
+    warm_start_fn = getattr(controller, "_initialize_plans_from_nominal_progress", None)
+    if callable(warm_start_fn):
+        try:
+            warm_start_fn(progress_s_ft)
+        except Exception:
+            pass
     return progress_s_ft
 
 
@@ -190,11 +212,15 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
     alpha_deg = np.asarray([row.get("alpha_deg", np.nan) for row in rows], dtype=np.float64)
     alpha_limit_deg = np.asarray([row.get("alpha_limit_deg", np.nan) for row in rows], dtype=np.float64)
     nz_g = np.asarray([row.get("nz_g", np.nan) for row in rows], dtype=np.float64)
-    nz_limit_g = np.asarray([row.get("nz_limit_g", np.nan) for row in rows], dtype=np.float64)
+    nz_min_g = np.asarray([row.get("nz_min_g", np.nan) for row in rows], dtype=np.float64)
+    nz_max_g = np.asarray([row.get("nz_max_g", np.nan) for row in rows], dtype=np.float64)
     aileron_cmd = np.asarray([row.get("aileron_cmd", np.nan) for row in rows], dtype=np.float64)
     elevator_cmd = np.asarray([row.get("elevator_cmd", np.nan) for row in rows], dtype=np.float64)
     rudder_cmd = np.asarray([row.get("rudder_cmd", np.nan) for row in rows], dtype=np.float64)
     throttle_cmd = np.asarray([row.get("throttle_cmd", np.nan) for row in rows], dtype=np.float64)
+    rudder_pos_norm = np.asarray([row.get("rudder_pos_norm", np.nan) for row in rows], dtype=np.float64)
+    rudder_pos_rad = np.asarray([row.get("rudder_pos_rad", np.nan) for row in rows], dtype=np.float64)
+    rudder_pos_deg = np.degrees(rudder_pos_rad)
     aileron_rate = np.asarray([row.get("aileron_rate", np.nan) for row in rows], dtype=np.float64)
     elevator_rate = np.asarray([row.get("elevator_rate", np.nan) for row in rows], dtype=np.float64)
     rudder_rate = np.asarray([row.get("rudder_rate", np.nan) for row in rows], dtype=np.float64)
@@ -246,9 +272,10 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
 
     axs[3].plot(time_s, nz_g, color="tab:orange", linewidth=1.8, label="nz")
     axs[3].plot(time_s, alpha_deg, color="tab:red", linewidth=1.8, label="alpha")
-    if np.isfinite(nz_limit_g).any():
-        axs[3].plot(time_s, nz_limit_g, color="black", linewidth=1.0, alpha=0.5, linestyle="--")
-        axs[3].plot(time_s, -nz_limit_g, color="black", linewidth=1.0, alpha=0.5, linestyle="--")
+    if np.isfinite(nz_min_g).any():
+        axs[3].plot(time_s, nz_min_g, color="black", linewidth=1.0, alpha=0.5, linestyle="--")
+    if np.isfinite(nz_max_g).any():
+        axs[3].plot(time_s, nz_max_g, color="black", linewidth=1.0, alpha=0.5, linestyle="--")
     if np.isfinite(alpha_limit_deg).any():
         axs[3].plot(time_s, alpha_limit_deg, color="tab:red", linewidth=1.0, alpha=0.5, linestyle="--")
     axs[3].set_ylabel("g / deg")
@@ -279,11 +306,33 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
     axs[6].plot(time_s, elevator_cmd, color="tab:orange", linewidth=1.5, label="ele")
     axs[6].plot(time_s, rudder_cmd, color="tab:green", linewidth=1.5, label="rud")
     axs[6].plot(time_s, throttle_cmd, color="tab:brown", linewidth=1.5, label="thr")
+    if np.isfinite(rudder_pos_norm).any():
+        axs[6].plot(
+            time_s,
+            rudder_pos_norm,
+            color="tab:green",
+            linewidth=1.2,
+            linestyle="--",
+            alpha=0.9,
+            label="rud pos norm",
+        )
     axs[6].set_xlabel("Time (s)")
     axs[6].set_ylabel("Cmd")
     axs[6].set_title("Action Commands")
     axs[6].legend(loc="best")
     axs[6].grid(True, alpha=0.25)
+
+    if np.isfinite(rudder_pos_deg).any():
+        ax6b = axs[6].twinx()
+        ax6b.plot(
+            time_s,
+            rudder_pos_deg,
+            color="tab:gray",
+            linewidth=1.0,
+            linestyle=":",
+            alpha=0.7,
+        )
+        ax6b.set_ylabel("Rudder (deg)")
 
     axs[7].plot(time_s, terrain_cost_est, color="tab:green", linewidth=1.6, label="terrain")
     axs[7].plot(time_s, rate_cost_est, color="tab:orange", linewidth=1.6, label="rate")
@@ -302,6 +351,67 @@ def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reas
     fig.savefig(plot_path, dpi=150)
     plt.close(fig)
     return csv_path, plot_path
+
+
+def save_mppi_plan_diagnostics(output_dir, file_stem, rows, action_plans, virtual_speed_plans):
+    if not rows:
+        return None, None
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / f"{file_stem}_plan_diagnostics.csv"
+    npz_path = output_dir / f"{file_stem}_plan_diagnostics.npz"
+
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    action_plan_arr = np.asarray(action_plans, dtype=np.float32)
+    virtual_speed_plan_arr = np.asarray(virtual_speed_plans, dtype=np.float32)
+    nominal_action_arr = np.asarray(
+        [
+            [
+                float(row["nominal_aileron_cmd"]),
+                float(row["nominal_elevator_cmd"]),
+                float(row["nominal_rudder_cmd"]),
+                float(row["nominal_throttle_cmd"]),
+            ]
+            for row in rows
+        ],
+        dtype=np.float32,
+    )
+    applied_action_arr = np.asarray(
+        [
+            [
+                float(row["applied_aileron_cmd"]),
+                float(row["applied_elevator_cmd"]),
+                float(row["applied_rudder_cmd"]),
+                float(row["applied_throttle_cmd"]),
+            ]
+            for row in rows
+        ],
+        dtype=np.float32,
+    )
+    np.savez_compressed(
+        npz_path,
+        action_plan=action_plan_arr,
+        virtual_speed_plan=virtual_speed_plan_arr,
+        call_index=np.asarray([int(row["call_index"]) for row in rows], dtype=np.int32),
+        step=np.asarray([int(row["step"]) for row in rows], dtype=np.int32),
+        time_s=np.asarray([float(row["time_s"]) for row in rows], dtype=np.float32),
+        progress_s_ft=np.asarray([float(row["progress_s_ft"]) for row in rows], dtype=np.float32),
+        controller_step_index=np.asarray([int(row["controller_step_index"]) for row in rows], dtype=np.int32),
+        using_backup=np.asarray([bool(row["using_backup"]) for row in rows], dtype=np.bool_),
+        nominal_action=nominal_action_arr,
+        applied_action=applied_action_arr,
+    )
+    return csv_path, npz_path
+
+
+def _append_state_fields(row_dict, *, prefix, state_dict):
+    for key in MPPI_STATE_KEYS:
+        row_dict[f"{prefix}_{key}"] = float(state_dict.get(key, np.nan))
 
 
 def to_mppi_state(env, state, altitude_ref_ft):
@@ -488,10 +598,11 @@ def build_jsbsim_gatekeeper(
         reference_trajectory=backup_reference,
     )
 
-    W, B, poly_powers = load_nominal_weights()
+    W, B, poly_powers, throttle_force_coeffs = load_nominal_weights()
     W_jax = jnp.asarray(W, dtype=jnp.float32)
     B_jax = jnp.asarray(B, dtype=jnp.float32)
     poly_powers_jax = jnp.asarray(poly_powers, dtype=jnp.int32)
+    throttle_force_coeffs_jax = jnp.asarray(throttle_force_coeffs, dtype=jnp.float32)
     north_samples_jax = jnp.asarray(north_samples_ft, dtype=jnp.float32)
     center_east_jax = jnp.asarray(center_east_samples_ft, dtype=jnp.float32)
     heading_samples_jax = jnp.asarray(heading_samples_rad, dtype=jnp.float32)
@@ -525,7 +636,14 @@ def build_jsbsim_gatekeeper(
 
     def dynamics_fn(state_flat, action, noise):
         noise = jnp.asarray(noise, dtype=jnp.float32)
-        return f16_kinematics_step_with_load_factors(state_flat, action, W_jax, B_jax + noise, poly_powers_jax)
+        return f16_kinematics_step_with_load_factors(
+            state_flat,
+            action,
+            W_jax,
+            B_jax + noise,
+            poly_powers_jax,
+            throttle_force_coeffs_jax,
+        )
 
     def safety_fn(state_flat, _env_param):
         terrain_floor_ft = _interp(terrain_floor_jax, state_flat[0])
@@ -928,6 +1046,10 @@ def main():
     termination_reason = "running"
     simple_diagnostic_rows = []
     mppi_tracking_rows = []
+    mppi_plan_rows = []
+    mppi_plan_action_sequences = []
+    mppi_plan_virtual_speed_sequences = []
+    mppi_plan_call_index = 0
 
     gatekeeper_bundle = None
     gatekeeper_prev_using_backup = False
@@ -1054,6 +1176,51 @@ def main():
                 gatekeeper.tick()
                 gatekeeper_prev_using_backup = bool(gatekeeper_state.using_backup)
             gk_ms = (time.time() - t0) * 1000.0
+
+            if controller_tag in {"mppi", "smooth_mppi"}:
+                plan_debug = None
+                plan_debug_getter = getattr(controller, "get_plan_debug", None)
+                if callable(plan_debug_getter):
+                    try:
+                        plan_debug = dict(plan_debug_getter())
+                    except Exception:
+                        plan_debug = None
+                if isinstance(plan_debug, dict):
+                    action_plan = np.asarray(plan_debug.get("action_plan", np.zeros((0, 4), dtype=np.float32)), dtype=np.float32)
+                    virtual_speed_plan = np.asarray(
+                        plan_debug.get("virtual_speed_plan", np.zeros((0,), dtype=np.float32)),
+                        dtype=np.float32,
+                    ).reshape(-1)
+                    if (
+                        action_plan.ndim == 2
+                        and action_plan.shape[1] == 4
+                        and virtual_speed_plan.ndim == 1
+                        and action_plan.shape[0] == virtual_speed_plan.shape[0]
+                        and action_plan.shape[0] >= 1
+                    ):
+                        nominal_action_vec = np.asarray(nominal_action, dtype=np.float32)
+                        applied_action_vec = np.asarray(action, dtype=np.float32)
+                        mppi_plan_rows.append(
+                            {
+                                "call_index": int(mppi_plan_call_index),
+                                "step": int(step),
+                                "time_s": float(step / 30.0),
+                                "progress_s_ft": float(plan_debug.get("progress_s_ft", np.nan)),
+                                "controller_step_index": int(plan_debug.get("step_index", -1)),
+                                "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
+                                "nominal_aileron_cmd": float(nominal_action_vec[0]),
+                                "nominal_elevator_cmd": float(nominal_action_vec[1]),
+                                "nominal_rudder_cmd": float(nominal_action_vec[2]),
+                                "nominal_throttle_cmd": float(nominal_action_vec[3]),
+                                "applied_aileron_cmd": float(applied_action_vec[0]),
+                                "applied_elevator_cmd": float(applied_action_vec[1]),
+                                "applied_rudder_cmd": float(applied_action_vec[2]),
+                                "applied_throttle_cmd": float(applied_action_vec[3]),
+                            }
+                        )
+                        mppi_plan_action_sequences.append(action_plan.copy())
+                        mppi_plan_virtual_speed_sequences.append(virtual_speed_plan.copy())
+                        mppi_plan_call_index += 1
 
             planner_debug = None
             raw_debug = None
@@ -1264,7 +1431,11 @@ def main():
                 alpha_limit_deg = float(np.degrees(float(mppi_cfg.alpha_limit_rad)))
                 alpha_excess_rad = max(alpha_rad - float(mppi_cfg.alpha_limit_rad), 0.0)
                 nz_g = float(post_controller_state.get("nz", 1.0))
-                nz_excess_g = max(abs(nz_g) - float(mppi_cfg.nz_limit_g), 0.0)
+                nz_excess_g = max(
+                    float(mppi_cfg.nz_min_g) - nz_g,
+                    nz_g - float(mppi_cfg.nz_max_g),
+                    0.0,
+                )
                 limit_cost_est = float(
                     float(mppi_cfg.nz_penalty_weight) * (nz_excess_g ** 2)
                     + float(mppi_cfg.alpha_penalty_weight) * (alpha_excess_rad ** 2)
@@ -1272,53 +1443,69 @@ def main():
                 total_stage_cost_est = float(
                     contouring_cost_est + terrain_cost_est + rate_cost_est + limit_cost_est
                 )
+                rudder_pos_norm = np.nan
+                rudder_pos_rad = np.nan
+                sim = getattr(env.unwrapped, "simulation", None)
+                if sim is not None:
+                    try:
+                        rudder_pos_norm = float(sim.get_property_value("fcs/rudder-pos-norm"))
+                    except Exception:
+                        pass
+                    try:
+                        rudder_pos_rad = float(sim.get_property_value("fcs/rudder-pos-rad"))
+                    except Exception:
+                        pass
 
-                mppi_tracking_rows.append(
-                    {
-                        "step": int(step),
-                        "time_s": float(step / 30.0),
-                        "progress_s_ft": float(progress_s_ft),
-                        "virtual_speed_fps": float(virtual_speed_fps),
-                        "reference_north_ft": float(tracking_metrics["reference_north_ft"]),
-                        "reference_east_ft": float(tracking_metrics["reference_east_ft"]),
-                        "reference_altitude_ft": float(tracking_metrics["reference_altitude_ft"]),
-                        "reference_heading_deg": float(np.degrees(float(tracking_metrics["reference_heading_rad"]))),
-                        "contour_error_ft": float(contour_error_ft),
-                        "lag_error_ft": float(lag_error_ft),
-                        "position_error_ft": float(position_error_ft),
-                        "altitude_error_ft": float(altitude_error_ft),
-                        "terrain_clearance_ft": float(terrain_clearance_ft),
-                        "terrain_safe_clearance_ft": float(terrain_safe_clearance_ft),
-                        "nz_g": float(nz_g),
-                        "nz_limit_g": float(mppi_cfg.nz_limit_g),
-                        "alpha_deg": float(alpha_deg),
-                        "alpha_limit_deg": float(alpha_limit_deg),
-                        "contour_cost_est": float(contour_cost_est),
-                        "lag_cost_est": float(lag_cost_est),
-                        "progress_reward_est": float(progress_reward_est),
-                        "virtual_speed_cost_est": float(virtual_speed_cost_est),
-                        "contouring_cost_est": float(contouring_cost_est),
-                        "terrain_cost_est": float(terrain_cost_est),
-                        "rate_cost_est": float(rate_cost_est),
-                        "limit_cost_est": float(limit_cost_est),
-                        "total_stage_cost_est": float(total_stage_cost_est),
-                        "aileron_cmd": float(action_vec[0]),
-                        "elevator_cmd": float(action_vec[1]),
-                        "rudder_cmd": float(action_vec[2]),
-                        "throttle_cmd": float(action_vec[3]),
-                        "aileron_rate": float(action_rate[0]),
-                        "elevator_rate": float(action_rate[1]),
-                        "rudder_rate": float(action_rate[2]),
-                        "throttle_rate": float(action_rate[3]),
-                        "termination_reason": str(termination_reason),
-                        "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
-                        "plan_ms": float(plan_ms),
-                        "gatekeeper_ms": float(gk_ms),
-                        "gatekeeper_nominal_prep_ms": float(gk_nom_prep),
-                        "gatekeeper_update_ms": float(gk_update_ms),
-                        "gatekeeper_backup_ms": float(gk_backup_ms),
-                    }
-                )
+                tracking_row = {
+                    "step": int(step),
+                    "time_s": float(step / 30.0),
+                    "progress_s_ft": float(progress_s_ft),
+                    "virtual_speed_fps": float(virtual_speed_fps),
+                    "reference_north_ft": float(tracking_metrics["reference_north_ft"]),
+                    "reference_east_ft": float(tracking_metrics["reference_east_ft"]),
+                    "reference_altitude_ft": float(tracking_metrics["reference_altitude_ft"]),
+                    "reference_heading_deg": float(np.degrees(float(tracking_metrics["reference_heading_rad"]))),
+                    "contour_error_ft": float(contour_error_ft),
+                    "lag_error_ft": float(lag_error_ft),
+                    "position_error_ft": float(position_error_ft),
+                    "altitude_error_ft": float(altitude_error_ft),
+                    "terrain_clearance_ft": float(terrain_clearance_ft),
+                    "terrain_safe_clearance_ft": float(terrain_safe_clearance_ft),
+                    "nz_g": float(nz_g),
+                    "nz_min_g": float(mppi_cfg.nz_min_g),
+                    "nz_max_g": float(mppi_cfg.nz_max_g),
+                    "alpha_deg": float(alpha_deg),
+                    "alpha_limit_deg": float(alpha_limit_deg),
+                    "contour_cost_est": float(contour_cost_est),
+                    "lag_cost_est": float(lag_cost_est),
+                    "progress_reward_est": float(progress_reward_est),
+                    "virtual_speed_cost_est": float(virtual_speed_cost_est),
+                    "contouring_cost_est": float(contouring_cost_est),
+                    "terrain_cost_est": float(terrain_cost_est),
+                    "rate_cost_est": float(rate_cost_est),
+                    "limit_cost_est": float(limit_cost_est),
+                    "total_stage_cost_est": float(total_stage_cost_est),
+                    "aileron_cmd": float(action_vec[0]),
+                    "elevator_cmd": float(action_vec[1]),
+                    "rudder_cmd": float(action_vec[2]),
+                    "throttle_cmd": float(action_vec[3]),
+                    "rudder_pos_norm": float(rudder_pos_norm),
+                    "rudder_pos_rad": float(rudder_pos_rad),
+                    "aileron_rate": float(action_rate[0]),
+                    "elevator_rate": float(action_rate[1]),
+                    "rudder_rate": float(action_rate[2]),
+                    "throttle_rate": float(action_rate[3]),
+                    "termination_reason": str(termination_reason),
+                    "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
+                    "plan_ms": float(plan_ms),
+                    "gatekeeper_ms": float(gk_ms),
+                    "gatekeeper_nominal_prep_ms": float(gk_nom_prep),
+                    "gatekeeper_update_ms": float(gk_update_ms),
+                    "gatekeeper_backup_ms": float(gk_backup_ms),
+                }
+                _append_state_fields(tracking_row, prefix="pre", state_dict=controller_state)
+                _append_state_fields(tracking_row, prefix="post", state_dict=post_controller_state)
+                mppi_tracking_rows.append(tracking_row)
                 prev_applied_action = action_vec.copy()
             if controller_tag == "simple":
                 simple_guidance = dict(getattr(controller, "last_guidance", {}) or {})
@@ -1395,6 +1582,16 @@ def main():
         if diag_csv_path is not None and diag_plot_path is not None:
             print(f"Saved tracking diagnostics CSV: {diag_csv_path}")
             print(f"Saved tracking diagnostics plot: {diag_plot_path}")
+        plan_diag_csv_path, plan_diag_npz_path = save_mppi_plan_diagnostics(
+            output_dir=output_dir,
+            file_stem=f"canyon_{controller_tag}_{mode_tag}",
+            rows=mppi_plan_rows,
+            action_plans=mppi_plan_action_sequences,
+            virtual_speed_plans=mppi_plan_virtual_speed_sequences,
+        )
+        if plan_diag_csv_path is not None and plan_diag_npz_path is not None:
+            print(f"Saved MPPI plan diagnostics CSV: {plan_diag_csv_path}")
+            print(f"Saved MPPI plan diagnostics NPZ: {plan_diag_npz_path}")
         if mppi_tracking_rows:
             contour_error_ft = np.asarray(
                 [float(row.get("contour_error_ft", np.nan)) for row in mppi_tracking_rows],

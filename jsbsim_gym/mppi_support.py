@@ -19,7 +19,8 @@ from jsbsim_gym.mppi_defaults import (
     MPPI_DEFAULT_HORIZON,
     MPPI_DEFAULT_LAG_WEIGHT,
     MPPI_DEFAULT_LAMBDA,
-    MPPI_DEFAULT_NZ_LIMIT_G,
+    MPPI_DEFAULT_NZ_MAX_G,
+    MPPI_DEFAULT_NZ_MIN_G,
     MPPI_DEFAULT_NZ_PENALTY_WEIGHT,
     MPPI_DEFAULT_PROGRESS_REWARD_WEIGHT,
     MPPI_DEFAULT_TERRAIN_COLLISION_PENALTY,
@@ -67,7 +68,8 @@ class MPPICostConfig:
     terrain_decay_rate_ft_inv: float = MPPI_DEFAULT_TERRAIN_DECAY_RATE_FT_INV
     terrain_safe_clearance_ft: float = DEFAULT_TERRAIN_SAFE_CLEARANCE_FT
     control_rate_weights: tuple[float, float, float, float] = DEFAULT_CONTROL_RATE_WEIGHTS
-    nz_limit_g: float = MPPI_DEFAULT_NZ_LIMIT_G
+    nz_min_g: float = MPPI_DEFAULT_NZ_MIN_G
+    nz_max_g: float = MPPI_DEFAULT_NZ_MAX_G
     nz_penalty_weight: float = MPPI_DEFAULT_NZ_PENALTY_WEIGHT
     alpha_limit_rad: float = DEFAULT_ALPHA_LIMIT_RAD
     alpha_penalty_weight: float = MPPI_DEFAULT_ALPHA_PENALTY_WEIGHT
@@ -78,6 +80,7 @@ class NominalJSBSimParams:
     W: Array
     B: Array
     poly_powers: Array
+    throttle_force_coeffs: Array
     reference_states_ft_rad: Array
     path_s_ft: Array
     path_positions_ft: Array
@@ -190,7 +193,7 @@ def build_nominal_params(
     terrain_east_samples_ft: np.ndarray,
     terrain_elevation_ft: np.ndarray,
 ) -> NominalJSBSimParams:
-    W, B, poly_powers = load_nominal_weights()
+    W, B, poly_powers, throttle_force_coeffs = load_nominal_weights()
 
     reference_states_np = np.asarray(reference_trajectory["reference_states_ft_rad"], dtype=np.float32)
     if reference_states_np.ndim != 2 or reference_states_np.shape[1] != 6:
@@ -224,6 +227,7 @@ def build_nominal_params(
         W=jnp.asarray(W, dtype=jnp.float32),
         B=jnp.asarray(B, dtype=jnp.float32),
         poly_powers=jnp.asarray(poly_powers, dtype=jnp.int32),
+        throttle_force_coeffs=jnp.asarray(throttle_force_coeffs, dtype=jnp.float32),
         reference_states_ft_rad=jnp.asarray(reference_states_np, dtype=jnp.float32),
         path_s_ft=jnp.asarray(path_s_np, dtype=jnp.float32),
         path_positions_ft=jnp.asarray(path_positions_np, dtype=jnp.float32),
@@ -318,7 +322,8 @@ def _backend_cost_config(cost_config: MPPICostConfig) -> backend.JaxMPPIConfig:
         terrain_decay_rate_ft_inv=float(cost_config.terrain_decay_rate_ft_inv),
         terrain_safe_clearance_ft=float(cost_config.terrain_safe_clearance_ft),
         control_rate_weights=tuple(float(x) for x in cost_config.control_rate_weights),
-        nz_limit_g=float(cost_config.nz_limit_g),
+        nz_min_g=float(cost_config.nz_min_g),
+        nz_max_g=float(cost_config.nz_max_g),
         nz_penalty_weight=float(cost_config.nz_penalty_weight),
         alpha_limit_rad=float(cost_config.alpha_limit_rad),
         alpha_penalty_weight=float(cost_config.alpha_penalty_weight),
@@ -330,7 +335,12 @@ def _backend_cost_config(cost_config: MPPICostConfig) -> backend.JaxMPPIConfig:
 
 def build_rollout_cost_fn(params: NominalJSBSimParams, cost_config: MPPICostConfig) -> Any:
     backend_config = _backend_cost_config(cost_config)
-    rollout_states = backend.build_rollout_state_batch_fn(params.W, params.B, params.poly_powers)
+    rollout_states = backend.build_rollout_state_batch_fn(
+        params.W,
+        params.B,
+        params.poly_powers,
+        params.throttle_force_coeffs,
+    )
     rollout_costs_from_states = backend.build_rollout_cost_from_states_fn(
         params.path_s_ft,
         params.path_positions_ft,
@@ -362,4 +372,9 @@ def build_rollout_cost_fn(params: NominalJSBSimParams, cost_config: MPPICostConf
 
 
 def build_rollout_positions_fn(params: NominalJSBSimParams) -> Any:
-    return backend.build_rollout_positions_fn(params.W, params.B, params.poly_powers)
+    return backend.build_rollout_positions_fn(
+        params.W,
+        params.B,
+        params.poly_powers,
+        params.throttle_force_coeffs,
+    )

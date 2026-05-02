@@ -5,6 +5,10 @@ import pandas as pd
 from jsbsim_gym.data_collection_env import DataCollectionEnv
 from jsbsim_gym.controllers import PersistentExcitationController
 
+EXTREME_MANEUVER_FIRST_STEP = 20
+EXTREME_MANEUVER_BURST_STEPS = 6
+EXTREME_MANEUVER_RECOVERY_STEPS = 12
+
 
 def _episode_profile(episode_idx):
     profiles = ("baseline", "high_alpha", "high_beta", "high_qbar")
@@ -68,6 +72,33 @@ def _episode_beta_schedule(episode_idx, rng, profile):
         jitter = rng.uniform(-1.0, 1.0, size=base_levels.shape[0])
     shift = int((3 * episode_idx) % base_levels.size)
     return np.clip(np.roll(base_levels, shift) + jitter, -18.0, 18.0)
+
+
+def _extreme_corner_actions():
+    actions = []
+    for roll_cmd in (-1.0, 1.0):
+        for pitch_cmd in (-1.0, 1.0):
+            for yaw_cmd in (-1.0, 1.0):
+                for throttle_cmd in (0.0, 1.0):
+                    actions.append((roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd))
+    return np.asarray(actions, dtype=np.float32)
+
+
+def _episode_extreme_action_schedule(episode_idx, steps_per_episode):
+    schedule = np.full((int(steps_per_episode), 4), np.nan, dtype=np.float32)
+    schedule_ids = np.full((int(steps_per_episode),), -1, dtype=np.int32)
+    corners = _extreme_corner_actions()
+    start_step = int(EXTREME_MANEUVER_FIRST_STEP + (episode_idx % 11))
+    corner_cursor = int((episode_idx * 5) % corners.shape[0])
+    step = start_step
+    while step < int(steps_per_episode):
+        corner_idx = int(corner_cursor % corners.shape[0])
+        step_hi = min(step + int(EXTREME_MANEUVER_BURST_STEPS), int(steps_per_episode))
+        schedule[step:step_hi, :] = corners[corner_idx][None, :]
+        schedule_ids[step:step_hi] = corner_idx
+        corner_cursor += 1
+        step = step_hi + int(EXTREME_MANEUVER_RECOVERY_STEPS)
+    return schedule, schedule_ids
 
 
 def _coverage_report(df):
@@ -211,6 +242,10 @@ def generate_canonical_dataset(
             excitation_scale=excitation_scale,
             seed=int(rng.integers(0, 2**31 - 1)),
         )
+        extreme_action_schedule, extreme_action_ids = _episode_extreme_action_schedule(
+            episode_idx=episode,
+            steps_per_episode=steps_per_episode,
+        )
 
         if profile == "high_beta":
             env.wind_theta = float(rng.uniform(0.08, 0.30))
@@ -232,6 +267,9 @@ def generate_canonical_dataset(
         for step in range(steps_per_episode):
             state_curr = env.get_full_state_dict()
             action = controller.get_action(state_curr, env.time_sec)
+            extreme_combo_index = int(extreme_action_ids[step])
+            if extreme_combo_index >= 0:
+                action = extreme_action_schedule[step].astype(np.float32).tolist()
             targets = controller.last_targets
             
             state_t, state_t_plus_1, done = env.step_collect(action)
@@ -271,6 +309,8 @@ def generate_canonical_dataset(
                 'collection_profile': str(profile),
                 'episode_index': int(episode),
                 'step_index': int(step),
+                'extreme_override': int(extreme_combo_index >= 0),
+                'extreme_combo_index': int(extreme_combo_index),
             }
             
             # Append next_ state variables

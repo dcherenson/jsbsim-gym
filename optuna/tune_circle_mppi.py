@@ -385,7 +385,14 @@ def _episode_cost_summary(args, config_kwargs, *, seed: int):
             alpha_rad = float(np.arctan2(float(post_controller_state["w"]), max(float(post_controller_state["u"]), 1.0)))
             alpha_excess_rad = max(alpha_rad - float(controller.config.alpha_limit_rad), 0.0)
             alpha_excess_deg.append(float(np.degrees(alpha_excess_rad)))
-            nz_excess_g.append(max(abs(float(post_controller_state.get("nz", 1.0))) - float(controller.config.nz_limit_g), 0.0))
+            nz_g = float(post_controller_state.get("nz", 1.0))
+            nz_excess_g.append(
+                max(
+                    float(controller.config.nz_min_g) - nz_g,
+                    nz_g - float(controller.config.nz_max_g),
+                    0.0,
+                )
+            )
 
             if done:
                 termination_reason = "terminated"

@@ -337,10 +337,17 @@ def _rollout_truth(case: ManeuverCase, action_plan: np.ndarray):
         env.close()
 
 
-def _build_nominal_rollout_fn(W, B, poly_powers):
+def _build_nominal_rollout_fn(W, B, poly_powers, throttle_force_coeffs):
     def rollout_fn(x0, action_plan):
         def step_fn(state, action):
-            next_state = f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers)
+            next_state = f16_kinematics_step_with_load_factors(
+                state,
+                action,
+                W,
+                B,
+                poly_powers,
+                throttle_force_coeffs,
+            )
             return next_state, state
 
         final_state, state_steps = lax.scan(step_fn, x0, action_plan, length=action_plan.shape[0])
@@ -349,7 +356,7 @@ def _build_nominal_rollout_fn(W, B, poly_powers):
     return jax.jit(rollout_fn)
 
 
-def _build_sampled_rollout_fn(W, B, poly_powers, uncertainty_sampler: RuntimeUncertaintySampler):
+def _build_sampled_rollout_fn(W, B, poly_powers, throttle_force_coeffs, uncertainty_sampler: RuntimeUncertaintySampler):
     active_feature_names = uncertainty_sampler.configure_active_features()
     active_feature_set = set(active_feature_names)
     uncertainty_data = uncertainty_sampler.to_jax()
@@ -394,7 +401,14 @@ def _build_sampled_rollout_fn(W, B, poly_powers, uncertainty_sampler: RuntimeUnc
             action = action_plan[step_idx]
             features = feature_fn(state, action, prev_action)
             noise = sample_empirical_jax(features, 0, subkey, uncertainty_data)
-            next_state = f16_kinematics_step_with_load_factors(state, action, W, B + noise, poly_powers)
+            next_state = f16_kinematics_step_with_load_factors(
+                state,
+                action,
+                W,
+                B + noise,
+                poly_powers,
+                throttle_force_coeffs,
+            )
             return (next_state, step_idx + 1, action), (state, noise)
 
         keys = jax.random.split(rng_key, int(action_plan.shape[0]))
@@ -572,10 +586,16 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    W, B, poly_powers = load_nominal_weights()
+    W, B, poly_powers, throttle_force_coeffs = load_nominal_weights()
     uncertainty_sampler = RuntimeUncertaintySampler(str(UNCERTAINTY_ARTIFACT_PATH))
-    nominal_rollout_fn = _build_nominal_rollout_fn(W, B, poly_powers)
-    sampled_rollout_fn, width_ft_default, width_grad_default = _build_sampled_rollout_fn(W, B, poly_powers, uncertainty_sampler)
+    nominal_rollout_fn = _build_nominal_rollout_fn(W, B, poly_powers, throttle_force_coeffs)
+    sampled_rollout_fn, width_ft_default, width_grad_default = _build_sampled_rollout_fn(
+        W,
+        B,
+        poly_powers,
+        throttle_force_coeffs,
+        uncertainty_sampler,
+    )
 
     case_results = []
     for case_idx, case in enumerate(_selected_cases(args.case)):

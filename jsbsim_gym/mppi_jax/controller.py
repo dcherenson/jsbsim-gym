@@ -20,7 +20,8 @@ from jsbsim_gym.mppi_defaults import (
     MPPI_DEFAULT_HORIZON,
     MPPI_DEFAULT_LAG_WEIGHT,
     MPPI_DEFAULT_LAMBDA,
-    MPPI_DEFAULT_NZ_LIMIT_G,
+    MPPI_DEFAULT_NZ_MAX_G,
+    MPPI_DEFAULT_NZ_MIN_G,
     MPPI_DEFAULT_NZ_PENALTY_WEIGHT,
     MPPI_DEFAULT_NUM_SAMPLES,
     MPPI_DEFAULT_OPTIMIZATION_STEPS,
@@ -44,6 +45,7 @@ from jsbsim_gym.mppi_support import (
     build_rollout_positions_fn,
     clip_action,
     contouring_reference_for_progress,
+    f16_kinematics_step_with_load_factors,
     jsbsim_state_to_jax_with_load_factors,
     make_trim_action_plan,
     make_trim_virtual_speed_plan,
@@ -75,7 +77,8 @@ class JaxMPPIConfig:
     terrain_decay_rate_ft_inv: float = MPPI_DEFAULT_TERRAIN_DECAY_RATE_FT_INV
     terrain_safe_clearance_ft: float = MPPI_DEFAULT_TERRAIN_SAFE_CLEARANCE_FT
     control_rate_weights: tuple[float, float, float, float] = MPPI_DEFAULT_CONTROL_RATE_WEIGHTS
-    nz_limit_g: float = MPPI_DEFAULT_NZ_LIMIT_G
+    nz_min_g: float = MPPI_DEFAULT_NZ_MIN_G
+    nz_max_g: float = MPPI_DEFAULT_NZ_MAX_G
     nz_penalty_weight: float = MPPI_DEFAULT_NZ_PENALTY_WEIGHT
     alpha_limit_rad: float = MPPI_DEFAULT_ALPHA_LIMIT_RAD
     alpha_penalty_weight: float = MPPI_DEFAULT_ALPHA_PENALTY_WEIGHT
@@ -121,7 +124,8 @@ class JaxMPPIController:
             terrain_decay_rate_ft_inv=self.config.terrain_decay_rate_ft_inv,
             terrain_safe_clearance_ft=self.config.terrain_safe_clearance_ft,
             control_rate_weights=self.config.control_rate_weights,
-            nz_limit_g=self.config.nz_limit_g,
+            nz_min_g=self.config.nz_min_g,
+            nz_max_g=self.config.nz_max_g,
             nz_penalty_weight=self.config.nz_penalty_weight,
             alpha_limit_rad=self.config.alpha_limit_rad,
             alpha_penalty_weight=self.config.alpha_penalty_weight,
@@ -150,6 +154,7 @@ class JaxMPPIController:
         self._last_virtual_speed_fps = float(self._trim_virtual_speed_fps)
         self._cached_virtual_speed_fps = float(self._trim_virtual_speed_fps)
         self._progress_s_ft = float(self.params.path_s_np[0])
+        self._initialize_plans_from_nominal_progress(self._progress_s_ft)
         self._last_replan_step = -10**9
         self._step_index = 0
         self._latest_render_debug: dict[str, np.ndarray] | None = None
@@ -171,9 +176,169 @@ class JaxMPPIController:
         self._last_virtual_speed_fps = float(self._trim_virtual_speed_fps)
         self._cached_virtual_speed_fps = float(self._trim_virtual_speed_fps)
         self._progress_s_ft = float(self.params.path_s_np[0])
+        self._initialize_plans_from_nominal_progress(self._progress_s_ft)
         self._last_replan_step = -10**9
         self._step_index = 0
         self._latest_render_debug = None
+
+    def _set_trim_plans(self) -> None:
+        self._action_plan = jnp.asarray(make_trim_action_plan(self.config.horizon), dtype=jnp.float32)
+        self._virtual_speed_plan = jnp.asarray(
+            make_trim_virtual_speed_plan(self.config.horizon, trim_speed_fps=self._trim_virtual_speed_fps),
+            dtype=jnp.float32,
+        )
+        self.base_plan = self._action_plan
+        self._last_action = np.asarray(self._action_plan[0], dtype=np.float32)
+        self._cached_action = self._last_action.copy()
+        self._last_virtual_speed_fps = float(self._virtual_speed_plan[0])
+        self._cached_virtual_speed_fps = float(self._virtual_speed_plan[0])
+
+    def _progress_to_reference_index(self, progress_s_ft: float) -> int:
+        path_s = np.asarray(self.params.path_s_np, dtype=np.float64).reshape(-1)
+        ref_len = int(np.asarray(self.params.reference_states_np).shape[0])
+        if path_s.size < 1 or ref_len < 1:
+            return 0
+
+        s = float(np.clip(progress_s_ft, float(path_s[0]), float(path_s[-1])))
+        path_idx = int(np.clip(np.searchsorted(path_s, s, side="left"), 0, path_s.size - 1))
+        if ref_len == path_s.size or path_s.size <= 1:
+            return int(np.clip(path_idx, 0, ref_len - 1))
+
+        frac = float(path_idx) / float(path_s.size - 1)
+        ref_idx = int(np.rint(frac * float(ref_len - 1)))
+        return int(np.clip(ref_idx, 0, ref_len - 1))
+
+    @staticmethod
+    def _reference_body_rates(phi_rad: np.ndarray, theta_rad: np.ndarray, psi_rad: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        dt = 1.0 / 30.0
+        phi = np.unwrap(np.asarray(phi_rad, dtype=np.float64))
+        theta = np.asarray(theta_rad, dtype=np.float64)
+        psi = np.unwrap(np.asarray(psi_rad, dtype=np.float64))
+
+        phi_dot = np.gradient(phi, dt)
+        theta_dot = np.gradient(theta, dt)
+        psi_dot = np.gradient(psi, dt)
+
+        theta_clip = np.clip(theta, -np.deg2rad(89.0), np.deg2rad(89.0))
+        cos_phi = np.cos(phi)
+        sin_phi = np.sin(phi)
+        cos_theta = np.cos(theta_clip)
+        tan_theta = np.tan(theta_clip)
+
+        q = theta_dot * cos_phi + psi_dot * cos_theta * sin_phi
+        r = -theta_dot * sin_phi + psi_dot * cos_theta * cos_phi
+        p = phi_dot - q * sin_phi * tan_theta - r * cos_phi * tan_theta
+        return p.astype(np.float64), q.astype(np.float64), r.astype(np.float64)
+
+    def _build_nominal_warm_start_plans(self, progress_s_ft: float) -> tuple[np.ndarray, np.ndarray]:
+        horizon = int(max(self.config.horizon, 1))
+        action_low = np.asarray(self.config.action_low, dtype=np.float64)
+        action_high = np.asarray(self.config.action_high, dtype=np.float64)
+        trim_action = np.asarray([0.0, 0.0, 0.0, 0.55], dtype=np.float64)
+        trim_action = np.clip(trim_action, action_low, action_high)
+
+        ref_states = np.asarray(self.params.reference_states_np, dtype=np.float64)
+        ref_speed = np.asarray(self.params.reference_speed_fps_np, dtype=np.float64).reshape(-1)
+        if ref_states.shape[0] < 2 or ref_speed.size < 1:
+            return (
+                np.asarray(make_trim_action_plan(horizon), dtype=np.float32),
+                np.asarray(make_trim_virtual_speed_plan(horizon, trim_speed_fps=self._trim_virtual_speed_fps), dtype=np.float32),
+            )
+
+        start_idx = self._progress_to_reference_index(progress_s_ft)
+        idx = np.arange(start_idx, start_idx + horizon + 1, dtype=np.int64)
+        idx = np.clip(idx, 0, ref_states.shape[0] - 1)
+
+        phi_seq = ref_states[idx, 3]
+        theta_seq = ref_states[idx, 4]
+        psi_seq = ref_states[idx, 5]
+        p_des, q_des, r_des = self._reference_body_rates(phi_seq, theta_seq, psi_seq)
+
+        idx_h = idx[:-1]
+        speed_des = ref_speed[np.clip(idx_h, 0, ref_speed.size - 1)]
+        speed_des = np.where(np.isfinite(speed_des), speed_des, float(self._trim_virtual_speed_fps))
+        speed_des = np.clip(
+            speed_des,
+            float(self.config.virtual_speed_min_fps),
+            float(self.config.virtual_speed_max_fps),
+        )
+
+        rep_state = np.zeros((14,), dtype=np.float32)
+        rep_state[:3] = ref_states[idx_h[0], :3].astype(np.float32)
+        rep_state[3] = float(max(speed_des[0], 1.0))
+        rep_state[6] = float(p_des[0])
+        rep_state[7] = float(q_des[0])
+        rep_state[8] = float(r_des[0])
+        rep_state[9] = float(phi_seq[0])
+        rep_state[10] = float(theta_seq[0])
+        rep_state[11] = float(psi_seq[0])
+        rep_state[12] = 0.0
+        rep_state[13] = 1.0
+
+        def _outputs_from_action(action_cmd: np.ndarray) -> np.ndarray:
+            next_state = np.asarray(
+                f16_kinematics_step_with_load_factors(
+                    jnp.asarray(rep_state, dtype=jnp.float32),
+                    jnp.asarray(action_cmd, dtype=jnp.float32),
+                    self.params.W,
+                    self.params.B,
+                    self.params.poly_powers,
+                    self.params.throttle_force_coeffs,
+                ),
+                dtype=np.float64,
+            )
+            speed_next = float(np.sqrt(max(float(next_state[3] ** 2 + next_state[4] ** 2 + next_state[5] ** 2), 1.0)))
+            return np.asarray([next_state[6], next_state[7], next_state[8], speed_next], dtype=np.float64)
+
+        y_trim = _outputs_from_action(trim_action)
+        jac = np.zeros((4, 4), dtype=np.float64)
+        eps = 0.08
+        for ch in range(4):
+            a_plus = trim_action.copy()
+            a_minus = trim_action.copy()
+            a_plus[ch] = min(float(action_high[ch]), float(a_plus[ch] + eps))
+            a_minus[ch] = max(float(action_low[ch]), float(a_minus[ch] - eps))
+            denom = float(a_plus[ch] - a_minus[ch])
+            if denom <= 1e-6:
+                jac[:, ch] = 0.0
+                continue
+            y_plus = _outputs_from_action(a_plus)
+            y_minus = _outputs_from_action(a_minus)
+            jac[:, ch] = (y_plus - y_minus) / denom
+
+        jac_pinv = np.linalg.pinv(jac, rcond=1e-3)
+        desired_outputs = np.column_stack([p_des[:-1], q_des[:-1], r_des[:-1], speed_des])
+        action_plan = np.zeros((horizon, 4), dtype=np.float64)
+        prev = trim_action.copy()
+        for k in range(horizon):
+            delta_y = desired_outputs[k] - y_trim
+            cmd = trim_action + jac_pinv @ delta_y
+            # Blend toward previous command to avoid large one-step discontinuities.
+            cmd = 0.35 * cmd + 0.65 * prev
+            cmd = np.clip(cmd, action_low, action_high)
+            action_plan[k] = cmd
+            prev = cmd
+
+        return action_plan.astype(np.float32), speed_des.astype(np.float32)
+
+    def _initialize_plans_from_nominal_progress(self, progress_s_ft: float) -> None:
+        try:
+            action_plan_np, speed_plan_np = self._build_nominal_warm_start_plans(progress_s_ft)
+            if action_plan_np.shape != (int(max(self.config.horizon, 1)), 4):
+                raise ValueError("invalid nominal action warm-start shape")
+            if speed_plan_np.shape != (int(max(self.config.horizon, 1)),):
+                raise ValueError("invalid nominal speed warm-start shape")
+            if not np.all(np.isfinite(action_plan_np)) or not np.all(np.isfinite(speed_plan_np)):
+                raise ValueError("non-finite nominal warm-start values")
+            self._action_plan = jnp.asarray(action_plan_np, dtype=jnp.float32)
+            self._virtual_speed_plan = jnp.asarray(speed_plan_np, dtype=jnp.float32)
+            self.base_plan = self._action_plan
+            self._last_action = np.asarray(self._action_plan[0], dtype=np.float32)
+            self._cached_action = self._last_action.copy()
+            self._last_virtual_speed_fps = float(self._virtual_speed_plan[0])
+            self._cached_virtual_speed_fps = float(self._virtual_speed_plan[0])
+        except Exception:
+            self._set_trim_plans()
 
     def _current_state(self, state_dict: dict[str, float]) -> jax.Array:
         return jsbsim_state_to_jax_with_load_factors(state_dict)
@@ -326,6 +491,14 @@ class JaxMPPIController:
 
     def get_render_debug(self) -> dict[str, np.ndarray] | None:
         return self._latest_render_debug
+
+    def get_plan_debug(self) -> dict[str, np.ndarray | float | int]:
+        return {
+            "action_plan": np.asarray(self._action_plan, dtype=np.float32).copy(),
+            "virtual_speed_plan": np.asarray(self._virtual_speed_plan, dtype=np.float32).copy(),
+            "progress_s_ft": float(self._progress_s_ft),
+            "step_index": int(self._step_index),
+        }
 
     def get_action(self, state_dict: dict[str, float]) -> np.ndarray:
         if self._step_index - self._last_replan_step < self.config.replan_interval:
