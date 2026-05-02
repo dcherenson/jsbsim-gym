@@ -34,6 +34,7 @@ from jsbsim_gym.simple_controller import (
     build_reference_trajectory,
     with_default_simple_controller_optuna_gains,
 )
+from jsbsim_gym.cascaded_pid_controller import PIDTrajectoryController
 from jsbsim_gym.uncertainty import RuntimeUncertaintySampler, sample_empirical_jax as sample_empirical_coeff_jax
 
 DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
@@ -129,6 +130,71 @@ def _print_mppi_config(controller_tag, config):
         value = getattr(config, field.name)
         print(f"  {field.name}: {value}")
 
+
+def save_pid_traj_diagnostics(output_dir, file_stem, rows, termination_reason):
+    if not rows:
+        return None, None
+
+    output_dir = Path(output_dir)
+    csv_path = output_dir / f"{file_stem}_diagnostics.csv"
+    plot_path = output_dir / f"{file_stem}_diagnostics.png"
+
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
+    
+    fig, axs = plt.subplots(5, 1, figsize=(12, 14), sharex=True, constrained_layout=True)
+
+    # 1. Guidance Errors (cross-track and altitude)
+    axs[0].plot(time_s, [r["e_xtrk"] for r in rows], label="Xtrack Err (ft)", color="tab:red", linewidth=2.0)
+    axs[0].plot(time_s, [r["e_z"] for r in rows], label="Alt Err (ft)", color="tab:blue", linewidth=2.0)
+    axs[0].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
+    axs[0].set_ylabel("Errors (ft)")
+    axs[0].set_title(f"PID Traj Controller Diagnostics | end={termination_reason} | steps={len(rows)}")
+    axs[0].legend(loc="best")
+    axs[0].grid(True, alpha=0.25)
+    
+    # 2. Guidance Commands (phi and alpha)
+    axs[1].plot(time_s, [r["phi_cmd"] for r in rows], label="Phi Cmd (rad)", color="tab:purple")
+    axs[1].plot(time_s, [r["phi"] for r in rows], label="Phi Actual", color="tab:green", alpha=0.7)
+    axs[1].plot(time_s, [r["alpha_cmd"] for r in rows], label="Alpha Cmd (rad)", color="tab:orange")
+    axs[1].plot(time_s, [r["alpha"] for r in rows], label="Alpha Actual", color="tab:brown", alpha=0.7)
+    axs[1].set_ylabel("Angles (rad)")
+    axs[1].legend(loc="best")
+    axs[1].grid(True, alpha=0.25)
+    
+    # 3. Rate Commands (p and q)
+    axs[2].plot(time_s, [r["p_cmd"] for r in rows], label="p Cmd (rad/s)", color="tab:green")
+    axs[2].plot(time_s, [r["p"] for r in rows], label="p Actual", color="tab:purple", alpha=0.7)
+    axs[2].plot(time_s, [r["q_cmd"] for r in rows], label="q Cmd (rad/s)", color="tab:blue")
+    axs[2].plot(time_s, [r["q"] for r in rows], label="q Actual", color="tab:orange", alpha=0.7)
+    axs[2].set_ylabel("Rates (rad/s)")
+    axs[2].legend(loc="best")
+    axs[2].grid(True, alpha=0.25)
+
+    # 4. Actuator Commands
+    axs[3].plot(time_s, [r["elevator_cmd"] for r in rows], label="Elevator Cmd", color="tab:red")
+    axs[3].plot(time_s, [r["aileron_cmd"] for r in rows], label="Aileron Cmd", color="tab:blue")
+    axs[3].plot(time_s, [r["rudder_cmd"] for r in rows], label="Rudder Cmd", color="tab:green")
+    axs[3].set_ylabel("Actuator Surface [-1, 1]")
+    axs[3].legend(loc="best")
+    axs[3].grid(True, alpha=0.25)
+    
+    # 5. Speed and Throttle
+    axs[4].plot(time_s, [r["v_opt_val"] for r in rows], label="V Opt (fps)", color="tab:orange")
+    axs[4].plot(time_s, [r["V"] for r in rows], label="V Actual (fps)", color="tab:brown")
+    axs[4].plot(time_s, [(r["throttle_cmd"]*100) for r in rows], label="Throttle Cmd (*100)", color="tab:gray", linestyle="--")
+    axs[4].set_ylabel("Speed / Throttle")
+    axs[4].set_xlabel("Time (s)")
+    axs[4].legend(loc="best")
+    axs[4].grid(True, alpha=0.25)
+
+    fig.savefig(plot_path, dpi=120)
+    plt.close(fig)
+    return csv_path, plot_path
 
 def save_simple_controller_diagnostics(output_dir, file_stem, rows, termination_reason):
     if not rows:
@@ -442,6 +508,7 @@ def to_mppi_state(env, state, altitude_ref_ft):
         "phi": float(state["phi"]),
         "theta": float(state["theta"]),
         "psi": float(state["psi"]),
+        "alpha": float(state.get("alpha", 0.0)),
         "beta": float(state.get("beta", 0.0)),
         "ny": float(state.get("ny", 0.0)),
         "nz": float(state.get("nz", 1.0)),
@@ -783,7 +850,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run canyon scenarios across available controllers.")
     parser.add_argument(
         "--controller",
-        choices=["mppi", "smooth_mppi", "simple", "altitude_hold"],
+        choices=["mppi", "smooth_mppi", "simple", "altitude_hold", "pid_traj"],
         default="mppi",
         help="Controller variant to run.",
     )
@@ -898,6 +965,7 @@ def main():
         "smooth_mppi": "canyon_smooth_mppi",
         "simple": "canyon_simple",
         "altitude_hold": "canyon_altitude_hold",
+        "pid_traj": "canyon_pid_traj",
     }
     output_dir = args.output_dir
     if output_dir is None:
@@ -997,6 +1065,11 @@ def main():
             config=simple_config,
         )
         controller.reset(initial_controller_state)
+    elif controller_tag == "pid_traj":
+        if nominal_reference is None:
+            raise ValueError("pid_traj requires --nominal-dyn-path.")
+        controller = PIDTrajectoryController(env=env, reference_trajectory=nominal_reference)
+        controller.reset(initial_controller_state)
     elif controller_tag == "altitude_hold":
         controller = AltitudeHoldController()
     else:
@@ -1045,6 +1118,7 @@ def main():
         recorder.set_centerline_profile(north_samples_ft, center_east_samples_ft)
     termination_reason = "running"
     simple_diagnostic_rows = []
+    pid_traj_diagnostic_rows = []
     mppi_tracking_rows = []
     mppi_plan_rows = []
     mppi_plan_action_sequences = []
@@ -1528,6 +1602,31 @@ def main():
                     }
                 )
 
+            if controller_tag == "pid_traj":
+                pid_diag = dict(getattr(controller, "last_diagnostics", {}) or {})
+                pid_traj_diagnostic_rows.append(
+                    {
+                        "step": int(step),
+                        "time_s": float(step / 30.0),
+                        "e_xtrk": float(pid_diag.get("e_xtrk", np.nan)),
+                        "e_z": float(pid_diag.get("e_z", np.nan)),
+                        "phi_cmd": float(pid_diag.get("phi_cmd", np.nan)),
+                        "phi": float(controller_state["phi"]),
+                        "alpha_cmd": float(pid_diag.get("alpha_cmd", np.nan)),
+                        "alpha": float(controller_state["alpha"]),
+                        "p_cmd": float(pid_diag.get("p_cmd", np.nan)),
+                        "p": float(controller_state["p"]),
+                        "q_cmd": float(pid_diag.get("q_cmd", np.nan)),
+                        "q": float(controller_state["q"]),
+                        "elevator_cmd": float(pid_diag.get("elevator_cmd", np.nan)),
+                        "aileron_cmd": float(pid_diag.get("aileron_cmd", np.nan)),
+                        "rudder_cmd": float(pid_diag.get("rudder_cmd", np.nan)),
+                        "throttle_cmd": float(pid_diag.get("throttle_cmd", np.nan)),
+                        "v_opt_val": float(pid_diag.get("v_opt_val", np.nan)),
+                        "V": float(speed_fps),
+                    }
+                )
+
             if step % 5 == 0:
                 if controller_tag in {"mppi", "smooth_mppi"}:
                     mode_label = "NOM"
@@ -1571,6 +1670,16 @@ def main():
         if diag_csv_path is not None and diag_plot_path is not None:
             print(f"Saved diagnostics CSV: {diag_csv_path}")
             print(f"Saved diagnostics plot: {diag_plot_path}")
+    if controller_tag == "pid_traj":
+        diag_csv_path, diag_plot_path = save_pid_traj_diagnostics(
+            output_dir=output_dir,
+            file_stem=f"canyon_{controller_tag}_{mode_tag}",
+            rows=pid_traj_diagnostic_rows,
+            termination_reason=termination_reason,
+        )
+        if diag_csv_path is not None and diag_plot_path is not None:
+            print(f"Saved pid_traj diagnostics CSV: {diag_csv_path}")
+            print(f"Saved pid_traj diagnostics plot: {diag_plot_path}")
     if controller_tag in {"mppi", "smooth_mppi"}:
         diag_csv_path, diag_plot_path = save_mppi_tracking_diagnostics(
             output_dir=output_dir,

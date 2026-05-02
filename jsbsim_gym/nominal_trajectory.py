@@ -146,7 +146,10 @@ def _body_euler_deg_series_from_dyn(dyn) -> tuple[np.ndarray, np.ndarray, np.nda
 
     pitch_deg = np.degrees(np.arctan2(x_body_neu[:, 2], np.hypot(x_body_neu[:, 0], x_body_neu[:, 1])))
     heading_deg = np.mod(np.degrees(np.arctan2(x_body_neu[:, 1], x_body_neu[:, 0])), 360.0)
-    roll_deg = np.degrees(np.arctan2(y_body_neu[:, 2], -z_body_neu[:, 2]))
+    # Negate to match JSBSim phi convention: positive phi = right bank (right wing down).
+    # arctan2(y_body_neu[:,2], -z_body_neu[:,2]) gives positive when the right wing points
+    # UP (left bank), which is the opposite of JSBSim's attitude/phi-rad sign.
+    roll_deg = -np.degrees(np.arctan2(y_body_neu[:, 2], -z_body_neu[:, 2]))
     return (
         np.asarray(roll_deg, dtype=np.float64),
         np.asarray(pitch_deg, dtype=np.float64),
@@ -310,6 +313,10 @@ def build_nominal_reference_from_dyn(
     roll_rad = np.unwrap(np.deg2rad(roll_deg))
     pitch_rad = np.unwrap(np.deg2rad(pitch_deg))
     heading_rad = np.unwrap(np.deg2rad(heading_deg))
+    alpha_deg = np.asarray(dyn.alpha, dtype=np.float64).reshape(-1)
+    beta_deg = np.asarray(dyn.beta, dtype=np.float64).reshape(-1)
+    alpha_rad = np.deg2rad(alpha_deg)
+    beta_rad = np.deg2rad(beta_deg)
 
     lat_deg, lon_deg = _north_east_m_to_lat_lon(
         north_m,
@@ -350,6 +357,8 @@ def build_nominal_reference_from_dyn(
     sample_phi_rad = np.interp(sample_time_s, time_s, roll_rad)
     sample_theta_rad = np.interp(sample_time_s, time_s, pitch_rad)
     sample_psi_rad = np.interp(sample_time_s, time_s, heading_rad)
+    sample_alpha_rad = np.interp(sample_time_s, time_s, alpha_rad)
+    sample_beta_rad = np.interp(sample_time_s, time_s, beta_rad)
 
     canyon_north = np.asarray(canyon.north_samples_ft, dtype=np.float64)
     canyon_center = np.asarray(canyon.center_east_samples_ft, dtype=np.float64)
@@ -391,6 +400,8 @@ def build_nominal_reference_from_dyn(
         "phi_rad": sample_phi_rad.astype(np.float32),
         "theta_rad": sample_theta_rad.astype(np.float32),
         "psi_rad": sample_psi_rad.astype(np.float32),
+        "alpha_rad": sample_alpha_rad.astype(np.float32),
+        "beta_rad": sample_beta_rad.astype(np.float32),
         "reference_states_ft_rad": np.column_stack(
             [
                 sample_north_ft,
