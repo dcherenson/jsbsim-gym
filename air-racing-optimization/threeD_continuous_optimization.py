@@ -205,7 +205,7 @@ opti.subject_to([
 ])
 altitude_agl = dyn.altitude - terrain_altitude
 
-altitude_agl_limit = 50 * u.foot
+altitude_agl_limit = 100 * u.foot
 
 opti.subject_to([
     altitude_agl / altitude_agl_limit > 1,

@@ -44,7 +44,7 @@ BLACK_CANYON_DEM = TaskConfig(
     dem_path=REPO_ROOT / "data/dem/black-canyon-gunnison_USGS10m.tif",
     dem_bbox=(38.52, 38.62, -107.78, -107.65),
     start_pixel=(1400, 950),
-    span_ft=9000.0,
+    span_ft=10000.0,
     crop_padding_m=3000.0,
     valley_rel_elev=0.08,
     smoothing_window=11,
@@ -52,7 +52,7 @@ BLACK_CANYON_DEM = TaskConfig(
     max_width_ft=2200.0,
     terrain_cost_sigma_m=10000.0,
     terrain_cost_weight=5.0,
-    initial_altitude_agl_ft=220.0,
+    initial_altitude_agl_ft=500.0,
 )
 
 LEGACY_RIFFE = TaskConfig(
