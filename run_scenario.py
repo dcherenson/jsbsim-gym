@@ -1,13 +1,12 @@
 import argparse
-import csv
 from dataclasses import fields, is_dataclass
 import time
 from pathlib import Path
 
 import gymnasium as gym
-import matplotlib.pyplot as plt
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 
 from drs_gatekeeper import DRSGatekeeper, GatekeeperParams, TrackBoundsEstimate
@@ -34,7 +33,14 @@ from jsbsim_gym.simple_controller import (
     build_reference_trajectory,
     with_default_simple_controller_optuna_gains,
 )
-from jsbsim_gym.cascaded_pid_controller import PIDTrajectoryController
+from jsbsim_gym.cascaded_pid_controller import PIDTrajectoryController, build_pid_trajectory_policy_jax
+from jsbsim_gym.run_diagnostics import (
+    _append_state_fields,
+    save_mppi_plan_diagnostics,
+    save_mppi_tracking_diagnostics,
+    save_pid_traj_diagnostics,
+    save_simple_controller_diagnostics,
+)
 from jsbsim_gym.uncertainty import RuntimeUncertaintySampler, sample_empirical_jax as sample_empirical_coeff_jax
 
 DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
@@ -131,353 +137,7 @@ def _print_mppi_config(controller_tag, config):
         print(f"  {field.name}: {value}")
 
 
-def save_pid_traj_diagnostics(output_dir, file_stem, rows, termination_reason):
-    if not rows:
-        return None, None
 
-    output_dir = Path(output_dir)
-    csv_path = output_dir / f"{file_stem}_diagnostics.csv"
-    plot_path = output_dir / f"{file_stem}_diagnostics.png"
-
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-
-    time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
-    
-    fig, axs = plt.subplots(5, 1, figsize=(12, 14), sharex=True, constrained_layout=True)
-
-    # 1. Guidance Errors (cross-track and altitude)
-    axs[0].plot(time_s, [r["e_xtrk"] for r in rows], label="Xtrack Err (ft)", color="tab:red", linewidth=2.0)
-    axs[0].plot(time_s, [r["e_z"] for r in rows], label="Alt Err (ft)", color="tab:blue", linewidth=2.0)
-    axs[0].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
-    axs[0].set_ylabel("Errors (ft)")
-    axs[0].set_title(f"PID Traj Controller Diagnostics | end={termination_reason} | steps={len(rows)}")
-    axs[0].legend(loc="best")
-    axs[0].grid(True, alpha=0.25)
-    
-    # 2. Guidance Commands (phi and alpha)
-    axs[1].plot(time_s, [np.degrees(r["phi_cmd"]) for r in rows], label="Phi Cmd (deg)", color="tab:purple")
-    axs[1].plot(time_s, [np.degrees(r["phi"]) for r in rows], label="Phi Actual", color="tab:green", alpha=0.7)
-    axs[1].plot(time_s, [np.degrees(r["alpha_cmd"]) for r in rows], label="Alpha Cmd (deg)", color="tab:orange")
-    axs[1].plot(time_s, [np.degrees(r["alpha"]) for r in rows], label="Alpha Actual", color="tab:brown", alpha=0.7)
-    axs[1].set_ylabel("Angles (deg)")
-    axs[1].legend(loc="best")
-    axs[1].grid(True, alpha=0.25)
-    
-    # 3. Rate Commands (p and q)
-    axs[2].plot(time_s, [np.degrees(r["p_cmd"]) for r in rows], label="p Cmd (deg/s)", color="tab:green")
-    axs[2].plot(time_s, [np.degrees(r["p"]) for r in rows], label="p Actual", color="tab:purple", alpha=0.7)
-    axs[2].plot(time_s, [np.degrees(r["q_cmd"]) for r in rows], label="q Cmd (deg/s)", color="tab:blue")
-    axs[2].plot(time_s, [np.degrees(r["q"]) for r in rows], label="q Actual", color="tab:orange", alpha=0.7)
-    axs[2].set_ylabel("Rates (deg/s)")
-    axs[2].legend(loc="best")
-    axs[2].grid(True, alpha=0.25)
-
-    # 4. Actuator Commands
-    axs[3].plot(time_s, [r["elevator_cmd"] for r in rows], label="Elevator Cmd", color="tab:red")
-    axs[3].plot(time_s, [r["aileron_cmd"] for r in rows], label="Aileron Cmd", color="tab:blue")
-    axs[3].plot(time_s, [r["rudder_cmd"] for r in rows], label="Rudder Cmd", color="tab:green")
-    axs[3].set_ylabel("Actuator Surface [-1, 1]")
-    axs[3].legend(loc="best")
-    axs[3].grid(True, alpha=0.25)
-    
-    # 5. Speed and Throttle
-    axs[4].plot(time_s, [r["v_opt_val"] for r in rows], label="V Opt (fps)", color="tab:orange")
-    axs[4].plot(time_s, [r["V"] for r in rows], label="V Actual (fps)", color="tab:brown")
-    axs[4].plot(time_s, [(r["throttle_cmd"]*100) for r in rows], label="Throttle Cmd (*100)", color="tab:gray", linestyle="--")
-    axs[4].set_ylabel("Speed / Throttle")
-    axs[4].set_xlabel("Time (s)")
-    axs[4].legend(loc="best")
-    axs[4].grid(True, alpha=0.25)
-
-    fig.savefig(plot_path, dpi=120)
-    plt.close(fig)
-    return csv_path, plot_path
-
-def save_simple_controller_diagnostics(output_dir, file_stem, rows, termination_reason):
-    if not rows:
-        return None, None
-
-    output_dir = Path(output_dir)
-    csv_path = output_dir / f"{file_stem}_diagnostics.csv"
-    plot_path = output_dir / f"{file_stem}_diagnostics.png"
-
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-
-    time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
-    xtrack_ft = np.asarray([row["lateral_error_ft"] for row in rows], dtype=np.float64)
-    xtrack_norm = np.asarray([row["lateral_error_norm"] for row in rows], dtype=np.float64)
-    heading_error_deg = np.asarray([row["heading_error_deg"] for row in rows], dtype=np.float64)
-    roll_cmd = np.asarray([row["roll_cmd"] for row in rows], dtype=np.float64)
-    roll_des_deg = np.asarray([row["roll_des_deg"] for row in rows], dtype=np.float64)
-    phi_deg = np.asarray([row["phi_deg"] for row in rows], dtype=np.float64)
-    track_accel_cmd_fps2 = np.asarray([row["track_accel_cmd_fps2"] for row in rows], dtype=np.float64)
-
-    fig, axs = plt.subplots(4, 1, figsize=(12, 11), sharex=True, constrained_layout=True)
-
-    axs[0].plot(time_s, xtrack_ft, color="tab:red", linewidth=2.0)
-    axs[0].axhline(0.0, color="black", linewidth=1.0, alpha=0.6)
-    axs[0].set_ylabel("Xtrack (ft)")
-    axs[0].set_title(f"Simple Controller Diagnostics | end={termination_reason} | steps={len(rows)}")
-    axs[0].grid(True, alpha=0.25)
-
-    axs[1].plot(time_s, xtrack_norm, color="tab:orange", linewidth=2.0, label="xtrack norm")
-    axs[1].axhline(1.0, color="black", linewidth=1.0, alpha=0.4, linestyle="--")
-    axs[1].axhline(-1.0, color="black", linewidth=1.0, alpha=0.4, linestyle="--")
-    axs[1].plot(time_s, heading_error_deg, color="tab:blue", linewidth=1.5, label="heading error (deg)")
-    axs[1].set_ylabel("Norm / Deg")
-    axs[1].legend(loc="best")
-    axs[1].grid(True, alpha=0.25)
-
-    axs[2].plot(time_s, roll_des_deg, color="tab:purple", linewidth=2.0, label="roll des (deg)")
-    axs[2].plot(time_s, phi_deg, color="tab:green", linewidth=1.5, label="phi (deg)")
-    axs[2].set_ylabel("Bank (deg)")
-    axs[2].legend(loc="best")
-    axs[2].grid(True, alpha=0.25)
-
-    axs[3].plot(time_s, roll_cmd, color="tab:brown", linewidth=2.0, label="roll cmd")
-    axs[3].plot(time_s, track_accel_cmd_fps2, color="tab:gray", linewidth=1.5, label="track accel (fps^2)")
-    axs[3].set_ylabel("Cmd / Accel")
-    axs[3].set_xlabel("Time (s)")
-    axs[3].legend(loc="best")
-    axs[3].grid(True, alpha=0.25)
-
-    fig.savefig(plot_path, dpi=150)
-    plt.close(fig)
-    return csv_path, plot_path
-
-
-def save_mppi_tracking_diagnostics(output_dir, file_stem, rows, termination_reason, controller_label):
-    if not rows:
-        return None, None
-
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = output_dir / f"{file_stem}_tracking_diagnostics.csv"
-    plot_path = output_dir / f"{file_stem}_tracking_diagnostics.png"
-
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-
-    time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
-    progress_s_ft = np.asarray([row["progress_s_ft"] for row in rows], dtype=np.float64)
-    virtual_speed_fps = np.asarray([row["virtual_speed_fps"] for row in rows], dtype=np.float64)
-    contour_error_ft = np.asarray([row["contour_error_ft"] for row in rows], dtype=np.float64)
-    lag_error_ft = np.asarray([row["lag_error_ft"] for row in rows], dtype=np.float64)
-    position_error_ft = np.asarray([row["position_error_ft"] for row in rows], dtype=np.float64)
-    altitude_error_ft = np.asarray([row["altitude_error_ft"] for row in rows], dtype=np.float64)
-    terrain_clearance_ft = np.asarray([row.get("terrain_clearance_ft", np.nan) for row in rows], dtype=np.float64)
-    terrain_safe_clearance_ft = np.asarray([row.get("terrain_safe_clearance_ft", np.nan) for row in rows], dtype=np.float64)
-    alpha_deg = np.asarray([row.get("alpha_deg", np.nan) for row in rows], dtype=np.float64)
-    alpha_limit_deg = np.asarray([row.get("alpha_limit_deg", np.nan) for row in rows], dtype=np.float64)
-    nz_g = np.asarray([row.get("nz_g", np.nan) for row in rows], dtype=np.float64)
-    nz_min_g = np.asarray([row.get("nz_min_g", np.nan) for row in rows], dtype=np.float64)
-    nz_max_g = np.asarray([row.get("nz_max_g", np.nan) for row in rows], dtype=np.float64)
-    aileron_cmd = np.asarray([row.get("aileron_cmd", np.nan) for row in rows], dtype=np.float64)
-    elevator_cmd = np.asarray([row.get("elevator_cmd", np.nan) for row in rows], dtype=np.float64)
-    rudder_cmd = np.asarray([row.get("rudder_cmd", np.nan) for row in rows], dtype=np.float64)
-    throttle_cmd = np.asarray([row.get("throttle_cmd", np.nan) for row in rows], dtype=np.float64)
-    rudder_pos_norm = np.asarray([row.get("rudder_pos_norm", np.nan) for row in rows], dtype=np.float64)
-    rudder_pos_rad = np.asarray([row.get("rudder_pos_rad", np.nan) for row in rows], dtype=np.float64)
-    rudder_pos_deg = np.degrees(rudder_pos_rad)
-    aileron_rate = np.asarray([row.get("aileron_rate", np.nan) for row in rows], dtype=np.float64)
-    elevator_rate = np.asarray([row.get("elevator_rate", np.nan) for row in rows], dtype=np.float64)
-    rudder_rate = np.asarray([row.get("rudder_rate", np.nan) for row in rows], dtype=np.float64)
-    throttle_rate = np.asarray([row.get("throttle_rate", np.nan) for row in rows], dtype=np.float64)
-    contour_cost_est = np.asarray([row.get("contour_cost_est", np.nan) for row in rows], dtype=np.float64)
-    lag_cost_est = np.asarray([row.get("lag_cost_est", np.nan) for row in rows], dtype=np.float64)
-    progress_reward_est = np.asarray([row.get("progress_reward_est", np.nan) for row in rows], dtype=np.float64)
-    virtual_speed_cost_est = np.asarray([row.get("virtual_speed_cost_est", np.nan) for row in rows], dtype=np.float64)
-    contouring_cost_est = np.asarray([row.get("contouring_cost_est", np.nan) for row in rows], dtype=np.float64)
-    terrain_cost_est = np.asarray([row.get("terrain_cost_est", np.nan) for row in rows], dtype=np.float64)
-    rate_cost_est = np.asarray([row.get("rate_cost_est", np.nan) for row in rows], dtype=np.float64)
-    limit_cost_est = np.asarray([row.get("limit_cost_est", np.nan) for row in rows], dtype=np.float64)
-    total_stage_cost_est = np.asarray([row.get("total_stage_cost_est", np.nan) for row in rows], dtype=np.float64)
-
-    fig, axs = plt.subplots(4, 2, figsize=(14, 13), sharex=True, constrained_layout=True)
-    axs = axs.reshape(-1)
-
-    axs[0].plot(time_s, contour_error_ft, color="tab:blue", linewidth=2.0, label="contour")
-    axs[0].plot(time_s, np.abs(lag_error_ft), color="tab:orange", linewidth=1.5, alpha=0.9, label="|lag|")
-    axs[0].plot(time_s, position_error_ft, color="tab:green", linewidth=1.2, alpha=0.9, label="position")
-    axs[0].set_ylabel("Feet")
-    axs[0].set_title("Contouring Errors")
-    axs[0].legend(loc="best")
-    axs[0].grid(True, alpha=0.25)
-
-    axs[1].plot(time_s, progress_s_ft, color="tab:purple", linewidth=2.0, label="s")
-    axs[1].plot(time_s, virtual_speed_fps, color="tab:brown", linewidth=1.5, alpha=0.9, label="v_s")
-    axs[1].plot(time_s, altitude_error_ft, color="tab:red", linewidth=1.2, alpha=0.8, label="altitude err")
-    axs[1].set_ylabel("Feet / ft/s")
-    axs[1].set_title("Virtual Progress")
-    axs[1].legend(loc="best")
-    axs[1].grid(True, alpha=0.25)
-
-    axs[2].plot(time_s, terrain_clearance_ft, color="tab:green", linewidth=2.0, label="terrain clr")
-    if np.isfinite(terrain_clearance_ft).any():
-        axs[2].plot(
-            time_s,
-            terrain_safe_clearance_ft,
-            color="black",
-            linewidth=1.0,
-            alpha=0.6,
-            linestyle="--",
-            label="safe clr",
-        )
-    axs[2].set_ylabel("Feet")
-    axs[2].set_title("Terrain Clearance")
-    axs[2].legend(loc="best")
-    axs[2].grid(True, alpha=0.25)
-
-    axs[3].plot(time_s, nz_g, color="tab:orange", linewidth=1.8, label="nz")
-    axs[3].plot(time_s, alpha_deg, color="tab:red", linewidth=1.8, label="alpha")
-    if np.isfinite(nz_min_g).any():
-        axs[3].plot(time_s, nz_min_g, color="black", linewidth=1.0, alpha=0.5, linestyle="--")
-    if np.isfinite(nz_max_g).any():
-        axs[3].plot(time_s, nz_max_g, color="black", linewidth=1.0, alpha=0.5, linestyle="--")
-    if np.isfinite(alpha_limit_deg).any():
-        axs[3].plot(time_s, alpha_limit_deg, color="tab:red", linewidth=1.0, alpha=0.5, linestyle="--")
-    axs[3].set_ylabel("g / deg")
-    axs[3].set_title("Structural Limits")
-    axs[3].legend(loc="best")
-    axs[3].grid(True, alpha=0.25)
-
-    axs[4].plot(time_s, contour_cost_est, color="tab:blue", linewidth=1.6, label="contour")
-    axs[4].plot(time_s, lag_cost_est, color="tab:orange", linewidth=1.6, label="lag")
-    axs[4].plot(time_s, progress_reward_est, color="tab:green", linewidth=1.6, label="-w_v v_s")
-    axs[4].plot(time_s, virtual_speed_cost_est, color="tab:purple", linewidth=1.6, label="R_vs v_s^2")
-    axs[4].plot(time_s, contouring_cost_est, color="black", linewidth=1.8, alpha=0.9, label="L_cont")
-    axs[4].set_ylabel("Cost")
-    axs[4].set_title("Contouring Cost Terms")
-    axs[4].legend(loc="best")
-    axs[4].grid(True, alpha=0.25)
-
-    axs[5].plot(time_s, aileron_rate, color="tab:blue", linewidth=1.5, label="ail rate")
-    axs[5].plot(time_s, elevator_rate, color="tab:orange", linewidth=1.5, label="ele rate")
-    axs[5].plot(time_s, rudder_rate, color="tab:green", linewidth=1.5, label="rud rate")
-    axs[5].plot(time_s, throttle_rate, color="tab:brown", linewidth=1.5, label="thr rate")
-    axs[5].set_ylabel("Delta cmd")
-    axs[5].set_title("Control Rates")
-    axs[5].legend(loc="best")
-    axs[5].grid(True, alpha=0.25)
-
-    axs[6].plot(time_s, aileron_cmd, color="tab:blue", linewidth=1.5, label="ail")
-    axs[6].plot(time_s, elevator_cmd, color="tab:orange", linewidth=1.5, label="ele")
-    axs[6].plot(time_s, rudder_cmd, color="tab:green", linewidth=1.5, label="rud")
-    axs[6].plot(time_s, throttle_cmd, color="tab:brown", linewidth=1.5, label="thr")
-    if np.isfinite(rudder_pos_norm).any():
-        axs[6].plot(
-            time_s,
-            rudder_pos_norm,
-            color="tab:green",
-            linewidth=1.2,
-            linestyle="--",
-            alpha=0.9,
-            label="rud pos norm",
-        )
-    axs[6].set_xlabel("Time (s)")
-    axs[6].set_ylabel("Cmd")
-    axs[6].set_title("Action Commands")
-    axs[6].legend(loc="best")
-    axs[6].grid(True, alpha=0.25)
-
-    if np.isfinite(rudder_pos_deg).any():
-        ax6b = axs[6].twinx()
-        ax6b.plot(
-            time_s,
-            rudder_pos_deg,
-            color="tab:gray",
-            linewidth=1.0,
-            linestyle=":",
-            alpha=0.7,
-        )
-        ax6b.set_ylabel("Rudder (deg)")
-
-    axs[7].plot(time_s, terrain_cost_est, color="tab:green", linewidth=1.6, label="terrain")
-    axs[7].plot(time_s, rate_cost_est, color="tab:orange", linewidth=1.6, label="rate")
-    axs[7].plot(time_s, limit_cost_est, color="tab:red", linewidth=1.6, label="limit")
-    axs[7].plot(time_s, total_stage_cost_est, color="black", linewidth=1.8, alpha=0.9, label="total")
-    axs[7].set_xlabel("Time (s)")
-    axs[7].set_ylabel("Cost")
-    axs[7].set_title("Stage Cost Terms")
-    axs[7].legend(loc="best")
-    axs[7].grid(True, alpha=0.25)
-
-    fig.suptitle(
-        f"{controller_label.upper()} Tracking Diagnostics | end={termination_reason} | steps={len(rows)}",
-        fontsize=13,
-    )
-    fig.savefig(plot_path, dpi=150)
-    plt.close(fig)
-    return csv_path, plot_path
-
-
-def save_mppi_plan_diagnostics(output_dir, file_stem, rows, action_plans, virtual_speed_plans):
-    if not rows:
-        return None, None
-
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = output_dir / f"{file_stem}_plan_diagnostics.csv"
-    npz_path = output_dir / f"{file_stem}_plan_diagnostics.npz"
-
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-
-    action_plan_arr = np.asarray(action_plans, dtype=np.float32)
-    virtual_speed_plan_arr = np.asarray(virtual_speed_plans, dtype=np.float32)
-    nominal_action_arr = np.asarray(
-        [
-            [
-                float(row["nominal_aileron_cmd"]),
-                float(row["nominal_elevator_cmd"]),
-                float(row["nominal_rudder_cmd"]),
-                float(row["nominal_throttle_cmd"]),
-            ]
-            for row in rows
-        ],
-        dtype=np.float32,
-    )
-    applied_action_arr = np.asarray(
-        [
-            [
-                float(row["applied_aileron_cmd"]),
-                float(row["applied_elevator_cmd"]),
-                float(row["applied_rudder_cmd"]),
-                float(row["applied_throttle_cmd"]),
-            ]
-            for row in rows
-        ],
-        dtype=np.float32,
-    )
-    np.savez_compressed(
-        npz_path,
-        action_plan=action_plan_arr,
-        virtual_speed_plan=virtual_speed_plan_arr,
-        call_index=np.asarray([int(row["call_index"]) for row in rows], dtype=np.int32),
-        step=np.asarray([int(row["step"]) for row in rows], dtype=np.int32),
-        time_s=np.asarray([float(row["time_s"]) for row in rows], dtype=np.float32),
-        progress_s_ft=np.asarray([float(row["progress_s_ft"]) for row in rows], dtype=np.float32),
-        controller_step_index=np.asarray([int(row["controller_step_index"]) for row in rows], dtype=np.int32),
-        using_backup=np.asarray([bool(row["using_backup"]) for row in rows], dtype=np.bool_),
-        nominal_action=nominal_action_arr,
-        applied_action=applied_action_arr,
-    )
-    return csv_path, npz_path
-
-
-def _append_state_fields(row_dict, *, prefix, state_dict):
-    for key in MPPI_STATE_KEYS:
-        row_dict[f"{prefix}_{key}"] = float(state_dict.get(key, np.nan))
 
 
 def to_mppi_state(env, state, altitude_ref_ft):
@@ -556,26 +216,29 @@ def get_active_canyon_reference(env, pad_back_ft=500.0, pad_front_ft=1500.0):
     )
 
 
+_GATEKEEPER_FLAT_BUF = np.zeros(14, dtype=np.float32)
+
 def controller_state_to_gatekeeper_flat(state_dict):
-    return jnp.asarray(
-        [
-            float(state_dict["p_N"]),
-            float(state_dict["p_E"]),
-            float(state_dict["h"]),
-            float(state_dict["u"]),
-            float(state_dict["v"]),
-            float(state_dict["w"]),
-            float(state_dict["p"]),
-            float(state_dict["q"]),
-            float(state_dict["r"]),
-            float(state_dict["phi"]),
-            float(state_dict["theta"]),
-            float(state_dict["psi"]),
-            float(state_dict.get("ny", 0.0)),
-            float(state_dict.get("nz", 1.0)),
-        ],
-        dtype=jnp.float32,
-    )
+    """Convert a controller state dict to a flat JAX float32 vector [14].
+
+    Uses a module-level numpy buffer to avoid per-call Python list allocation.
+    """
+    buf = _GATEKEEPER_FLAT_BUF
+    buf[0]  = state_dict["p_N"]
+    buf[1]  = state_dict["p_E"]
+    buf[2]  = state_dict["h"]
+    buf[3]  = state_dict["u"]
+    buf[4]  = state_dict["v"]
+    buf[5]  = state_dict["w"]
+    buf[6]  = state_dict["p"]
+    buf[7]  = state_dict["q"]
+    buf[8]  = state_dict["r"]
+    buf[9]  = state_dict["phi"]
+    buf[10] = state_dict["theta"]
+    buf[11] = state_dict["psi"]
+    buf[12] = state_dict.get("ny", 0.0)
+    buf[13] = state_dict.get("nz", 1.0)
+    return jnp.asarray(buf, dtype=jnp.float32)
 
 
 def _pad_action_plan(action_plan, horizon):
@@ -593,11 +256,32 @@ def _pad_action_plan(action_plan, horizon):
     return np.concatenate([plan, pad], axis=0).astype(np.float32, copy=False)
 
 
+def _build_gatekeeper_nominal_trajectory(controller, nominal_action, horizon):
+    """
+    Build a [T, 4] nominal action sequence for gatekeeper rollout.
+
+    MPPI-style controllers provide `base_plan`; controllers without an open-loop
+    plan (e.g. PID trajectory tracking) fall back to repeating the current
+    nominal action.
+    """
+    horizon = int(max(horizon, 1))
+
+    base_plan = getattr(controller, "base_plan", None)
+    if base_plan is not None:
+        return _pad_action_plan(base_plan, horizon)
+
+    action = np.asarray(nominal_action, dtype=np.float32).reshape(-1)
+    if action.size != 4:
+        raise ValueError(f"Expected nominal action shape (4,), got {action.shape}.")
+    return np.repeat(action[np.newaxis, :], horizon, axis=0).astype(np.float32, copy=False)
+
+
 def build_jsbsim_gatekeeper(
     env,
     initial_controller_state,
     nominal_horizon,
     debug_timing=False,
+    nominal_policy_fn_override=None,
 ):
     canyon = env.unwrapped.canyon
 
@@ -632,10 +316,10 @@ def build_jsbsim_gatekeeper(
     altitude_ref_ft = float(getattr(env.unwrapped, "dem_start_elev_ft", 0.0))
     terrain_floor_rel_ft = terrain_floor_msl_ft - altitude_ref_ft
     canyon_top_rel_ft = terrain_floor_rel_ft + wall_height_samples_ft
-    backup_peek_ft =00.0
-    pcis_centerline_tol_ft = 500.0
-    pcis_altitude_tol_ft = 500.0
-    backup_target_speed_fps = 350.0 * KTS_TO_FPS
+    backup_peek_ft =1000.0
+    pcis_centerline_tol_ft = 1000.0
+    pcis_altitude_tol_ft = 1000.0
+    backup_target_speed_fps = 200.0 * KTS_TO_FPS
     pcis_speed_limit_fps = 400.0 * KTS_TO_FPS
     backup_target_altitude_ft = float(np.nanmax(canyon_top_rel_ft) + backup_peek_ft)
 
@@ -690,8 +374,11 @@ def build_jsbsim_gatekeeper(
     def _speed_fps(state_flat):
         return jnp.sqrt(jnp.maximum(jnp.sum(jnp.square(state_flat[3:6])), 1.0))
 
-    def nominal_policy_fn(_state_flat):
-        return latest_nominal["action"]
+    if nominal_policy_fn_override is None:
+        def nominal_policy_fn(_state_flat):
+            return latest_nominal["action"]
+    else:
+        nominal_policy_fn = nominal_policy_fn_override
 
     backup_policy_fn = build_simple_trajectory_policy_jax(
         config=backup_config,
@@ -766,9 +453,9 @@ def build_jsbsim_gatekeeper(
         return jnp.asarray([feature_map[name] for name in active_empirical_features], dtype=jnp.float32)
 
     params = GatekeeperParams(
-        M=20,
-        T=100,
-        N=250,
+        M=10,
+        T=50,
+        N=100,
         delta=0.1,
         epsilon=0.10,
         beta=0.00,
@@ -880,7 +567,10 @@ def parse_args():
     parser.add_argument(
         "--gatekeeper",
         action="store_true",
-        help="Wrap the nominal MPPI controller with the DRS gatekeeper and a conservative simple-controller backup.",
+        help=(
+            "Wrap the nominal controller with the DRS gatekeeper and a conservative "
+            "simple-controller backup (supported: mppi, smooth_mppi, pid_traj)."
+        ),
     )
     parser.add_argument(
         "--gatekeeper-debug-timing",
@@ -892,7 +582,7 @@ def parse_args():
         "--nominal-dyn-path",
         type=Path,
         default=None,
-        help="Optional Aerosandbox dyn.asb path to use as the MPPI nominal reference trajectory.",
+        help="Optional Aerosandbox dyn.asb path to use as the nominal reference trajectory.",
     )
     parser.add_argument(
         "--nominal-start-fraction",
@@ -904,8 +594,8 @@ def parse_args():
 
 def main():
     args = parse_args()
-    if args.gatekeeper and args.controller not in {"mppi", "smooth_mppi"}:
-        raise ValueError("--gatekeeper currently requires --controller mppi or --controller smooth_mppi.")
+    if args.gatekeeper and args.controller not in {"mppi", "smooth_mppi", "pid_traj"}:
+        raise ValueError("--gatekeeper currently requires --controller mppi, --controller smooth_mppi, or --controller pid_traj.")
     nominal_start_fraction = float(args.nominal_start_fraction)
     if args.nominal_dyn_path is None and nominal_start_fraction > 0.0:
         raise ValueError("--nominal-start-fraction requires --nominal-dyn-path.")
@@ -1065,6 +755,12 @@ def main():
             config=simple_config,
         )
         controller.reset(initial_controller_state)
+        _simple_target_alt_rel = float(getattr(controller._core, "target_altitude_ft", float("nan")))
+        _simple_target_alt_msl = _simple_target_alt_rel + altitude_ref_ft
+        print(
+            f"Simple controller target altitude: {_simple_target_alt_rel:.1f} ft (rel DEM origin) "
+            f"/ {_simple_target_alt_msl:.1f} ft MSL"
+        )
     elif controller_tag == "pid_traj":
         if nominal_reference is None:
             raise ValueError("pid_traj requires --nominal-dyn-path.")
@@ -1154,7 +850,11 @@ def main():
             latest_nominal = gatekeeper_bundle["latest_nominal"]
             nominal_action = controller.get_action(initial_controller_state)
             latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
-            warmup_nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
+            warmup_nominal_trajectory = _build_gatekeeper_nominal_trajectory(
+                controller=controller,
+                nominal_action=nominal_action,
+                horizon=gatekeeper.params.T,
+            )
             _ = gatekeeper.update(
                 controller_state_to_gatekeeper_flat(initial_controller_state),
                 track_bounds=None,
@@ -1165,6 +865,41 @@ def main():
             gatekeeper_prev_using_backup = False
             controller.reset(seed=3)
             _set_mppi_nominal_start_progress(controller, nominal_start_fraction)
+            print("Gatekeeper JIT compilation finished.", flush=True)
+    elif controller_tag == "pid_traj":
+        if args.gatekeeper:
+            if not UNCERTAINTY_ARTIFACT_PATH.exists():
+                raise FileNotFoundError(f"Missing uncertainty artifact: {UNCERTAINTY_ARTIFACT_PATH}")
+            pid_nominal_policy_fn = build_pid_trajectory_policy_jax(
+                reference_trajectory=nominal_reference,
+                config=getattr(controller, "config", None),
+            )
+            gatekeeper_bundle = build_jsbsim_gatekeeper(
+                env=env,
+                initial_controller_state=initial_controller_state,
+                nominal_horizon=100,
+                debug_timing=bool(args.gatekeeper_debug_timing),
+                nominal_policy_fn_override=pid_nominal_policy_fn,
+            )
+            print(
+                f"Initialized gatekeeper with backup simple controller at {gatekeeper_bundle['backup_target_speed_fps'] / KTS_TO_FPS:.0f} kts and "
+                f"target altitude {gatekeeper_bundle['backup_target_altitude_ft']:.0f} ft above DEM origin."
+            )
+            print("Compiling PID policy JAX JIT... (this takes a moment)", flush=True)
+            # Warm up the JIT-compiled nominal policy in isolation first.
+            _warmup_state = controller_state_to_gatekeeper_flat(initial_controller_state)
+            _ = pid_nominal_policy_fn(_warmup_state)
+            _.block_until_ready()
+            print("Compiling Gatekeeper JAX JIT... (this takes a moment)", flush=True)
+            gatekeeper = gatekeeper_bundle["gatekeeper"]
+            _ = gatekeeper.update(
+                controller_state_to_gatekeeper_flat(initial_controller_state),
+                track_bounds=None,
+                nominal_trajectory=None,
+                max_steps=int(args.max_steps),
+            )
+            gatekeeper.reset(controller_state_to_gatekeeper_flat(initial_controller_state), t=0)
+            gatekeeper_prev_using_backup = False
             print("Gatekeeper JIT compilation finished.", flush=True)
 
     print("\nStarting Canyon Flight...")
@@ -1212,11 +947,19 @@ def main():
             if gatekeeper_bundle is not None:
                 gatekeeper = gatekeeper_bundle["gatekeeper"]
                 latest_nominal = gatekeeper_bundle["latest_nominal"]
-                latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
+                if controller_tag in {"mppi", "smooth_mppi"}:
+                    latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
 
                 t_ws = time.time()
-                nominal_trajectory = _pad_action_plan(getattr(controller, "base_plan", None), gatekeeper.params.T)
-                nominal_trajectory_jax = jnp.asarray(nominal_trajectory, dtype=jnp.float32)
+                if controller_tag in {"mppi", "smooth_mppi"}:
+                    nominal_trajectory = _build_gatekeeper_nominal_trajectory(
+                        controller=controller,
+                        nominal_action=nominal_action,
+                        horizon=gatekeeper.params.T,
+                    )
+                    nominal_trajectory_jax = jnp.asarray(nominal_trajectory, dtype=jnp.float32)
+                else:
+                    nominal_trajectory_jax = None
                 gk_nom_prep = (time.time() - t_ws) * 1000.0
 
                 track_bounds = None
