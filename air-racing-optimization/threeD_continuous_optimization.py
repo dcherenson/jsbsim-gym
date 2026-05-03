@@ -22,6 +22,13 @@ print("2D warm start ready.", flush=True)
 
 N = solution_quantities["N"]
 
+# F-16 parameters (aligned with this repo's JSBSim model):
+# - wing area: aircraft/f16/f16.xml -> 300 ft^2
+# - max afterburner thrust: aircraft/f16/Engines/F100-PW-229.xml -> 29000 lbf
+F16_WING_AREA = 300 * u.foot ** 2
+F16_MAX_THRUST_SL = 29000 * u.lbf
+F16_MAX_ROLL_RATE_DPS = 100.0
+
 initial_state = asb.DynamicsPointMass3DSpeedGammaTrack(
     mass_props=asb.MassProperties(mass=0),  # Placeholder
     x_e=course_info["north_start"],
@@ -133,8 +140,8 @@ opti.subject_to([
     np.diff(np.degrees(dyn.bank)) / 90 > -1,
     np.diff(np.degrees(dyn.track)) / 60 < 1,
     np.diff(np.degrees(dyn.track)) / 60 > -1,
-    roll_rate / 180 < 1,
-    roll_rate / 180 > -1,
+    roll_rate / F16_MAX_ROLL_RATE_DPS < 1,
+    roll_rate / F16_MAX_ROLL_RATE_DPS > -1,
 ])
 
 ### Add in forces
@@ -147,11 +154,10 @@ dyn.add_gravity_force(g=9.81)
 #     include_wave_drag=False,
 # ).run()
 
-wing_area = 38
 CL = (2 * np.pi * np.radians(dyn.alpha))  # Very crude model
-lift = dyn.op_point.dynamic_pressure() * wing_area * CL
+lift = dyn.op_point.dynamic_pressure() * F16_WING_AREA * CL
 accel_G = lift / dyn.mass_props.mass / 9.81
-max_thrust = (79e3 * 2) * dyn.op_point.atmosphere.density() / 1.225
+max_thrust = F16_MAX_THRUST_SL * dyn.op_point.atmosphere.density() / 1.225
 drag = max_thrust * (dyn.speed / (1.0 * 343)) ** 2  # Very crude model, such that sea-level equilibrium at M1.0
 drag *= 1 + 1 * (
     (CL - 0.05)
@@ -159,7 +165,7 @@ drag *= 1 + 1 * (
 # Add extra drag from roll rate inputs
 roll_rate_drag_multiplier = 4 * 0.2 * (  # You go 20% slower at max roll rate
         np.gradient(np.degrees(dyn.bank), time)  # degrees / sec
-        / 180  # Max roll rate is 360 deg/sec
+        / F16_MAX_ROLL_RATE_DPS
 ) ** 2
 drag *= 1 + roll_rate_drag_multiplier
 
@@ -229,7 +235,7 @@ opti.subject_to([
 ### Add G-force constraints
 # accel_G = -aero["F_w"][2] / dyn.mass_props.mass / 9.81
 opti.subject_to([
-    accel_G < 9,
+    accel_G < 7,
     accel_G > -0.5
 ])
 
@@ -270,6 +276,7 @@ sol = opti.solve(
     options={
         "print_time": True,
         "ipopt.print_level": 5,
+        "ipopt.hessian_approximation": "limited-memory",
         # "ipopt.mu_strategy": "monotone"
     }
 )

@@ -11,14 +11,18 @@ class PIDTrajectoryController:
             
         guidance_gains = config.get('guidance', {
             'kp_xtrk': 0.05, 'kd_xtrk': 0.01,
-            'kp_z': 0.01, 'kd_z': 0.005
+            'kp_z': 0.01, 'kd_z': 0.005,
+            'bank_alpha_gain': 0.35,
+            'bank_error_deadband_rad': np.deg2rad(2.0),
+            'bank_correction_turn_threshold_rad': np.deg2rad(10.0),
+            'bank_alpha_boost_max_rad': np.deg2rad(8.0),
         })
         
         autopilot_gains = config.get('autopilot', {
             'alpha_p': 3.0, 'alpha_i': 1.0, 
-            'q_p': 0.4, 'q_d': 0.1,
+            'q_p': 3.0, 'q_d': 0.0,
             'phi_p': 2.5,
-            'p_p': 0.15, 'p_d': 0.05,
+            'p_p': 0.5, 'p_d': 0.0,
             'beta_p': 3.0, 'beta_i': 1.5,
             'washout_tau': 1.0, 'r_highpass_gain': 0.5,
             'v_p': 0.01, 'v_i': 0.002
@@ -77,7 +81,12 @@ class PIDTrajectoryController:
         
         phi = self.env.unwrapped.simulation.get_property_value("attitude/phi-rad")
         
-        phi_cmd, alpha_cmd, v_opt = self.guidance.update(current_enu_ft, (0,0,0), dt)
+        phi_cmd, alpha_cmd, v_opt = self.guidance.update(
+            current_enu_ft,
+            (0, 0, 0),
+            dt,
+            current_phi=phi,
+        )
         
         cmds = (phi_cmd, alpha_cmd, v_opt)
         states = (alpha, beta, phi, p, q, r, V)
@@ -88,12 +97,8 @@ class PIDTrajectoryController:
         self.last_diagnostics.update(self.guidance.last_diagnostics)
         self.last_diagnostics.update(self.autopilot.last_diagnostics)
         
-        # JSBSim Gym Action order is typically: roll, pitch, yaw, throttle
-        # So aileron, elevator, rudder, throttle
-        # Ensure sign conventions apply
         # JSBSim fcs/elevator-cmd-norm > 0 is trailing edge down (pitch down).
-        # We negate the elevator command so that a positive pitch_cmd naturally yields a pitch up moment.
-        return np.array([aileron, elevator, rudder, throttle], dtype=np.float32)
+        return np.array([aileron, elevator, 0*rudder, throttle], dtype=np.float32)
 
 class DiscretePID:
     """Discrete-time PID controller with anti-windup."""
@@ -154,38 +159,28 @@ class WashoutFilter:
         return filtered
 
 class SpatialGuidance:
-    """Translates 3D positional errors into aerodynamic corrections."""
+    """Translates 3D positional errors into aerodynamic corrections using lookahead and nz-scaling."""
     def __init__(self, gains, nominal_trajectory_data):
-        """
-        nominal_trajectory_data is a dict containing arrays for:
-        - lat, lon, h (or ENU pre-converted)
-        - alpha_opt, phi_opt, v_opt
-        - heading or course angle
-        """
         self.kp_xtrk = gains.get('kp_xtrk', 0.05)
         self.kd_xtrk = gains.get('kd_xtrk', 0.01)
         self.kp_z = gains.get('kp_z', 0.01)
         self.kd_z = gains.get('kd_z', 0.005)
         
+        # New lookahead parameter (distance in feet to anticipate turns)
+        self.lookahead_dist = gains.get('lookahead_dist_ft', 1000.0)
+        
         self.trajectory_data = nominal_trajectory_data
         
-        # Extract path
         self.path_enu = nominal_trajectory_data['enu'] # (N, 3) East, North, Up
         self.path_heading = nominal_trajectory_data['heading_rad'] # (N,)
         self.alpha_opt = nominal_trajectory_data['alpha_opt'] # (N,)
         self.phi_opt = nominal_trajectory_data['phi_opt'] # (N,)
         self.v_opt = nominal_trajectory_data['v_opt'] # (N,)
         
-        # State for derivative terms
         self.prev_e_xtrk = 0.0
         self.prev_e_z = 0.0
 
     def lla_to_enu(self, lat, lon, alt, ref_lat, ref_lon, ref_alt):
-        """
-        Convert LLA to local ENU Cartesian frame.
-        Approximation for small areas.
-        """
-        # WGS84 Constants
         a = 6378137.0
         f = 1 / 298.257223563
         e2 = 2*f - f**2
@@ -204,34 +199,38 @@ class SpatialGuidance:
         return np.array([east, north, up])
 
     def find_closest_point(self, current_enu):
-        """Find index of the closest point on the path."""
         distances = np.linalg.norm(self.path_enu - current_enu, axis=1)
         return np.argmin(distances)
+        
+    def get_lookahead_index(self, closest_idx):
+        """Finds the index of the point lookahead_dist ahead on the path."""
+        accumulated_dist = 0.0
+        curr_idx = closest_idx
+        max_idx = len(self.path_enu) - 1
+        
+        while accumulated_dist < self.lookahead_dist and curr_idx < max_idx:
+            step_dist = np.linalg.norm(self.path_enu[curr_idx + 1] - self.path_enu[curr_idx])
+            accumulated_dist += step_dist
+            curr_idx += 1
+            
+        return curr_idx
 
-    def update(self, current_lla, ref_lla, dt):
-        """
-        Compute guidance commands.
-        current_lla: (lat, lon, alt)
-        ref_lla: (ref_lat, ref_lon, ref_alt) - Canyon entrance
-        """
+    def update(self, current_lla, ref_lla, dt, current_phi=None):
         current_enu = self.lla_to_enu(*current_lla, *ref_lla)
         
         idx = self.find_closest_point(current_enu)
+        target_idx = self.get_lookahead_index(idx)
+        
         closest_p = self.path_enu[idx]
         trk_hdg = self.path_heading[idx]
         
-        # Calculate cross-track error
+        # Calculate errors relative to the closest point
         d_east = current_enu[0] - closest_p[0]
         d_north = current_enu[1] - closest_p[1]
         
-        # Cross track error in horizontal plane
-        # Rotate difference into path frame
         e_xtrk = d_north * (-np.sin(trk_hdg)) + d_east * (np.cos(trk_hdg))
+        e_z = closest_p[2] - current_enu[2] 
         
-        # Altitude error
-        e_z = closest_p[2] - current_enu[2] # Positive if we are below path
-        
-        # Rates of error
         if dt > 0:
             e_xtrk_dot = (e_xtrk - self.prev_e_xtrk) / dt
             e_z_dot = (e_z - self.prev_e_z) / dt
@@ -242,13 +241,26 @@ class SpatialGuidance:
         self.prev_e_xtrk = e_xtrk
         self.prev_e_z = e_z
         
-        # Guidance laws
+        # Roll guidance: error correction + lookahead feedforward
         delta_phi = self.kp_xtrk * e_xtrk + self.kd_xtrk * e_xtrk_dot
-        delta_alpha = self.kp_z * e_z + self.kd_z * e_z_dot
-        
-        # Command generation
         phi_cmd = self.phi_opt[idx] #+ delta_phi
-        alpha_cmd = self.alpha_opt[idx] #+ delta_alpha
+        
+        # Pitch guidance: Load factor (nz) based altitude correction
+        delta_nz = self.kp_z * e_z + self.kd_z * e_z_dot
+        
+        if current_phi is None:
+            current_phi = 0.0
+            
+        # Limit phi in the denominator to ~80 degrees to prevent singularity
+        phi_for_lift = np.clip(current_phi, -1.4, 1.4)
+        
+        # Calculate commanded normal load factor: nz = (1g + correction) / cos(phi)
+        nz_cmd = (1.0 + delta_nz) / np.cos(phi_for_lift)
+        nz_cmd = 1.0
+        
+        # Scale the nominal 1g lookahead alpha by the commanded load factor
+        alpha_cmd = self.alpha_opt[idx] * nz_cmd
+        
         v_opt_val = self.v_opt[idx]
         
         self.last_diagnostics = {
@@ -256,15 +268,17 @@ class SpatialGuidance:
             'e_z': float(e_z),
             'e_xtrk_dot': float(e_xtrk_dot),
             'e_z_dot': float(e_z_dot),
+            'closest_idx': int(idx),
+            'target_idx': int(target_idx),
             'delta_phi': float(delta_phi),
-            'delta_alpha': float(delta_alpha),
+            'delta_nz': float(delta_nz),
+            'nz_cmd': float(nz_cmd),
             'phi_cmd': float(phi_cmd),
             'alpha_cmd': float(alpha_cmd),
             'v_opt_val': float(v_opt_val)
         }
         
         return phi_cmd, alpha_cmd, v_opt_val
-
 class F16Autopilot:
     """Translates guidance commands into actuator deflections."""
     def __init__(self, gains):
@@ -364,7 +378,12 @@ class CascadedControllerWrapper:
         current_lla = (lat, lon, alt)
         
         # 2. Call SpatialGuidance
-        phi_cmd, alpha_cmd, v_opt = self.guidance.update(current_lla, self.ref_lla, dt)
+        phi_cmd, alpha_cmd, v_opt = self.guidance.update(
+            current_lla,
+            self.ref_lla,
+            dt,
+            current_phi=phi,
+        )
         
         # 3. Pass to Autopilot
         cmds = (phi_cmd, alpha_cmd, v_opt)

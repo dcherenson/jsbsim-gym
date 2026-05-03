@@ -139,7 +139,7 @@ def solve_2d_continuous_optimization():
         ) / ds > np.cosd(75)  # Max deviation from goal direction
     ])
 
-    allowed_G = 9
+    allowed_G = 7
     allowable_discrete_track_change = (
         (allowed_G * 9.81) / assumed_airspeed * dt
     )
