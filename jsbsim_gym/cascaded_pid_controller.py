@@ -1,32 +1,48 @@
 import numpy as np
+import jax
+import jax.numpy as jnp
+
+
+DEFAULT_PID_TRAJ_GUIDANCE_GAINS = {
+    'kp_xtrk': -0.01,
+    'kd_xtrk': -0.01,
+    'kp_z': 0.02,
+    'kd_z': 0.01,
+    'k_accel_to_alpha_scale': 0.2,
+    'lookahead_dist_ft': 300.0,
+}
+
+DEFAULT_PID_TRAJ_AUTOPILOT_GAINS = {
+    'alpha_p': 3.0,
+    'alpha_i': 1.0,
+    'q_p': 3.0,
+    'q_d': 0.0,
+    'phi_p': 5.0,
+    'p_p': 2.0,
+    'p_d': 0.,
+    'beta_p': 3.0,
+    'beta_i': 1.5,
+    'washout_tau': 1.0,
+    'r_highpass_gain': 0.5,
+    'v_p': 0.1,
+    'v_i': 0.02,
+}
+
+
+def _resolve_pid_traj_gains(config=None):
+    config = {} if config is None else dict(config)
+    guidance_gains = dict(DEFAULT_PID_TRAJ_GUIDANCE_GAINS)
+    guidance_gains.update(dict(config.get('guidance', {})))
+    autopilot_gains = dict(DEFAULT_PID_TRAJ_AUTOPILOT_GAINS)
+    autopilot_gains.update(dict(config.get('autopilot', {})))
+    return guidance_gains, autopilot_gains
 
 class PIDTrajectoryController:
     """Wrapper that implements the get_action() interface used by run_scenario.py"""
     def __init__(self, env, reference_trajectory, config=None):
         self.env = env
-        
-        # Build gains (can be overridden by config)
-        if config is None:
-            config = {}
-            
-        guidance_gains = config.get('guidance', {
-            'kp_xtrk': 0.05, 'kd_xtrk': 0.01,
-            'kp_z': 0.01, 'kd_z': 0.005,
-            'bank_alpha_gain': 0.35,
-            'bank_error_deadband_rad': np.deg2rad(2.0),
-            'bank_correction_turn_threshold_rad': np.deg2rad(10.0),
-            'bank_alpha_boost_max_rad': np.deg2rad(8.0),
-        })
-        
-        autopilot_gains = config.get('autopilot', {
-            'alpha_p': 3.0, 'alpha_i': 1.0, 
-            'q_p': 3.0, 'q_d': 0.0,
-            'phi_p': 2.5,
-            'p_p': 0.5, 'p_d': 0.0,
-            'beta_p': 3.0, 'beta_i': 1.5,
-            'washout_tau': 1.0, 'r_highpass_gain': 0.5,
-            'v_p': 0.01, 'v_i': 0.002
-        })
+        self.config = {} if config is None else dict(config)
+        guidance_gains, autopilot_gains = _resolve_pid_traj_gains(self.config)
         
         # Convert the nominal reference dict into the format SpatialGuidance expects
         north_ft = reference_trajectory['north_ft']
@@ -100,14 +116,169 @@ class PIDTrajectoryController:
         # JSBSim fcs/elevator-cmd-norm > 0 is trailing edge down (pitch down).
         return np.array([aileron, elevator, 0*rudder, throttle], dtype=np.float32)
 
+    def get_render_debug(self):
+        debug = getattr(self.guidance, 'last_render_debug', None)
+        if not debug:
+            return {}
+        
+        airplane_enu = debug['airplane_enu']
+        e_xtrk = debug['e_xtrk']
+        trk_hdg = debug['trk_hdg']
+        e_z = debug['e_z']
+        
+        # e_xtrk = d_north * (-sin(trk_hdg)) + d_east * cos(trk_hdg)
+        # So cross_track_vec in ENU is [cos(trk_hdg), -sin(trk_hdg)]
+        cross_track_vec = np.array([np.cos(trk_hdg), -np.sin(trk_hdg)], dtype=np.float32)
+        abeam_enu_xy = airplane_enu[0:2] - e_xtrk * cross_track_vec
+        
+        # Points: 0=Airplane, 1=Abeam horizontal, 2=Abeam vertical
+        xy = np.array([
+            [airplane_enu[1], airplane_enu[0]],  # North, East
+            [abeam_enu_xy[1], abeam_enu_xy[0]],
+            [abeam_enu_xy[1], abeam_enu_xy[0]]
+        ], dtype=np.float32)
+        
+        h_ft = np.array([
+            airplane_enu[2],
+            airplane_enu[2],
+            airplane_enu[2] + e_z
+        ], dtype=np.float32)
+        
+        return {
+            'pid_error_xy': xy,
+            'pid_error_h_ft': h_ft
+        }
+
+
+def build_pid_trajectory_policy_jax(reference_trajectory, config=None):
+    """
+    Build a JAX nominal policy for gatekeeper rollouts that applies state feedback
+    on each simulated rollout state.
+
+    Gatekeeper rollout state convention:
+    [p_N, p_E, h, u, v, w, p, q, r, phi, theta, psi, ny, nz]
+    """
+    guidance_gains, autopilot_gains = _resolve_pid_traj_gains(config)
+
+    north_ft = np.asarray(reference_trajectory['north_ft'], dtype=np.float32).reshape(-1)
+    east_ft = np.asarray(reference_trajectory['east_ft'], dtype=np.float32).reshape(-1)
+    alt_ft = np.asarray(reference_trajectory['altitude_ft'], dtype=np.float32).reshape(-1)
+    heading_rad = np.asarray(reference_trajectory['heading_rad'], dtype=np.float32).reshape(-1)
+    phi_opt = np.asarray(reference_trajectory['phi_rad'], dtype=np.float32).reshape(-1)
+    alpha_opt = np.asarray(reference_trajectory['alpha_rad'], dtype=np.float32).reshape(-1)
+    v_opt = np.asarray(reference_trajectory['speed_fps'], dtype=np.float32).reshape(-1)
+
+    sample_count = int(north_ft.size)
+    if sample_count < 2:
+        raise ValueError("PID trajectory nominal policy requires at least two trajectory samples.")
+    if not (
+        east_ft.size == sample_count
+        and alt_ft.size == sample_count
+        and heading_rad.size == sample_count
+        and phi_opt.size == sample_count
+        and alpha_opt.size == sample_count
+        and v_opt.size == sample_count
+    ):
+        raise ValueError("PID trajectory nominal arrays must all have matching sample counts.")
+
+    path_enu = np.column_stack((east_ft, north_ft, alt_ft)).astype(np.float32)
+    segment_lengths = np.linalg.norm(np.diff(path_enu, axis=0), axis=1)
+    segment_lengths = np.where(np.isfinite(segment_lengths), np.maximum(segment_lengths, 0.0), 0.0)
+    path_s = np.concatenate([[0.0], np.cumsum(segment_lengths, dtype=np.float64)]).astype(np.float32)
+
+    path_enu_jax = jnp.asarray(path_enu, dtype=jnp.float32)
+    path_heading_jax = jnp.asarray(heading_rad, dtype=jnp.float32)
+    phi_opt_jax = jnp.asarray(phi_opt, dtype=jnp.float32)
+    alpha_opt_jax = jnp.asarray(alpha_opt, dtype=jnp.float32)
+    v_opt_jax = jnp.asarray(v_opt, dtype=jnp.float32)
+    path_s_jax = jnp.asarray(path_s, dtype=jnp.float32)
+
+    lookahead_dist_ft = float(guidance_gains.get('lookahead_dist_ft', 500.0))
+    kp_xtrk = float(guidance_gains.get('kp_xtrk', 0.0))
+    kp_z = float(guidance_gains.get('kp_z', 0.0))
+    bank_alpha_gain = float(guidance_gains.get('bank_alpha_gain', 0.0))
+    bank_deadband = float(guidance_gains.get('bank_error_deadband_rad', 0.0))
+    bank_turn_threshold = float(guidance_gains.get('bank_correction_turn_threshold_rad', 0.0))
+    bank_alpha_boost_max = float(guidance_gains.get('bank_alpha_boost_max_rad', 0.0))
+
+    alpha_p = float(autopilot_gains.get('alpha_p', 0.0))
+    q_p = float(autopilot_gains.get('q_p', 0.0))
+    phi_p = float(autopilot_gains.get('phi_p', 0.0))
+    p_p = float(autopilot_gains.get('p_p', 0.0))
+    v_p = float(autopilot_gains.get('v_p', 0.0))
+
+    max_idx = sample_count - 1
+
+    def _wrap_angle(angle_rad):
+        return jnp.arctan2(jnp.sin(angle_rad), jnp.cos(angle_rad))
+
+    def policy_fn(state_flat):
+        p_n = state_flat[0]
+        p_e = state_flat[1]
+        h = state_flat[2]
+        u = state_flat[3]
+        v = state_flat[4]
+        w = state_flat[5]
+        p_rate = state_flat[6]
+        q_rate = state_flat[7]
+        phi = state_flat[9]
+
+        speed = jnp.sqrt(jnp.maximum(u * u + v * v + w * w, 1.0))
+        alpha = jnp.arctan2(w, jnp.maximum(u, 1.0))
+        beta = jnp.arcsin(jnp.clip(v / speed, -1.0, 1.0))
+
+        current_enu = jnp.stack([p_e, p_n, h]).astype(jnp.float32)
+        diff = path_enu_jax - current_enu[None, :]
+        idx = jnp.argmin(jnp.sum(jnp.square(diff), axis=1))
+
+        target_s = path_s_jax[idx] + lookahead_dist_ft
+        target_idx = jnp.searchsorted(path_s_jax, target_s, side='left')
+        target_idx = jnp.clip(target_idx, idx, max_idx)
+
+        closest_p = path_enu_jax[idx]
+        trk_hdg = path_heading_jax[target_idx]
+        d_east = current_enu[0] - closest_p[0]
+        d_north = current_enu[1] - closest_p[1]
+        e_xtrk = d_north * (-jnp.sin(trk_hdg)) + d_east * jnp.cos(trk_hdg)
+        e_z = closest_p[2] - current_enu[2]
+
+        phi_cmd = phi_opt_jax[target_idx] + kp_xtrk * e_xtrk
+        alpha_cmd = alpha_opt_jax[target_idx] * (1.0 + kp_z * e_z)
+
+        abs_bank_error = jnp.abs(phi_cmd) - jnp.abs(phi)
+        need_turn_boost = jnp.logical_and(
+            jnp.abs(phi_cmd) > bank_turn_threshold,
+            abs_bank_error > bank_deadband,
+        )
+        alpha_boost = bank_alpha_gain * abs_bank_error
+        alpha_boost = jnp.clip(alpha_boost, 0.0, bank_alpha_boost_max)
+        alpha_cmd = alpha_cmd + jnp.where(need_turn_boost, alpha_boost, 0.0)
+
+        v_cmd = v_opt_jax[target_idx]
+
+        q_cmd = jnp.clip(alpha_p * (alpha_cmd - alpha), -10.0, 10.0)
+        elevator = -jnp.clip(q_p * (q_cmd - q_rate), -1.0, 1.0)
+
+        phi_error = _wrap_angle(phi_cmd - phi)
+        p_cmd = jnp.clip(phi_p * phi_error, -10.0, 10.0)
+        aileron = jnp.clip(p_p * (p_cmd - p_rate), -1.0, 1.0)
+
+        throttle = jnp.clip(v_p * (v_cmd - speed), 0.0, 1.0)
+
+        return jnp.stack([aileron, elevator, jnp.zeros_like(aileron), throttle]).astype(jnp.float32)
+
+    policy_fn_jit = jax.jit(policy_fn)
+    return policy_fn_jit
+
 class DiscretePID:
     """Discrete-time PID controller with anti-windup."""
-    def __init__(self, kp, ki, kd, output_min=-1.0, output_max=1.0):
+    def __init__(self, kp, ki, kd, output_min=-1.0, output_max=1.0, wrap_angle=False):
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.output_min = output_min
         self.output_max = output_max
+        self.wrap_angle = wrap_angle
         self.integral = 0.0
         self.prev_error = 0.0
 
@@ -115,7 +286,14 @@ class DiscretePID:
         if dt <= 0:
             return 0.0
 
-        error = setpoint - process_variable
+        # normalize angles if requested
+        if self.wrap_angle:
+            setpoint = np.arctan2(np.sin(setpoint), np.cos(setpoint))
+            process_variable = np.arctan2(np.sin(process_variable), np.cos(process_variable))
+            error = setpoint - process_variable
+            error = np.arctan2(np.sin(error), np.cos(error))
+        else:
+            error = setpoint - process_variable
         
         # Proportional
         p_term = self.kp * error
@@ -165,9 +343,9 @@ class SpatialGuidance:
         self.kd_xtrk = gains.get('kd_xtrk', 0.01)
         self.kp_z = gains.get('kp_z', 0.01)
         self.kd_z = gains.get('kd_z', 0.005)
-        
+        self.k_accel_to_alpha_scale = gains.get('k_accel_to_alpha_scale', 0.0)
         # New lookahead parameter (distance in feet to anticipate turns)
-        self.lookahead_dist = gains.get('lookahead_dist_ft', 1000.0)
+        self.lookahead_dist = gains.get('lookahead_dist_ft', 500.0)
         
         self.trajectory_data = nominal_trajectory_data
         
@@ -224,12 +402,26 @@ class SpatialGuidance:
         closest_p = self.path_enu[idx]
         trk_hdg = self.path_heading[idx]
         
-        # Calculate errors relative to the closest point
+        # Calculate errors relative to the closest point laterally
         d_east = current_enu[0] - closest_p[0]
         d_north = current_enu[1] - closest_p[1]
         
         e_xtrk = d_north * (-np.sin(trk_hdg)) + d_east * (np.cos(trk_hdg))
-        e_z = closest_p[2] - current_enu[2] 
+        
+        # Asymmetrical vertical lookahead: anticipate pull-ups, but not dives
+        lookahead_alt = self.path_enu[target_idx][2]
+        closest_alt = closest_p[2]
+        target_alt = max(closest_alt, lookahead_alt)
+        
+        e_z = target_alt - current_enu[2] + 100.0
+        
+        self.last_render_debug = {
+            'airplane_enu': current_enu.copy(),
+            'closest_p_enu': closest_p.copy(),
+            'e_xtrk': e_xtrk,
+            'trk_hdg': trk_hdg,
+            'e_z': e_z
+        }
         
         if dt > 0:
             e_xtrk_dot = (e_xtrk - self.prev_e_xtrk) / dt
@@ -242,26 +434,39 @@ class SpatialGuidance:
         self.prev_e_z = e_z
         
         # Roll guidance: error correction + lookahead feedforward
-        delta_phi = self.kp_xtrk * e_xtrk + self.kd_xtrk * e_xtrk_dot
-        phi_cmd = self.phi_opt[idx] #+ delta_phi
+        delta_lateral_accel = np.clip(self.kp_xtrk * e_xtrk + self.kd_xtrk * e_xtrk_dot, -4.0, 4.0)
         
         # Pitch guidance: Load factor (nz) based altitude correction
-        delta_nz = self.kp_z * e_z + self.kd_z * e_z_dot
-        
-        if current_phi is None:
-            current_phi = 0.0
+        delta_vertical_accel = np.clip(self.kp_z * e_z + self.kd_z * e_z_dot, -2.0, 9.0)
+
+        open_loop_vertical_accel = np.cos(self.phi_opt[idx])
+        open_loop_lateral_accel = np.sin(self.phi_opt[target_idx])
+
+        total_lateral_accel = delta_lateral_accel + open_loop_lateral_accel
+        total_vertical_accel = delta_vertical_accel + open_loop_vertical_accel
+
+        accel_direction = np.arctan2(total_lateral_accel, total_vertical_accel)
+        phi_cmd = np.clip(accel_direction, -np.radians(120.0), np.radians(120.0))
+
+        # Calculate the extra lift (Gs) needed by projecting the desired
+        # acceleration vector onto the current lift vector direction.
+        if current_phi is not None:
+            # Lift vector components based on current bank angle
+            lift_y = np.sin(current_phi)
+            lift_z = np.cos(current_phi)
+            M_effective = total_lateral_accel * lift_y + total_vertical_accel * lift_z
+            # Prevent negative load factor demands in this logic (clip to 0 or 1g as needed)
+            M_effective = max(0.0, M_effective)
+        else:
+            M_effective = np.sqrt(total_lateral_accel**2 + total_vertical_accel**2)
             
-        # Limit phi in the denominator to ~80 degrees to prevent singularity
-        phi_for_lift = np.clip(current_phi, -1.4, 1.4)
-        
-        # Calculate commanded normal load factor: nz = (1g + correction) / cos(phi)
-        nz_cmd = (1.0 + delta_nz) / np.cos(phi_for_lift)
-        nz_cmd = 1.0
-        
+        delta_lift_Gs = M_effective - 1.0
+
         # Scale the nominal 1g lookahead alpha by the commanded load factor
-        alpha_cmd = self.alpha_opt[idx] * nz_cmd
+        alpha_cmd = self.alpha_opt[idx] + delta_lift_Gs * self.k_accel_to_alpha_scale
+        alpha_cmd = np.clip(alpha_cmd, -np.radians(5.0), np.radians(20.0))
         
-        v_opt_val = self.v_opt[idx]
+        v_opt_val = self.v_opt[target_idx]
         
         self.last_diagnostics = {
             'e_xtrk': float(e_xtrk),
@@ -270,9 +475,9 @@ class SpatialGuidance:
             'e_z_dot': float(e_z_dot),
             'closest_idx': int(idx),
             'target_idx': int(target_idx),
-            'delta_phi': float(delta_phi),
-            'delta_nz': float(delta_nz),
-            'nz_cmd': float(nz_cmd),
+            # 'delta_phi': float(delta_phi),
+            'phi_ref': float(self.phi_opt[target_idx]),
+            'alpha_ref': float(self.alpha_opt[target_idx]),
             'phi_cmd': float(phi_cmd),
             'alpha_cmd': float(alpha_cmd),
             'v_opt_val': float(v_opt_val)
@@ -283,11 +488,11 @@ class F16Autopilot:
     """Translates guidance commands into actuator deflections."""
     def __init__(self, gains):
         # Pitch Axis (Elevator): outer PI on alpha, inner PD on q
-        self.alpha_pi = DiscretePID(gains['alpha_p'], gains['alpha_i'], 0.0, -10.0, 10.0)
+        self.alpha_pi = DiscretePID(gains['alpha_p'], gains['alpha_i'], 0.0, -2.0, 2.0)
         self.q_pd = DiscretePID(gains['q_p'], 0.0, gains['q_d'], -1.0, 1.0)
         
         # Roll Axis (Aileron): outer P on phi, inner PD on p
-        self.phi_p = DiscretePID(gains['phi_p'], 0.0, 0.0, -10.0, 10.0)
+        self.phi_p = DiscretePID(gains['phi_p'], 0.0, 0.0, -10.0, 10.0, wrap_angle=True)
         self.p_pd = DiscretePID(gains['p_p'], 0.0, gains['p_d'], -1.0, 1.0)
         
         # Yaw Axis (Rudder - Turn Coordination): PI on beta
