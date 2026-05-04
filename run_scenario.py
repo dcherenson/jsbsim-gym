@@ -590,6 +590,12 @@ def parse_args():
         default=0.0,
         help="Start at this fraction of nominal dyn trajectory progress in [0,1] (0=start, 1=end).",
     )
+    parser.add_argument(
+        "--nominal-end-fraction",
+        type=_fraction_0_to_1,
+        default=1.0,
+        help="Truncate the nominal dyn trajectory at this fraction in [0,1] (1=full traj, 0.5=first half).",
+    )
     return parser.parse_args()
 
 def main():
@@ -597,8 +603,16 @@ def main():
     if args.gatekeeper and args.controller not in {"mppi", "smooth_mppi", "pid_traj"}:
         raise ValueError("--gatekeeper currently requires --controller mppi, --controller smooth_mppi, or --controller pid_traj.")
     nominal_start_fraction = float(args.nominal_start_fraction)
+    nominal_end_fraction = float(args.nominal_end_fraction)
     if args.nominal_dyn_path is None and nominal_start_fraction > 0.0:
         raise ValueError("--nominal-start-fraction requires --nominal-dyn-path.")
+    if args.nominal_dyn_path is None and nominal_end_fraction < 1.0:
+        raise ValueError("--nominal-end-fraction requires --nominal-dyn-path.")
+    if nominal_end_fraction <= nominal_start_fraction:
+        raise ValueError(
+            f"--nominal-end-fraction ({nominal_end_fraction}) must be greater than "
+            f"--nominal-start-fraction ({nominal_start_fraction})."
+        )
     initial_speed_kts = float(DEFAULT_INITIAL_SPEED_KTS)
     initial_altitude_ft = float(DEFAULT_INITIAL_ALTITUDE_FT)
     dem_start_pixel = DEM_START_PIXEL
@@ -721,10 +735,13 @@ def main():
             canyon=canyon,
             altitude_ref_ft=altitude_ref_ft,
             resample_spacing_ft=float(getattr(env.unwrapped, "canyon_segment_spacing_ft", 12.0)),
+            end_fraction=nominal_end_fraction,
         )
+        n_samples = len(np.asarray(nominal_reference['reference_states_ft_rad']))
+        end_frac_str = f" (end={nominal_end_fraction:.2f})" if nominal_end_fraction < 1.0 else ""
         print(
             f"Loaded nominal dyn reference from {args.nominal_dyn_path} "
-            f"({len(np.asarray(nominal_reference['reference_states_ft_rad']))} samples)."
+            f"({n_samples} samples{end_frac_str})."
         )
 
     config_base_kwargs = build_mppi_base_config_kwargs()
@@ -1071,6 +1088,14 @@ def main():
                             raw_debug.get("warm_start_h_ft", np.zeros((0,), dtype=np.float32)),
                             dtype=np.float32,
                         ).copy(),
+                        "pid_error_xy": np.asarray(
+                            raw_debug.get("pid_error_xy", np.zeros((0, 2), dtype=np.float32)),
+                            dtype=np.float32,
+                        ).copy(),
+                        "pid_error_h_ft": np.asarray(
+                            raw_debug.get("pid_error_h_ft", np.zeros((0,), dtype=np.float32)),
+                            dtype=np.float32,
+                        ).copy(),
                     }
             else:
                 predicted_xy = np.asarray(
@@ -1353,8 +1378,10 @@ def main():
                         "time_s": float(step / 30.0),
                         "e_xtrk": float(pid_diag.get("e_xtrk", np.nan)),
                         "e_z": float(pid_diag.get("e_z", np.nan)),
+                        "phi_ref": float(pid_diag.get("phi_ref", np.nan)),
                         "phi_cmd": float(pid_diag.get("phi_cmd", np.nan)),
                         "phi": float(controller_state["phi"]),
+                        "alpha_ref": float(pid_diag.get("alpha_ref", np.nan)),
                         "alpha_cmd": float(pid_diag.get("alpha_cmd", np.nan)),
                         "alpha": float(controller_state["alpha"]),
                         "p_cmd": float(pid_diag.get("p_cmd", np.nan)),

@@ -50,14 +50,25 @@ def save_pid_traj_diagnostics(output_dir, file_stem, rows, termination_reason):
     axs[0].legend(loc="best")
     axs[0].grid(True, alpha=0.25)
 
-    # 2. Guidance Commands (phi and alpha)
-    axs[1].plot(time_s, [np.degrees(r["phi_cmd"]) for r in rows], label="Phi Cmd (deg)", color="tab:purple")
-    axs[1].plot(time_s, [np.degrees(r["phi"]) for r in rows], label="Phi Actual", color="tab:green", alpha=0.7)
-    axs[1].plot(time_s, [np.degrees(r["alpha_cmd"]) for r in rows], label="Alpha Cmd (deg)", color="tab:orange")
-    axs[1].plot(time_s, [np.degrees(r["alpha"]) for r in rows], label="Alpha Actual", color="tab:brown", alpha=0.7)
-    axs[1].set_ylabel("Angles (deg)")
-    axs[1].legend(loc="best")
-    axs[1].grid(True, alpha=0.25)
+    # 2. Guidance Commands (phi and alpha) + nominal trajectory reference
+    ax1 = axs[1]
+    ax1.plot(time_s, [np.degrees(r["phi_cmd"]) for r in rows],
+             label="Phi Cmd (deg)", color="tab:purple", linewidth=1.8)
+    ax1.plot(time_s, [np.degrees(r["phi"]) for r in rows],
+             label="Phi Actual", color="tab:green", linewidth=1.4, alpha=0.8)
+    ax1.plot(time_s, [np.degrees(r.get("phi_ref", float("nan"))) for r in rows],
+             label="Phi Ref (traj)", color="tab:purple", linewidth=1.2,
+             linestyle="--", alpha=0.55)
+    ax1.plot(time_s, [np.degrees(r["alpha_cmd"]) for r in rows],
+             label="Alpha Cmd (deg)", color="tab:orange", linewidth=1.8)
+    ax1.plot(time_s, [np.degrees(r["alpha"]) for r in rows],
+             label="Alpha Actual", color="tab:brown", linewidth=1.4, alpha=0.8)
+    ax1.plot(time_s, [np.degrees(r.get("alpha_ref", float("nan"))) for r in rows],
+             label="Alpha Ref (traj)", color="tab:orange", linewidth=1.2,
+             linestyle="--", alpha=0.55)
+    ax1.set_ylabel("Angles (deg)")
+    ax1.legend(loc="best", fontsize=8)
+    ax1.grid(True, alpha=0.25)
 
     # 3. Rate Commands (p and q)
     axs[2].plot(time_s, [np.degrees(r["p_cmd"]) for r in rows], label="p Cmd (deg/s)", color="tab:green")

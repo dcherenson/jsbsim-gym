@@ -341,6 +341,14 @@ class CanyonRunRecorder:
             planner_debug.get("gk_h_ft", np.zeros((0, 0), dtype=np.float32)),
             dtype=np.float32,
         )
+        pid_error_xy = np.asarray(
+            planner_debug.get("pid_error_xy", np.zeros((0, 2), dtype=np.float32)),
+            dtype=np.float32,
+        )
+        pid_error_h = np.asarray(
+            planner_debug.get("pid_error_h_ft", np.zeros((0,), dtype=np.float32)),
+            dtype=np.float32,
+        )
         failure_mask = np.asarray(
             planner_debug.get("failure_mask", np.zeros((0,), dtype=bool)),
             dtype=bool,
@@ -351,6 +359,7 @@ class CanyonRunRecorder:
             and final_xy.size == 0
             and lookahead_xy.size == 0
             and gk_trajectories.size == 0
+            and pid_error_xy.size == 0
         ):
             return frame
 
@@ -415,6 +424,25 @@ class CanyonRunRecorder:
                 draw.ellipse((x_pix - 7, y_pix - 7, x_pix + 7, y_pix + 7), fill=(28, 32, 18, 220))
                 draw.ellipse((x_pix - 5, y_pix - 5, x_pix + 5, y_pix + 5), fill=(160, 255, 74, 255))
                 draw.ellipse((x_pix - 2, y_pix - 2, x_pix + 2, y_pix + 2), fill=(250, 255, 230, 255))
+
+        if len(pid_error_xy) >= 2:
+            world_points = self._trajectory_world_points(pid_error_xy, pid_error_h)
+            pixels = self._project_world_points(world_points, view, projection, width, height)
+            valid_mask = np.all(np.isfinite(pixels), axis=1)
+            valid_pixels = pixels[valid_mask]
+            
+            if len(valid_pixels) >= 2:
+                # Draw the error lines (horizontal cross-track, vertical altitude)
+                draw.line([tuple(point) for point in valid_pixels], fill=(255, 50, 50, 255), width=2)
+                
+                # Draw small dots at the airplane and closest point on path
+                for idx, (x_pix, y_pix) in enumerate(valid_pixels):
+                    if idx == 0:
+                        # Airplane position
+                        draw.ellipse((x_pix - 4, y_pix - 4, x_pix + 4, y_pix + 4), fill=(50, 200, 255, 255))
+                    elif idx == len(valid_pixels) - 1:
+                        # Path closest point
+                        draw.ellipse((x_pix - 4, y_pix - 4, x_pix + 4, y_pix + 4), fill=(255, 50, 50, 255))
 
         return np.asarray(image.convert("RGB"), dtype=np.uint8)
 

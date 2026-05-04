@@ -287,12 +287,16 @@ def build_nominal_reference_from_dyn(
     canyon: Any,
     altitude_ref_ft: float = 0.0,
     resample_spacing_ft: float = 12.0,
+    end_fraction: float = 1.0,
 ) -> dict[str, np.ndarray]:
     """Convert an Aerosandbox `dyn.asb` trajectory into DEM-local MPPI references.
 
-    The optimization stores position in a global north/east meter frame tied to the
-    DEM clip midpoint. The runtime canyon environment uses a DEM-local north/east
-    frame in feet, so we convert through latitude/longitude using the DEM bounds.
+    Parameters
+    ----------
+    end_fraction : float
+        Fraction in [0, 1] of the trajectory to load. 1.0 loads the full trajectory;
+        0.5 loads only the first half. The truncation is applied on the raw
+        trajectory time axis before any resampling.
     """
 
     dyn_path = Path(dyn_path).expanduser()
@@ -334,6 +338,31 @@ def build_nominal_reference_from_dyn(
     local_north_ft = local_samples[:, 0]
     local_east_ft = local_samples[:, 1]
     altitude_rel_ft = altitude_msl_ft - float(altitude_ref_ft)
+    # Optionally truncate the trajectory to [t_start, t_start + end_fraction * duration]
+    end_fraction = float(np.clip(end_fraction, 0.0, 1.0))
+    if end_fraction < 1.0:
+        t_start = float(time_s[0])
+        t_end = float(time_s[-1])
+        t_cutoff = t_start + end_fraction * (t_end - t_start)
+        mask = time_s <= t_cutoff
+        if int(np.count_nonzero(mask)) < 2:
+            mask[:2] = True  # keep at least two samples
+        north_m = north_m[mask]
+        east_m = east_m[mask]
+        altitude_msl_ft = altitude_msl_ft[mask]
+        speed_fps = speed_fps[mask]
+        time_s = time_s[mask]
+        roll_rad = roll_rad[mask]
+        pitch_rad = pitch_rad[mask]
+        heading_rad = heading_rad[mask]
+        alpha_rad = alpha_rad[mask]
+        beta_rad = beta_rad[mask]
+        lat_deg = lat_deg[mask]
+        lon_deg = lon_deg[mask]
+        local_north_ft = local_north_ft[mask]
+        local_east_ft = local_east_ft[mask]
+        altitude_rel_ft = altitude_rel_ft[mask]
+
     (
         display_north_ft,
         display_east_ft,

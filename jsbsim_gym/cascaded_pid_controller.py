@@ -4,12 +4,13 @@ import jax.numpy as jnp
 
 
 DEFAULT_PID_TRAJ_GUIDANCE_GAINS = {
-    'kp_xtrk': 0.005,
-    'kd_xtrk': 0.001,
-    'kp_z': 0.001,
-    'kd_z': 0.001,
-    'lookahead_dist_ft': 500.0,
-    'bank_alpha_gain': 0.35,
+    'kp_xtrk': -0.01,
+    'kd_xtrk': -0.005,
+    'kp_z': 0.003,
+    'kd_z': 0.000,
+    'k_accel_to_alpha_scale': 0.1,
+    'lookahead_dist_ft': 00.0,
+    'bank_alpha_gain': 0.0,
     'bank_error_deadband_rad': np.deg2rad(2.0),
     'bank_correction_turn_threshold_rad': np.deg2rad(10.0),
     'bank_alpha_boost_max_rad': np.deg2rad(8.0),
@@ -20,9 +21,9 @@ DEFAULT_PID_TRAJ_AUTOPILOT_GAINS = {
     'alpha_i': 1.0,
     'q_p': 3.0,
     'q_d': 0.0,
-    'phi_p': 2.5,
-    'p_p': 0.5,
-    'p_d': 0.0,
+    'phi_p': 5.0,
+    'p_p': 2.0,
+    'p_d': 0.,
     'beta_p': 3.0,
     'beta_i': 1.5,
     'washout_tau': 1.0,
@@ -118,6 +119,39 @@ class PIDTrajectoryController:
         
         # JSBSim fcs/elevator-cmd-norm > 0 is trailing edge down (pitch down).
         return np.array([aileron, elevator, 0*rudder, throttle], dtype=np.float32)
+
+    def get_render_debug(self):
+        debug = getattr(self.guidance, 'last_render_debug', None)
+        if not debug:
+            return {}
+        
+        airplane_enu = debug['airplane_enu']
+        e_xtrk = debug['e_xtrk']
+        trk_hdg = debug['trk_hdg']
+        e_z = debug['e_z']
+        
+        # e_xtrk = d_north * (-sin(trk_hdg)) + d_east * cos(trk_hdg)
+        # So cross_track_vec in ENU is [cos(trk_hdg), -sin(trk_hdg)]
+        cross_track_vec = np.array([np.cos(trk_hdg), -np.sin(trk_hdg)], dtype=np.float32)
+        abeam_enu_xy = airplane_enu[0:2] - e_xtrk * cross_track_vec
+        
+        # Points: 0=Airplane, 1=Abeam horizontal, 2=Abeam vertical
+        xy = np.array([
+            [airplane_enu[1], airplane_enu[0]],  # North, East
+            [abeam_enu_xy[1], abeam_enu_xy[0]],
+            [abeam_enu_xy[1], abeam_enu_xy[0]]
+        ], dtype=np.float32)
+        
+        h_ft = np.array([
+            airplane_enu[2],
+            airplane_enu[2],
+            airplane_enu[2] + e_z
+        ], dtype=np.float32)
+        
+        return {
+            'pid_error_xy': xy,
+            'pid_error_h_ft': h_ft
+        }
 
 
 def build_pid_trajectory_policy_jax(reference_trajectory, config=None):
@@ -255,7 +289,11 @@ class DiscretePID:
         if dt <= 0:
             return 0.0
 
+        # normalize angles
+        setpoint = np.arctan2(np.sin(setpoint), np.cos(setpoint))
+        process_variable = np.arctan2(np.sin(process_variable), np.cos(process_variable))
         error = setpoint - process_variable
+        error = np.arctan2(np.sin(error), np.cos(error))
         
         # Proportional
         p_term = self.kp * error
@@ -305,7 +343,7 @@ class SpatialGuidance:
         self.kd_xtrk = gains.get('kd_xtrk', 0.01)
         self.kp_z = gains.get('kp_z', 0.01)
         self.kd_z = gains.get('kd_z', 0.005)
-        
+        self.k_accel_to_alpha_scale = gains.get('k_accel_to_alpha_scale', 0.0)
         # New lookahead parameter (distance in feet to anticipate turns)
         self.lookahead_dist = gains.get('lookahead_dist_ft', 500.0)
         
@@ -362,7 +400,7 @@ class SpatialGuidance:
         target_idx = self.get_lookahead_index(idx)
         
         closest_p = self.path_enu[idx]
-        trk_hdg = self.path_heading[target_idx]
+        trk_hdg = self.path_heading[idx]
         
         # Calculate errors relative to the closest point
         d_east = current_enu[0] - closest_p[0]
@@ -370,6 +408,14 @@ class SpatialGuidance:
         
         e_xtrk = d_north * (-np.sin(trk_hdg)) + d_east * (np.cos(trk_hdg))
         e_z = closest_p[2] - current_enu[2] 
+        
+        self.last_render_debug = {
+            'airplane_enu': current_enu.copy(),
+            'closest_p_enu': closest_p.copy(),
+            'e_xtrk': e_xtrk,
+            'trk_hdg': trk_hdg,
+            'e_z': e_z
+        }
         
         if dt > 0:
             e_xtrk_dot = (e_xtrk - self.prev_e_xtrk) / dt
@@ -382,24 +428,35 @@ class SpatialGuidance:
         self.prev_e_z = e_z
         
         # Roll guidance: error correction + lookahead feedforward
-        delta_phi = self.kp_xtrk * e_xtrk + self.kd_xtrk * e_xtrk_dot
-        phi_cmd = self.phi_opt[target_idx] #+ delta_phi
+        delta_lateral_accel = self.kp_xtrk * e_xtrk + self.kd_xtrk * e_xtrk_dot
         
         # Pitch guidance: Load factor (nz) based altitude correction
-        delta_nz = self.kp_z * e_z + self.kd_z * e_z_dot
+        delta_vertical_accel = self.kp_z * e_z + self.kd_z * e_z_dot
+
+        open_loop_vertical_accel = np.cos(self.phi_opt[target_idx])
+        open_loop_lateral_accel = np.sin(self.phi_opt[target_idx])
+
+        delta_accel_mag = np.sqrt(delta_lateral_accel**2 + delta_vertical_accel**2)
+
+        accel_direction = np.arctan2(delta_lateral_accel + open_loop_lateral_accel, delta_vertical_accel + open_loop_vertical_accel)
+        
+        #might have to add or subtract pi to accel_direction depending on the sign of delta_lateral_accel + open_loop_lateral_accel
+        accel_direction = np.arctan2(delta_lateral_accel + open_loop_lateral_accel, delta_vertical_accel + open_loop_vertical_accel)
+        
+        #add pi to accel_direction if delta_vertical_accel + open_loop_vertical_accel is negative
+        
+        # Open loop accel (Gs) from optimized path
+        phi_cmd = np.clip(accel_direction, -np.radians(150.0), np.radians(150.0))
         
         if current_phi is None:
             current_phi = 0.0
-            
-        # Limit phi in the denominator to ~80 degrees to prevent singularity
-        phi_for_lift = np.clip(current_phi, -1.4, 1.4)
-        
-        # Calculate commanded normal load factor: nz = (1g + correction) / cos(phi)
-        nz_cmd = (1.0 + delta_nz) / np.cos(phi_for_lift)
-        nz_cmd = 1.0
+
+        if np.sign(phi_cmd) != np.sign(self.phi_opt[target_idx]):
+            pass
         
         # Scale the nominal 1g lookahead alpha by the commanded load factor
-        alpha_cmd = self.alpha_opt[target_idx] * nz_cmd
+        alpha_cmd = self.alpha_opt[target_idx] + delta_accel_mag * self.k_accel_to_alpha_scale
+        alpha_cmd = np.clip(alpha_cmd, -np.radians(5.0), np.radians(20.0)) 
         
         v_opt_val = self.v_opt[target_idx]
         
@@ -410,9 +467,9 @@ class SpatialGuidance:
             'e_z_dot': float(e_z_dot),
             'closest_idx': int(idx),
             'target_idx': int(target_idx),
-            'delta_phi': float(delta_phi),
-            'delta_nz': float(delta_nz),
-            'nz_cmd': float(nz_cmd),
+            # 'delta_phi': float(delta_phi),
+            'phi_ref': float(self.phi_opt[target_idx]),
+            'alpha_ref': float(self.alpha_opt[target_idx]),
             'phi_cmd': float(phi_cmd),
             'alpha_cmd': float(alpha_cmd),
             'v_opt_val': float(v_opt_val)
