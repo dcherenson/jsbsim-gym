@@ -5,15 +5,11 @@ import jax.numpy as jnp
 
 DEFAULT_PID_TRAJ_GUIDANCE_GAINS = {
     'kp_xtrk': -0.01,
-    'kd_xtrk': -0.005,
-    'kp_z': 0.003,
-    'kd_z': 0.000,
-    'k_accel_to_alpha_scale': 0.1,
-    'lookahead_dist_ft': 00.0,
-    'bank_alpha_gain': 0.0,
-    'bank_error_deadband_rad': np.deg2rad(2.0),
-    'bank_correction_turn_threshold_rad': np.deg2rad(10.0),
-    'bank_alpha_boost_max_rad': np.deg2rad(8.0),
+    'kd_xtrk': -0.01,
+    'kp_z': 0.02,
+    'kd_z': 0.01,
+    'k_accel_to_alpha_scale': 0.2,
+    'lookahead_dist_ft': 300.0,
 }
 
 DEFAULT_PID_TRAJ_AUTOPILOT_GAINS = {
@@ -28,8 +24,8 @@ DEFAULT_PID_TRAJ_AUTOPILOT_GAINS = {
     'beta_i': 1.5,
     'washout_tau': 1.0,
     'r_highpass_gain': 0.5,
-    'v_p': 0.01,
-    'v_i': 0.002,
+    'v_p': 0.1,
+    'v_i': 0.02,
 }
 
 
@@ -276,12 +272,13 @@ def build_pid_trajectory_policy_jax(reference_trajectory, config=None):
 
 class DiscretePID:
     """Discrete-time PID controller with anti-windup."""
-    def __init__(self, kp, ki, kd, output_min=-1.0, output_max=1.0):
+    def __init__(self, kp, ki, kd, output_min=-1.0, output_max=1.0, wrap_angle=False):
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.output_min = output_min
         self.output_max = output_max
+        self.wrap_angle = wrap_angle
         self.integral = 0.0
         self.prev_error = 0.0
 
@@ -289,11 +286,14 @@ class DiscretePID:
         if dt <= 0:
             return 0.0
 
-        # normalize angles
-        setpoint = np.arctan2(np.sin(setpoint), np.cos(setpoint))
-        process_variable = np.arctan2(np.sin(process_variable), np.cos(process_variable))
-        error = setpoint - process_variable
-        error = np.arctan2(np.sin(error), np.cos(error))
+        # normalize angles if requested
+        if self.wrap_angle:
+            setpoint = np.arctan2(np.sin(setpoint), np.cos(setpoint))
+            process_variable = np.arctan2(np.sin(process_variable), np.cos(process_variable))
+            error = setpoint - process_variable
+            error = np.arctan2(np.sin(error), np.cos(error))
+        else:
+            error = setpoint - process_variable
         
         # Proportional
         p_term = self.kp * error
@@ -402,12 +402,18 @@ class SpatialGuidance:
         closest_p = self.path_enu[idx]
         trk_hdg = self.path_heading[idx]
         
-        # Calculate errors relative to the closest point
+        # Calculate errors relative to the closest point laterally
         d_east = current_enu[0] - closest_p[0]
         d_north = current_enu[1] - closest_p[1]
         
         e_xtrk = d_north * (-np.sin(trk_hdg)) + d_east * (np.cos(trk_hdg))
-        e_z = closest_p[2] - current_enu[2] 
+        
+        # Asymmetrical vertical lookahead: anticipate pull-ups, but not dives
+        lookahead_alt = self.path_enu[target_idx][2]
+        closest_alt = closest_p[2]
+        target_alt = max(closest_alt, lookahead_alt)
+        
+        e_z = target_alt - current_enu[2] + 100.0
         
         self.last_render_debug = {
             'airplane_enu': current_enu.copy(),
@@ -428,35 +434,37 @@ class SpatialGuidance:
         self.prev_e_z = e_z
         
         # Roll guidance: error correction + lookahead feedforward
-        delta_lateral_accel = self.kp_xtrk * e_xtrk + self.kd_xtrk * e_xtrk_dot
+        delta_lateral_accel = np.clip(self.kp_xtrk * e_xtrk + self.kd_xtrk * e_xtrk_dot, -4.0, 4.0)
         
         # Pitch guidance: Load factor (nz) based altitude correction
-        delta_vertical_accel = self.kp_z * e_z + self.kd_z * e_z_dot
+        delta_vertical_accel = np.clip(self.kp_z * e_z + self.kd_z * e_z_dot, -2.0, 9.0)
 
-        open_loop_vertical_accel = np.cos(self.phi_opt[target_idx])
+        open_loop_vertical_accel = np.cos(self.phi_opt[idx])
         open_loop_lateral_accel = np.sin(self.phi_opt[target_idx])
 
-        delta_accel_mag = np.sqrt(delta_lateral_accel**2 + delta_vertical_accel**2)
+        total_lateral_accel = delta_lateral_accel + open_loop_lateral_accel
+        total_vertical_accel = delta_vertical_accel + open_loop_vertical_accel
 
-        accel_direction = np.arctan2(delta_lateral_accel + open_loop_lateral_accel, delta_vertical_accel + open_loop_vertical_accel)
-        
-        #might have to add or subtract pi to accel_direction depending on the sign of delta_lateral_accel + open_loop_lateral_accel
-        accel_direction = np.arctan2(delta_lateral_accel + open_loop_lateral_accel, delta_vertical_accel + open_loop_vertical_accel)
-        
-        #add pi to accel_direction if delta_vertical_accel + open_loop_vertical_accel is negative
-        
-        # Open loop accel (Gs) from optimized path
-        phi_cmd = np.clip(accel_direction, -np.radians(150.0), np.radians(150.0))
-        
-        if current_phi is None:
-            current_phi = 0.0
+        accel_direction = np.arctan2(total_lateral_accel, total_vertical_accel)
+        phi_cmd = np.clip(accel_direction, -np.radians(120.0), np.radians(120.0))
 
-        if np.sign(phi_cmd) != np.sign(self.phi_opt[target_idx]):
-            pass
-        
+        # Calculate the extra lift (Gs) needed by projecting the desired
+        # acceleration vector onto the current lift vector direction.
+        if current_phi is not None:
+            # Lift vector components based on current bank angle
+            lift_y = np.sin(current_phi)
+            lift_z = np.cos(current_phi)
+            M_effective = total_lateral_accel * lift_y + total_vertical_accel * lift_z
+            # Prevent negative load factor demands in this logic (clip to 0 or 1g as needed)
+            M_effective = max(0.0, M_effective)
+        else:
+            M_effective = np.sqrt(total_lateral_accel**2 + total_vertical_accel**2)
+            
+        delta_lift_Gs = M_effective - 1.0
+
         # Scale the nominal 1g lookahead alpha by the commanded load factor
-        alpha_cmd = self.alpha_opt[target_idx] + delta_accel_mag * self.k_accel_to_alpha_scale
-        alpha_cmd = np.clip(alpha_cmd, -np.radians(5.0), np.radians(20.0)) 
+        alpha_cmd = self.alpha_opt[idx] + delta_lift_Gs * self.k_accel_to_alpha_scale
+        alpha_cmd = np.clip(alpha_cmd, -np.radians(5.0), np.radians(20.0))
         
         v_opt_val = self.v_opt[target_idx]
         
@@ -480,11 +488,11 @@ class F16Autopilot:
     """Translates guidance commands into actuator deflections."""
     def __init__(self, gains):
         # Pitch Axis (Elevator): outer PI on alpha, inner PD on q
-        self.alpha_pi = DiscretePID(gains['alpha_p'], gains['alpha_i'], 0.0, -10.0, 10.0)
+        self.alpha_pi = DiscretePID(gains['alpha_p'], gains['alpha_i'], 0.0, -2.0, 2.0)
         self.q_pd = DiscretePID(gains['q_p'], 0.0, gains['q_d'], -1.0, 1.0)
         
         # Roll Axis (Aileron): outer P on phi, inner PD on p
-        self.phi_p = DiscretePID(gains['phi_p'], 0.0, 0.0, -10.0, 10.0)
+        self.phi_p = DiscretePID(gains['phi_p'], 0.0, 0.0, -10.0, 10.0, wrap_angle=True)
         self.p_pd = DiscretePID(gains['p_p'], 0.0, gains['p_d'], -1.0, 1.0)
         
         # Yaw Axis (Rudder - Turn Coordination): PI on beta
