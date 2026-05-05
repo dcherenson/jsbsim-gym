@@ -129,7 +129,7 @@ dmypy.json
 .pyre/
 
 # Custom Directories
-.vscode
+# .vscode
 logs/
 models/
 

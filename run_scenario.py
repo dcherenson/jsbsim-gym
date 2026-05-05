@@ -414,13 +414,16 @@ def build_jsbsim_gatekeeper(
 
     def safety_fn(state_flat, _env_param):
         terrain_floor_ft = _interp(terrain_floor_jax, state_flat[0])
-        return 100 #state_flat[2] - terrain_floor_ft
+        val = state_flat[2] - terrain_floor_ft
+        # jax.debug.print("Safety function value: {v}", v=val)
+        return val
 
     def pcis_fn(state_flat):
         speed_margin = pcis_speed_limit_fps - _speed_fps(state_flat)
         centerline_margin = 100 #pcis_centerline_tol_ft - jnp.abs(state_flat[1] - _interp(center_east_jax, state_flat[0]))
         altitude_margin = pcis_altitude_tol_ft - jnp.abs(state_flat[2] - backup_target_altitude_ft)
-        return 100 #jnp.minimum(speed_margin, jnp.minimum(centerline_margin, altitude_margin))
+        # jax.debug.print("PCIS function values - Speed: {s}, Centerline: {c}, Altitude: {a}", s=speed_margin, c=centerline_margin, a=altitude_margin)
+        return jnp.minimum(speed_margin, jnp.minimum(centerline_margin, altitude_margin))
 
     def empirical_feature_fn(state_flat, action, prev_action, step_idx):
         del step_idx
@@ -466,9 +469,9 @@ def build_jsbsim_gatekeeper(
         return jnp.asarray([feature_map[name] for name in active_empirical_features], dtype=jnp.float32)
 
     params = GatekeeperParams(
-        M=10,
+        M=30,
         T=100,
-        N=50,
+        N=100,
         delta=0.1,
         epsilon=0.90,
         beta=0.00,

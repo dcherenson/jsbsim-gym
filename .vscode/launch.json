@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Scenario MPPI (dyn.asb)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_scenario.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--nominal-dyn-path", "air-racing-optimization/final_results/f16dyn_crude.asb",
+        "--nominal-start-fraction", "0.0",
+        "--nominal-end-fraction", "0.1",
+        "--controller", "altitude_hold",
+        // "--max-steps", "100"
+        // "--gatekeeper"
+      ],
+      "env": {
+        "JAX_PLATFORMS": "cpu"
+      }
+    }
+  ]
+}
