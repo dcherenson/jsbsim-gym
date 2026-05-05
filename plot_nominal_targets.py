@@ -119,6 +119,8 @@ def main():
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
     print(f"Saved: {out_path}  ({len(t)} samples, t=[{t[0]:.1f}, {t[-1]:.1f}] s)")
+    total_distance = np.trapezoid(speed_kts, t) * 0.3048 / KTS_PER_FPS
+    print(f"Total trajectory length in meters: {total_distance}")
 
 
 if __name__ == "__main__":

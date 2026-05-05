@@ -196,10 +196,9 @@ def build_pid_trajectory_policy_jax(reference_trajectory, config=None):
     lookahead_dist_ft = float(guidance_gains.get('lookahead_dist_ft', 500.0))
     kp_xtrk = float(guidance_gains.get('kp_xtrk', 0.0))
     kp_z = float(guidance_gains.get('kp_z', 0.0))
-    bank_alpha_gain = float(guidance_gains.get('bank_alpha_gain', 0.0))
-    bank_deadband = float(guidance_gains.get('bank_error_deadband_rad', 0.0))
-    bank_turn_threshold = float(guidance_gains.get('bank_correction_turn_threshold_rad', 0.0))
-    bank_alpha_boost_max = float(guidance_gains.get('bank_alpha_boost_max_rad', 0.0))
+    kd_xtrk = float(guidance_gains.get('kd_xtrk', 0.0))
+    kd_z = float(guidance_gains.get('kd_z', 0.0))
+    k_accel_to_alpha_scale = float(guidance_gains.get('k_accel_to_alpha_scale', 0.0))
 
     alpha_p = float(autopilot_gains.get('alpha_p', 0.0))
     q_p = float(autopilot_gains.get('q_p', 0.0))
@@ -236,23 +235,40 @@ def build_pid_trajectory_policy_jax(reference_trajectory, config=None):
         target_idx = jnp.clip(target_idx, idx, max_idx)
 
         closest_p = path_enu_jax[idx]
-        trk_hdg = path_heading_jax[target_idx]
+        trk_hdg = path_heading_jax[idx]
         d_east = current_enu[0] - closest_p[0]
         d_north = current_enu[1] - closest_p[1]
         e_xtrk = d_north * (-jnp.sin(trk_hdg)) + d_east * jnp.cos(trk_hdg)
-        e_z = closest_p[2] - current_enu[2]
 
-        phi_cmd = phi_opt_jax[target_idx] + kp_xtrk * e_xtrk
-        alpha_cmd = alpha_opt_jax[target_idx] * (1.0 + kp_z * e_z)
+        lookahead_alt = path_enu_jax[target_idx][2]
+        closest_alt = closest_p[2]
+        target_alt = jnp.maximum(closest_alt, lookahead_alt)
+        
+        e_z = target_alt - current_enu[2] + 100.0
 
-        abs_bank_error = jnp.abs(phi_cmd) - jnp.abs(phi)
-        need_turn_boost = jnp.logical_and(
-            jnp.abs(phi_cmd) > bank_turn_threshold,
-            abs_bank_error > bank_deadband,
-        )
-        alpha_boost = bank_alpha_gain * abs_bank_error
-        alpha_boost = jnp.clip(alpha_boost, 0.0, bank_alpha_boost_max)
-        alpha_cmd = alpha_cmd + jnp.where(need_turn_boost, alpha_boost, 0.0)
+        # Note: the JAX implementation is statless so we omit derivative terms 
+        # (e_xtrk_dot and e_z_dot are assumed to be 0 for the rollout)
+        delta_lateral_accel = jnp.clip(kp_xtrk * e_xtrk, -4.0, 4.0)
+        delta_vertical_accel = jnp.clip(kp_z * e_z, -2.0, 9.0)
+
+        open_loop_vertical_accel = jnp.cos(phi_opt_jax[idx])
+        open_loop_lateral_accel = jnp.sin(phi_opt_jax[target_idx])
+
+        total_lateral_accel = delta_lateral_accel + open_loop_lateral_accel
+        total_vertical_accel = delta_vertical_accel + open_loop_vertical_accel
+
+        accel_direction = jnp.arctan2(total_lateral_accel, total_vertical_accel)
+        phi_cmd = jnp.clip(accel_direction, -jnp.radians(120.0), jnp.radians(120.0))
+
+        lift_y = jnp.sin(phi)
+        lift_z = jnp.cos(phi)
+        M_effective = total_lateral_accel * lift_y + total_vertical_accel * lift_z
+        M_effective = jnp.maximum(0.0, M_effective)
+            
+        delta_lift_Gs = M_effective - 1.0
+
+        alpha_cmd = alpha_opt_jax[idx] + delta_lift_Gs * k_accel_to_alpha_scale
+        alpha_cmd = jnp.clip(alpha_cmd, -jnp.radians(5.0), jnp.radians(20.0))
 
         v_cmd = v_opt_jax[target_idx]
 

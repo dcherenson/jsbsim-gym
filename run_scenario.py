@@ -12,7 +12,7 @@ import jax.numpy as jnp
 from drs_gatekeeper import DRSGatekeeper, GatekeeperParams, TrackBoundsEstimate
 import jsbsim_gym.canyon_env  # Registers JSBSimCanyon-v0
 from jsbsim_gym.canyon import DEMCanyon
-from jsbsim_gym.canyon_env import OBS_ALTITUDE_ERROR_FT, OBS_PHI, OBS_P, OBS_Q, OBS_R, OBS_THETA
+from jsbsim_gym.canyon_env import OBS_ALTITUDE_ERROR_FT, OBS_PHI, OBS_P, OBS_Q, OBS_R, OBS_THETA, OBS_U_FPS, OBS_V_FPS, OBS_W_FPS
 from jsbsim_gym.canyon_artifacts import CanyonRunRecorder
 from jsbsim_gym.mppi_run_config import (
     KTS_TO_FPS,
@@ -282,6 +282,7 @@ def build_jsbsim_gatekeeper(
     nominal_horizon,
     debug_timing=False,
     nominal_policy_fn_override=None,
+    backup_controller_type="altitude_hold",
 ):
     canyon = env.unwrapped.canyon
 
@@ -316,11 +317,11 @@ def build_jsbsim_gatekeeper(
     altitude_ref_ft = float(getattr(env.unwrapped, "dem_start_elev_ft", 0.0))
     terrain_floor_rel_ft = terrain_floor_msl_ft - altitude_ref_ft
     canyon_top_rel_ft = terrain_floor_rel_ft + wall_height_samples_ft
-    backup_peek_ft =1000.0
+    backup_peek_ft =0.0
     pcis_centerline_tol_ft = 1000.0
     pcis_altitude_tol_ft = 1000.0
-    backup_target_speed_fps = 200.0 * KTS_TO_FPS
-    pcis_speed_limit_fps = 400.0 * KTS_TO_FPS
+    backup_target_speed_fps = 300.0 * KTS_TO_FPS
+    pcis_speed_limit_fps = 600.0 * KTS_TO_FPS
     backup_target_altitude_ft = float(np.nanmax(canyon_top_rel_ft) + backup_peek_ft)
 
     backup_reference = build_reference_trajectory(
@@ -331,18 +332,24 @@ def build_jsbsim_gatekeeper(
         closed_loop=False,
     )
 
-    backup_config = SimpleCanyonControllerConfig(
-        target_speed_fps=backup_target_speed_fps,
-        use_dem_centerline=False,
-    )
-    backup_config, _, _ = with_default_simple_controller_optuna_gains(backup_config)
-    backup_controller = SimpleTrajectoryController(
-        config=backup_config,
-        target_altitude_ft=backup_target_altitude_ft,
-        wall_margin_ft=float(getattr(env.unwrapped, "wall_margin_ft", 0.0)),
-        altitude_reference_offset_ft=0.0,
-        reference_trajectory=backup_reference,
-    )
+    if backup_controller_type == "altitude_hold":
+        backup_controller = AltitudeHoldController(
+            target_speed_fps=backup_target_speed_fps, 
+            target_altitude_ft=backup_target_altitude_ft
+            )
+    else:
+        backup_config = SimpleCanyonControllerConfig(
+            target_speed_fps=backup_target_speed_fps,
+            use_dem_centerline=False,
+        )
+        backup_config, _, _ = with_default_simple_controller_optuna_gains(backup_config)
+        backup_controller = SimpleTrajectoryController(
+            config=backup_config,
+            target_altitude_ft=backup_target_altitude_ft,
+            wall_margin_ft=float(getattr(env.unwrapped, "wall_margin_ft", 0.0)),
+            altitude_reference_offset_ft=0.0,
+            reference_trajectory=backup_reference,
+        )
     backup_controller.reset(
         state_dict=initial_controller_state,
         target_altitude_ft=backup_target_altitude_ft,
@@ -380,13 +387,19 @@ def build_jsbsim_gatekeeper(
     else:
         nominal_policy_fn = nominal_policy_fn_override
 
-    backup_policy_fn = build_simple_trajectory_policy_jax(
-        config=backup_config,
-        reference_trajectory=backup_reference,
-        target_altitude_ft=backup_target_altitude_ft,
-        wall_margin_ft=float(getattr(env.unwrapped, "wall_margin_ft", 0.0)),
-        altitude_reference_offset_ft=0.0,
-    )
+    if backup_controller_type == "altitude_hold":
+        backup_policy_fn = build_altitude_hold_policy_jax(
+            target_altitude_ft=backup_target_altitude_ft,
+            target_speed_fps=backup_target_speed_fps
+        )
+    else:
+        backup_policy_fn = build_simple_trajectory_policy_jax(
+            config=backup_config,
+            reference_trajectory=backup_reference,
+            target_altitude_ft=backup_target_altitude_ft,
+            wall_margin_ft=float(getattr(env.unwrapped, "wall_margin_ft", 0.0)),
+            altitude_reference_offset_ft=0.0,
+        )
 
     def dynamics_fn(state_flat, action, noise):
         noise = jnp.asarray(noise, dtype=jnp.float32)
@@ -401,11 +414,11 @@ def build_jsbsim_gatekeeper(
 
     def safety_fn(state_flat, _env_param):
         terrain_floor_ft = _interp(terrain_floor_jax, state_flat[0])
-        return state_flat[2] - terrain_floor_ft
+        return 100 #state_flat[2] - terrain_floor_ft
 
     def pcis_fn(state_flat):
         speed_margin = pcis_speed_limit_fps - _speed_fps(state_flat)
-        centerline_margin = pcis_centerline_tol_ft - jnp.abs(state_flat[1] - _interp(center_east_jax, state_flat[0]))
+        centerline_margin = 100 #pcis_centerline_tol_ft - jnp.abs(state_flat[1] - _interp(center_east_jax, state_flat[0]))
         altitude_margin = pcis_altitude_tol_ft - jnp.abs(state_flat[2] - backup_target_altitude_ft)
         return jnp.minimum(speed_margin, jnp.minimum(centerline_margin, altitude_margin))
 
@@ -501,16 +514,35 @@ def build_jsbsim_gatekeeper(
 class AltitudeHoldController:
     """Straight-flight + altitude-hold controller for visualization/debug runs."""
 
-    def __init__(self):
-        self.altitude_error_integral = 0.0
+    def __init__(self, target_altitude_ft = 400.0, target_speed_fps = 400.0):
+        self.target_altitude_ft = target_altitude_ft
+        self.target_speed_fps = target_speed_fps
 
-    def get_action(self, obs):
-        altitude_error_ft = float(obs[OBS_ALTITUDE_ERROR_FT])
-        roll_angle = float(obs[OBS_PHI])
-        roll_rate = float(obs[OBS_P])
-        pitch_rate = float(obs[OBS_Q])
-        yaw_rate = float(obs[OBS_R])
-        pitch_angle = float(obs[OBS_THETA])
+    def reset(self, state_dict=None, target_altitude_ft=None, reference_trajectory=None, target_speed_fps=None, **kwargs):
+        self.altitude_error_integral = 0.0
+        if target_altitude_ft is not None:
+            self.target_altitude_ft = float(target_altitude_ft)
+        if target_speed_fps is not None:
+            self.target_speed_fps = float(target_speed_fps)
+
+    def get_action(self, obs_or_state):
+        if isinstance(obs_or_state, dict):
+            h = float(obs_or_state["h"])
+            altitude_error_ft = float(self.target_altitude_ft - h)
+            roll_angle = float(obs_or_state["phi"])
+            pitch_angle = float(obs_or_state["theta"])
+            roll_rate = float(obs_or_state["p"])
+            pitch_rate = float(obs_or_state["q"])
+            yaw_rate = float(obs_or_state["r"])
+            speed_fps = float(np.sqrt(obs_or_state["u"]**2 + obs_or_state["v"]**2 + obs_or_state["w"]**2))
+        else:
+            altitude_error_ft = float(obs_or_state[OBS_ALTITUDE_ERROR_FT])
+            roll_angle = float(obs_or_state[OBS_PHI])
+            roll_rate = float(obs_or_state[OBS_P])
+            pitch_rate = float(obs_or_state[OBS_Q])
+            yaw_rate = float(obs_or_state[OBS_R])
+            pitch_angle = float(obs_or_state[OBS_THETA])
+            speed_fps = float(np.sqrt(obs_or_state[OBS_U_FPS]**2 + obs_or_state[OBS_V_FPS]**2 + obs_or_state[OBS_W_FPS]**2))
 
         self.altitude_error_integral += altitude_error_ft * (1.0 / 30.0)
         self.altitude_error_integral = np.clip(self.altitude_error_integral, -2000.0, 2000.0)
@@ -527,10 +559,46 @@ class AltitudeHoldController:
             0.50,
         )
 
-        throttle_cmd = np.clip(0.64 - 0.00008 * altitude_error_ft, 0.50, 0.95)
+        speed_error_fps = self.target_speed_fps - speed_fps
+        throttle_cmd = np.clip(0.64 + 0.01 * speed_error_fps, 0.50, 0.95)
         return np.array([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd], dtype=np.float32)
 
 
+def build_altitude_hold_policy_jax(target_altitude_ft, target_speed_fps):
+    """Build a JAX policy closure that mirrors the altitude hold controller."""
+    target_altitude_ft = float(target_altitude_ft)
+    target_speed_fps = float(target_speed_fps)
+    
+    def policy_fn(state_flat):
+        h = state_flat[2]
+        u = state_flat[3]
+        v = state_flat[4]
+        w = state_flat[5]
+        roll_rate = state_flat[6]
+        pitch_rate = state_flat[7]
+        yaw_rate = state_flat[8]
+        roll_angle = state_flat[9]
+        pitch_angle = state_flat[10]
+
+        speed_fps = jnp.sqrt(u**2 + v**2 + w**2)
+        altitude_error_ft = target_altitude_ft - h
+        
+        roll_cmd = jnp.clip(-1.6 * roll_angle - 0.45 * roll_rate, -0.35, 0.35)
+        yaw_cmd = jnp.clip(-0.25 * yaw_rate, -0.15, 0.15)
+
+        pitch_cmd = jnp.clip(
+            0.0022 * altitude_error_ft
+            + 0.70 * pitch_angle
+            - 0.30 * pitch_rate,
+            -0.50,
+            0.50,
+        )
+
+        speed_error_fps = target_speed_fps - speed_fps
+        throttle_cmd = jnp.clip(0.64 + 0.01 * speed_error_fps, 0.50, 0.95)
+        return jnp.stack([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd])
+
+    return policy_fn
 
 
 def parse_args():
@@ -576,6 +644,13 @@ def parse_args():
         "--gatekeeper-debug-timing",
         action="store_true",
         help="Print gatekeeper timing diagnostics each step.",
+    )
+    parser.add_argument(
+        "--backup-controller",
+        type=str,
+        default="altitude_hold",
+        choices=["simple", "altitude_hold"],
+        help="Which controller to use as the gatekeeper backup.",
     )
 
     parser.add_argument(
@@ -857,6 +932,7 @@ def main():
                 initial_controller_state=initial_controller_state,
                 nominal_horizon=int(controller.config.horizon),
                 debug_timing=bool(args.gatekeeper_debug_timing),
+                backup_controller_type=args.backup_controller,
             )
             print(
                 f"Initialized gatekeeper with backup simple controller at {gatekeeper_bundle['backup_target_speed_fps'] / KTS_TO_FPS:.0f} kts and "
@@ -897,6 +973,7 @@ def main():
                 nominal_horizon=100,
                 debug_timing=bool(args.gatekeeper_debug_timing),
                 nominal_policy_fn_override=pid_nominal_policy_fn,
+                backup_controller_type=args.backup_controller,
             )
             print(
                 f"Initialized gatekeeper with backup simple controller at {gatekeeper_bundle['backup_target_speed_fps'] / KTS_TO_FPS:.0f} kts and "
