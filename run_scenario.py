@@ -420,7 +420,7 @@ def build_jsbsim_gatekeeper(
         speed_margin = pcis_speed_limit_fps - _speed_fps(state_flat)
         centerline_margin = 100 #pcis_centerline_tol_ft - jnp.abs(state_flat[1] - _interp(center_east_jax, state_flat[0]))
         altitude_margin = pcis_altitude_tol_ft - jnp.abs(state_flat[2] - backup_target_altitude_ft)
-        return jnp.minimum(speed_margin, jnp.minimum(centerline_margin, altitude_margin))
+        return 100 #jnp.minimum(speed_margin, jnp.minimum(centerline_margin, altitude_margin))
 
     def empirical_feature_fn(state_flat, action, prev_action, step_idx):
         del step_idx
@@ -467,10 +467,10 @@ def build_jsbsim_gatekeeper(
 
     params = GatekeeperParams(
         M=10,
-        T=50,
-        N=100,
+        T=100,
+        N=50,
         delta=0.1,
-        epsilon=0.10,
+        epsilon=0.90,
         beta=0.00,
         alpha=0.0,
         p=1,
@@ -514,7 +514,7 @@ def build_jsbsim_gatekeeper(
 class AltitudeHoldController:
     """Straight-flight + altitude-hold controller for visualization/debug runs."""
 
-    def __init__(self, target_altitude_ft = 400.0, target_speed_fps = 400.0):
+    def __init__(self, target_altitude_ft = 1000.0, target_speed_fps = 400.0):
         self.target_altitude_ft = target_altitude_ft
         self.target_speed_fps = target_speed_fps
 
@@ -526,41 +526,36 @@ class AltitudeHoldController:
             self.target_speed_fps = float(target_speed_fps)
 
     def get_action(self, obs_or_state):
-        if isinstance(obs_or_state, dict):
-            h = float(obs_or_state["h"])
-            altitude_error_ft = float(self.target_altitude_ft - h)
-            roll_angle = float(obs_or_state["phi"])
-            pitch_angle = float(obs_or_state["theta"])
-            roll_rate = float(obs_or_state["p"])
-            pitch_rate = float(obs_or_state["q"])
-            yaw_rate = float(obs_or_state["r"])
-            speed_fps = float(np.sqrt(obs_or_state["u"]**2 + obs_or_state["v"]**2 + obs_or_state["w"]**2))
-        else:
-            altitude_error_ft = float(obs_or_state[OBS_ALTITUDE_ERROR_FT])
-            roll_angle = float(obs_or_state[OBS_PHI])
-            roll_rate = float(obs_or_state[OBS_P])
-            pitch_rate = float(obs_or_state[OBS_Q])
-            yaw_rate = float(obs_or_state[OBS_R])
-            pitch_angle = float(obs_or_state[OBS_THETA])
-            speed_fps = float(np.sqrt(obs_or_state[OBS_U_FPS]**2 + obs_or_state[OBS_V_FPS]**2 + obs_or_state[OBS_W_FPS]**2))
+        h = float(obs_or_state["h"])
+        altitude_error_ft = float(self.target_altitude_ft - h)
+        roll_angle = float(obs_or_state["phi"])
+        pitch_angle = float(obs_or_state["theta"])
+        roll_rate = float(obs_or_state["p"])
+        pitch_rate = float(obs_or_state["q"])
+        yaw_rate = float(obs_or_state["r"])
+        u = float(obs_or_state["u"])
+        v = float(obs_or_state["v"])
+        w = float(obs_or_state["w"])
+        speed_fps = float(np.sqrt(u**2 + v**2 + w**2))
+        v_rate = u * np.sin(pitch_angle) - v * np.sin(roll_angle) * np.cos(pitch_angle) - w * np.cos(roll_angle) * np.cos(pitch_angle)
+        # self.altitude_error_integral += altitude_error_ft * (1.0 / 30.0)
+        # self.altitude_error_integral = np.clip(self.altitude_error_integral, -2000.0, 2000.0)
 
-        self.altitude_error_integral += altitude_error_ft * (1.0 / 30.0)
-        self.altitude_error_integral = np.clip(self.altitude_error_integral, -2000.0, 2000.0)
-
-        roll_cmd = np.clip(-1.6 * roll_angle - 0.45 * roll_rate, -0.35, 0.35)
+        roll_cmd = np.clip(-1.6 * roll_angle - 0.45 * roll_rate, -1.0, 1.0)
         yaw_cmd = np.clip(-0.25 * yaw_rate, -0.15, 0.15)
 
         pitch_cmd = np.clip(
-            0.0022 * altitude_error_ft
+            -0.0022 * altitude_error_ft
+            + 0.004 * v_rate
             + 0.70 * pitch_angle
-            - 0.30 * pitch_rate
-            + 0.00006 * self.altitude_error_integral,
-            -0.50,
-            0.50,
+            + 0.30 * pitch_rate,
+            # + 0.00006 * self.altit÷=ude_error_integral,
+            -1.0,
+            1.0,
         )
 
         speed_error_fps = self.target_speed_fps - speed_fps
-        throttle_cmd = np.clip(0.64 + 0.01 * speed_error_fps, 0.50, 0.95)
+        throttle_cmd = np.clip(0.64 + 0.01 * speed_error_fps, 0.0, 1.0)
         return np.array([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd], dtype=np.float32)
 
 
@@ -585,17 +580,20 @@ def build_altitude_hold_policy_jax(target_altitude_ft, target_speed_fps):
         
         roll_cmd = jnp.clip(-1.6 * roll_angle - 0.45 * roll_rate, -0.35, 0.35)
         yaw_cmd = jnp.clip(-0.25 * yaw_rate, -0.15, 0.15)
+        v_rate = u * jnp.sin(pitch_angle) - v * jnp.sin(roll_angle) * jnp.cos(pitch_angle) - w * jnp.cos(roll_angle) * jnp.cos(pitch_angle)
+
 
         pitch_cmd = jnp.clip(
-            0.0022 * altitude_error_ft
+            -0.0022 * altitude_error_ft
+            + 0.004 * v_rate
             + 0.70 * pitch_angle
             - 0.30 * pitch_rate,
-            -0.50,
-            0.50,
+            -1.0,
+            1.0,
         )
 
         speed_error_fps = target_speed_fps - speed_fps
-        throttle_cmd = jnp.clip(0.64 + 0.01 * speed_error_fps, 0.50, 0.95)
+        throttle_cmd = jnp.clip(0.64 + 0.01 * speed_error_fps, 0.0, 1.0)
         return jnp.stack([roll_cmd, pitch_cmd, yaw_cmd, throttle_cmd])
 
     return policy_fn
@@ -672,6 +670,447 @@ def parse_args():
         help="Truncate the nominal dyn trajectory at this fraction in [0,1] (1=full traj, 0.5=first half).",
     )
     return parser.parse_args()
+
+def collect_pre_step_diagnostics(
+    step,
+    controller_tag,
+    controller,
+    gatekeeper_state,
+    gatekeeper_bundle,
+    controller_state,
+    action,
+    nominal_action,
+    mppi_plan_call_index,
+    env,
+    mppi_plan_rows,
+    mppi_plan_action_sequences,
+    mppi_plan_virtual_speed_sequences,
+):
+    if controller_tag in {"mppi", "smooth_mppi"}:
+        plan_debug = None
+        plan_debug_getter = getattr(controller, "get_plan_debug", None)
+        if callable(plan_debug_getter):
+            try:
+                plan_debug = dict(plan_debug_getter())
+            except Exception:
+                plan_debug = None
+        if isinstance(plan_debug, dict):
+            action_plan = np.asarray(plan_debug.get("action_plan", np.zeros((0, 4), dtype=np.float32)), dtype=np.float32)
+            virtual_speed_plan = np.asarray(
+                plan_debug.get("virtual_speed_plan", np.zeros((0,), dtype=np.float32)),
+                dtype=np.float32,
+            ).reshape(-1)
+            if (
+                action_plan.ndim == 2
+                and action_plan.shape[1] == 4
+                and virtual_speed_plan.ndim == 1
+                and action_plan.shape[0] == virtual_speed_plan.shape[0]
+                and action_plan.shape[0] >= 1
+            ):
+                nominal_action_vec = np.asarray(nominal_action, dtype=np.float32)
+                applied_action_vec = np.asarray(action, dtype=np.float32)
+                mppi_plan_rows.append(
+                    {
+                        "call_index": int(mppi_plan_call_index),
+                        "step": int(step),
+                        "time_s": float(step / 30.0),
+                        "progress_s_ft": float(plan_debug.get("progress_s_ft", np.nan)),
+                        "controller_step_index": int(plan_debug.get("step_index", -1)),
+                        "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
+                        "nominal_aileron_cmd": float(nominal_action_vec[0]),
+                        "nominal_elevator_cmd": float(nominal_action_vec[1]),
+                        "nominal_rudder_cmd": float(nominal_action_vec[2]),
+                        "nominal_throttle_cmd": float(nominal_action_vec[3]),
+                        "applied_aileron_cmd": float(applied_action_vec[0]),
+                        "applied_elevator_cmd": float(applied_action_vec[1]),
+                        "applied_rudder_cmd": float(applied_action_vec[2]),
+                        "applied_throttle_cmd": float(applied_action_vec[3]),
+                    }
+                )
+                mppi_plan_action_sequences.append(action_plan.copy())
+                mppi_plan_virtual_speed_sequences.append(virtual_speed_plan.copy())
+                mppi_plan_call_index += 1
+
+    planner_debug = None
+    raw_debug = None
+    debug_getter = getattr(controller, "get_render_debug", None)
+    if callable(debug_getter):
+        raw_debug = debug_getter()
+    if gatekeeper_state is None:
+        if raw_debug is not None:
+            planner_debug = {
+                "candidate_xy": np.asarray(
+                    raw_debug.get("candidate_xy", np.zeros((0, 0, 2), dtype=np.float32)),
+                    dtype=np.float32,
+                ).copy(),
+                "candidate_h_ft": np.asarray(
+                    raw_debug.get("candidate_h_ft", np.zeros((0, 0), dtype=np.float32)),
+                    dtype=np.float32,
+                ).copy(),
+                "final_xy": np.asarray(
+                    raw_debug.get("final_xy", np.zeros((0, 2), dtype=np.float32)),
+                    dtype=np.float32,
+                ).copy(),
+                "final_h_ft": np.asarray(
+                    raw_debug.get("final_h_ft", np.zeros((0,), dtype=np.float32)),
+                    dtype=np.float32,
+                ).copy(),
+                "warm_start_xy": np.asarray(
+                    raw_debug.get("warm_start_xy", np.zeros((0, 2), dtype=np.float32)),
+                    dtype=np.float32,
+                ).copy(),
+                "warm_start_h_ft": np.asarray(
+                    raw_debug.get("warm_start_h_ft", np.zeros((0,), dtype=np.float32)),
+                    dtype=np.float32,
+                ).copy(),
+                "pid_error_xy": np.asarray(
+                    raw_debug.get("pid_error_xy", np.zeros((0, 2), dtype=np.float32)),
+                    dtype=np.float32,
+                ).copy(),
+                "pid_error_h_ft": np.asarray(
+                    raw_debug.get("pid_error_h_ft", np.zeros((0,), dtype=np.float32)),
+                    dtype=np.float32,
+                ).copy(),
+            }
+    else:
+        predicted_xy = np.asarray(
+            gatekeeper_state.predicted_trajectories
+            if gatekeeper_state.predicted_trajectories is not None
+            else np.zeros((0, 0, 2), dtype=np.float32),
+            dtype=np.float32,
+        )
+        predicted_h_ft = np.zeros((0, 0), dtype=np.float32)
+        if predicted_xy.ndim == 3 and predicted_xy.shape[-1] == 2:
+            predicted_h_ft = np.full(
+                (predicted_xy.shape[0], predicted_xy.shape[1]),
+                float(controller_state["h"]),
+                dtype=np.float32,
+            )
+        planner_debug = {
+            "gk_trajectories": predicted_xy,
+            "gk_h_ft": predicted_h_ft,
+            "failure_mask": np.asarray(
+                gatekeeper_state.failure_mask
+                if gatekeeper_state.failure_mask is not None
+                else np.zeros((0,), dtype=bool),
+                dtype=bool,
+            ),
+            "m_star": int(gatekeeper_state.m_star),
+            "s_t": int(gatekeeper_state.s_prev),
+            "plan_start_t": int(gatekeeper_state.plan_start_t),
+            "is_reverting": bool(gatekeeper_state.is_reverting),
+            "using_backup": bool(gatekeeper_state.using_backup),
+            "q_bar_star": float(gatekeeper_state.q_bar_star),
+            "epsilon": float(gatekeeper_bundle["gatekeeper"].params.epsilon),
+        }
+        if raw_debug is not None:
+            planner_debug["warm_start_xy"] = np.asarray(
+                raw_debug.get("warm_start_xy", np.zeros((0, 2), dtype=np.float32)),
+                dtype=np.float32,
+            ).copy()
+            planner_debug["warm_start_h_ft"] = np.asarray(
+                raw_debug.get("warm_start_h_ft", np.zeros((0,), dtype=np.float32)),
+                dtype=np.float32,
+            ).copy()
+
+    if controller_tag == "simple" and gatekeeper_state is None:
+        guidance = dict(getattr(controller, "last_guidance", {}) or {})
+        lookahead_north_ft = float(guidance.get("lookahead_north_ft", controller_state["p_N"]))
+        lookahead_center_east_ft = float(guidance.get("lookahead_center_east_ft", controller_state["p_E"]))
+
+        if planner_debug is None:
+            planner_debug = {
+                "candidate_xy": np.zeros((0, 0, 2), dtype=np.float32),
+                "candidate_h_ft": np.zeros((0, 0), dtype=np.float32),
+                "final_xy": np.zeros((0, 2), dtype=np.float32),
+                "final_h_ft": np.zeros((0,), dtype=np.float32),
+            }
+
+        planner_debug["lookahead_xy"] = np.asarray(
+            [[lookahead_north_ft, lookahead_center_east_ft]],
+            dtype=np.float32,
+        )
+        lookahead_h_ft = float(controller_state["h"])
+        planner_debug["lookahead_h_ft"] = np.asarray(
+            [lookahead_h_ft],
+            dtype=np.float32,
+        )
+
+    heading_deg = _wrap_heading_deg(controller_state["psi"])
+    heading_cmd_deg = heading_deg
+    if controller_tag == "simple":
+        simple_guidance = dict(getattr(controller, "last_guidance", {}) or {})
+        heading_cmd_deg = float(simple_guidance.get("centerline_heading_deg", heading_deg))
+    else:
+        get_hdg_cmd = getattr(controller, "get_reference_heading_rad", None)
+        if callable(get_hdg_cmd):
+            try:
+                heading_cmd_deg = _wrap_heading_deg(get_hdg_cmd())
+            except Exception:
+                heading_cmd_deg = heading_deg
+
+    hud_debug = {
+        "heading_deg": float(heading_deg),
+        "heading_cmd_deg": float(heading_cmd_deg),
+        "action_cmd": np.asarray(action, dtype=np.float32).copy(),
+    }
+    if gatekeeper_state is not None:
+        hud_debug.update(
+            {
+                "gatekeeper_active": True,
+                "using_backup": bool(gatekeeper_state.using_backup),
+                "is_reverting": bool(gatekeeper_state.is_reverting),
+                "s_t": int(gatekeeper_state.s_prev),
+                "m_star": int(gatekeeper_state.m_star),
+                "q_bar_star": float(gatekeeper_state.q_bar_star),
+                "epsilon": float(gatekeeper_bundle["gatekeeper"].params.epsilon),
+            }
+        )
+
+    invalid_action = False
+    if np.isnan(action).any() or np.isinf(action).any():
+        print(f"Invalid action at step {step}: {action}")
+        invalid_action = True
+
+    set_hud_commands = getattr(env.unwrapped, "set_hud_commands", None)
+    if callable(set_hud_commands):
+        controller_mode_label = {
+            "mppi": "MPPI",
+            "smooth_mppi": "SMPPI",
+            "simple": "SIMPLE",
+            "altitude_hold": "HOLD",
+        }.get(controller_tag, str(controller_tag).upper())
+        gate_label = "TRACK"
+        if gatekeeper_state is not None:
+            gate_label = "BACKUP" if gatekeeper_state.using_backup else "NOMINAL"
+        guidance_label = f"HDG {int(round(heading_cmd_deg)) % 360:03d}"
+        set_hud_commands(
+            heading_cmd_deg=heading_cmd_deg,
+            mode_labels=(controller_mode_label, gate_label, guidance_label),
+        )
+    return mppi_plan_call_index, planner_debug, hud_debug, invalid_action
+
+def collect_post_step_diagnostics(
+    step,
+    controller_tag,
+    controller,
+    gatekeeper_state,
+    controller_state,
+    post_controller_state,
+    action,
+    prev_applied_action,
+    info,
+    state,
+    env,
+    termination_reason,
+    plan_ms,
+    gk_ms,
+    gk_nom_prep,
+    gk_update_ms,
+    gk_backup_ms,
+    start_path_north_ft,
+    mppi_tracking_rows,
+    simple_diagnostic_rows,
+    pid_traj_diagnostic_rows,
+):
+    width_ft = float(info.get("canyon_width_ft", np.nan))
+    lateral_ft = float(info.get("lateral_error_ft", np.nan))
+    speed_fps = float(
+        np.sqrt(
+            float(state["u"]) ** 2 + float(state["v"]) ** 2 + float(state["w"]) ** 2
+        )
+    )
+    if controller_tag in {"mppi", "smooth_mppi"}:
+        mppi_cfg = getattr(controller, "config", None)
+        if mppi_cfg is None:
+            raise RuntimeError("MPPI controller missing config while collecting debug diagnostics.")
+        tracking_metrics = dict(controller.get_tracking_metrics(post_controller_state))
+        action_vec = np.asarray(action, dtype=np.float32)
+        action_rate = action_vec - prev_applied_action
+
+        progress_s_ft = float(tracking_metrics["progress_s_ft"])
+        virtual_speed_fps = float(tracking_metrics["virtual_speed_fps"])
+        contour_error_ft = float(tracking_metrics["contour_error_ft"])
+        lag_error_ft = float(tracking_metrics["lag_error_ft"])
+        position_error_ft = float(tracking_metrics["position_error_ft"])
+        altitude_error_ft = float(tracking_metrics["altitude_error_ft"])
+        contour_cost_est = float(tracking_metrics["contour_cost_est"])
+        lag_cost_est = float(tracking_metrics["lag_cost_est"])
+        progress_reward_est = float(tracking_metrics["progress_reward_est"])
+        virtual_speed_cost_est = float(tracking_metrics["virtual_speed_cost_est"])
+        contouring_cost_est = float(tracking_metrics["contouring_cost_est"])
+
+        terrain_clearance_ft = float(info.get("terrain_clearance_ft", np.nan))
+        terrain_safe_clearance_ft = float(mppi_cfg.terrain_safe_clearance_ft)
+        if np.isfinite(terrain_clearance_ft):
+            if terrain_clearance_ft <= 0.0:
+                terrain_cost_est = float(mppi_cfg.terrain_collision_penalty)
+            else:
+                terrain_cost_est = float(
+                    min(
+                        float(mppi_cfg.terrain_collision_penalty),
+                        float(mppi_cfg.terrain_repulsion_scale)
+                        * np.exp(
+                            -float(mppi_cfg.terrain_decay_rate_ft_inv)
+                            * (terrain_clearance_ft - terrain_safe_clearance_ft)
+                        ),
+                    )
+                )
+        else:
+            terrain_cost_est = np.nan
+
+        rate_weights = np.asarray(mppi_cfg.control_rate_weights, dtype=np.float64)
+        rate_cost_est = float(np.sum(rate_weights * np.square(action_rate)))
+
+        alpha_rad = float(np.arctan2(float(post_controller_state["w"]), max(float(post_controller_state["u"]), 1.0)))
+        alpha_deg = float(np.degrees(alpha_rad))
+        alpha_limit_deg = float(np.degrees(float(mppi_cfg.alpha_limit_rad)))
+        alpha_excess_rad = max(alpha_rad - float(mppi_cfg.alpha_limit_rad), 0.0)
+        nz_g = float(post_controller_state.get("nz", 1.0))
+        nz_excess_g = max(
+            float(mppi_cfg.nz_min_g) - nz_g,
+            nz_g - float(mppi_cfg.nz_max_g),
+            0.0,
+        )
+        limit_cost_est = float(
+            float(mppi_cfg.nz_penalty_weight) * (nz_excess_g ** 2)
+            + float(mppi_cfg.alpha_penalty_weight) * (alpha_excess_rad ** 2)
+        )
+        total_stage_cost_est = float(
+            contouring_cost_est + terrain_cost_est + rate_cost_est + limit_cost_est
+        )
+        rudder_pos_norm = np.nan
+        rudder_pos_rad = np.nan
+        sim = getattr(env.unwrapped, "simulation", None)
+        if sim is not None:
+            try:
+                rudder_pos_norm = float(sim.get_property_value("fcs/rudder-pos-norm"))
+            except Exception:
+                pass
+            try:
+                rudder_pos_rad = float(sim.get_property_value("fcs/rudder-pos-rad"))
+            except Exception:
+                pass
+
+        tracking_row = {
+            "step": int(step),
+            "time_s": float(step / 30.0),
+            "progress_s_ft": float(progress_s_ft),
+            "virtual_speed_fps": float(virtual_speed_fps),
+            "reference_north_ft": float(tracking_metrics["reference_north_ft"]),
+            "reference_east_ft": float(tracking_metrics["reference_east_ft"]),
+            "reference_altitude_ft": float(tracking_metrics["reference_altitude_ft"]),
+            "reference_heading_deg": float(np.degrees(float(tracking_metrics["reference_heading_rad"]))),
+            "contour_error_ft": float(contour_error_ft),
+            "lag_error_ft": float(lag_error_ft),
+            "position_error_ft": float(position_error_ft),
+            "altitude_error_ft": float(altitude_error_ft),
+            "terrain_clearance_ft": float(terrain_clearance_ft),
+            "terrain_safe_clearance_ft": float(terrain_safe_clearance_ft),
+            "nz_g": float(nz_g),
+            "nz_min_g": float(mppi_cfg.nz_min_g),
+            "nz_max_g": float(mppi_cfg.nz_max_g),
+            "alpha_deg": float(alpha_deg),
+            "alpha_limit_deg": float(alpha_limit_deg),
+            "contour_cost_est": float(contour_cost_est),
+            "lag_cost_est": float(lag_cost_est),
+            "progress_reward_est": float(progress_reward_est),
+            "virtual_speed_cost_est": float(virtual_speed_cost_est),
+            "contouring_cost_est": float(contouring_cost_est),
+            "terrain_cost_est": float(terrain_cost_est),
+            "rate_cost_est": float(rate_cost_est),
+            "limit_cost_est": float(limit_cost_est),
+            "total_stage_cost_est": float(total_stage_cost_est),
+            "aileron_cmd": float(action_vec[0]),
+            "elevator_cmd": float(action_vec[1]),
+            "rudder_cmd": float(action_vec[2]),
+            "throttle_cmd": float(action_vec[3]),
+            "rudder_pos_norm": float(rudder_pos_norm),
+            "rudder_pos_rad": float(rudder_pos_rad),
+            "aileron_rate": float(action_rate[0]),
+            "elevator_rate": float(action_rate[1]),
+            "rudder_rate": float(action_rate[2]),
+            "throttle_rate": float(action_rate[3]),
+            "termination_reason": str(termination_reason),
+            "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
+            "plan_ms": float(plan_ms),
+            "gatekeeper_ms": float(gk_ms),
+            "gatekeeper_nominal_prep_ms": float(gk_nom_prep),
+            "gatekeeper_update_ms": float(gk_update_ms),
+            "gatekeeper_backup_ms": float(gk_backup_ms),
+        }
+        _append_state_fields(tracking_row, prefix="pre", state_dict=controller_state)
+        _append_state_fields(tracking_row, prefix="post", state_dict=post_controller_state)
+        mppi_tracking_rows.append(tracking_row)
+        prev_applied_action = action_vec.copy()
+    if controller_tag == "simple":
+        simple_guidance = dict(getattr(controller, "last_guidance", {}) or {})
+        simple_diagnostic_rows.append(
+            {
+                "step": int(step),
+                "time_s": float(step / 30.0),
+                "lateral_error_ft": float(info.get("lateral_error_ft", np.nan)),
+                "lateral_error_norm": float(info.get("lateral_error_norm", np.nan)),
+                "heading_error_deg": float(simple_guidance.get("heading_error_deg", np.nan)),
+                "roll_cmd": float(simple_guidance.get("roll_cmd", np.nan)),
+                "roll_des_deg": float(simple_guidance.get("roll_des_deg", np.nan)),
+                "phi_deg": float(np.degrees(float(controller_state["phi"]))),
+                "track_accel_cmd_fps2": float(simple_guidance.get("track_accel_cmd_fps2", np.nan)),
+                "nz_des": float(simple_guidance.get("nz_des", np.nan)),
+                "pitch_cmd": float(simple_guidance.get("pitch_cmd", np.nan)),
+                "speed_fps": float(speed_fps),
+                "altitude_error_ft": float(info.get("altitude_error_ft", np.nan)),
+                "terrain_clearance_ft": float(info.get("terrain_clearance_ft", np.nan)),
+            }
+        )
+
+    if controller_tag == "pid_traj":
+        pid_diag = dict(getattr(controller, "last_diagnostics", {}) or {})
+        pid_traj_diagnostic_rows.append(
+            {
+                "step": int(step),
+                "time_s": float(step / 30.0),
+                "e_xtrk": float(pid_diag.get("e_xtrk", np.nan)),
+                "e_z": float(pid_diag.get("e_z", np.nan)),
+                "phi_ref": float(pid_diag.get("phi_ref", np.nan)),
+                "phi_cmd": float(pid_diag.get("phi_cmd", np.nan)),
+                "phi": float(controller_state["phi"]),
+                "alpha_ref": float(pid_diag.get("alpha_ref", np.nan)),
+                "alpha_cmd": float(pid_diag.get("alpha_cmd", np.nan)),
+                "alpha": float(controller_state["alpha"]),
+                "p_cmd": float(pid_diag.get("p_cmd", np.nan)),
+                "p": float(controller_state["p"]),
+                "q_cmd": float(pid_diag.get("q_cmd", np.nan)),
+                "q": float(controller_state["q"]),
+                "elevator_cmd": float(pid_diag.get("elevator_cmd", np.nan)),
+                "aileron_cmd": float(pid_diag.get("aileron_cmd", np.nan)),
+                "rudder_cmd": float(pid_diag.get("rudder_cmd", np.nan)),
+                "throttle_cmd": float(pid_diag.get("throttle_cmd", np.nan)),
+                "v_opt_val": float(pid_diag.get("v_opt_val", np.nan)),
+                "V": float(speed_fps),
+            }
+        )
+
+    if step % 5 == 0:
+        if controller_tag in {"mppi", "smooth_mppi"}:
+            mode_label = "NOM"
+            if gatekeeper_state is not None and bool(gatekeeper_state.using_backup):
+                mode_label = "BACKUP"
+            print(
+                f"{step:<5} | {progress_s_ft:<8.0f} | {contour_error_ft:<8.1f} | {lag_error_ft:<8.1f} | "
+                f"{position_error_ft:<8.1f} | {altitude_error_ft:<8.1f} | {terrain_clearance_ft:<7.1f} | "
+                f"{total_stage_cost_est:<10.1f} | {mode_label:<6} | "
+                f"{plan_ms:<8.1f} | {gk_ms:<8.1f}"
+            )
+        else:
+            rel_north_ft = float(controller_state["p_N"] - start_path_north_ft)
+            rel_alt_ft = float(controller_state["h"])
+            print(
+                f"{step:<5} | {rel_north_ft:<8.0f} | {lateral_ft:<8.0f} | {rel_alt_ft:<8.0f} | "
+                f"{speed_fps:<6.0f} | {width_ft:<6.0f} | {plan_ms:<8.1f} | {gk_ms:<8.1f} | "
+                f"{gk_nom_prep:<7.1f} | {gk_update_ms:<7.1f} | {gk_backup_ms:<7.1f}"
+            )
+    return prev_applied_action
 
 def main():
     args = parse_args()
@@ -1020,17 +1459,19 @@ def main():
         )
         print("-" * 110)
 
+    # MAIN LOOP
     try:
         prev_applied_action = np.asarray([0.0, 0.0, 0.0, 0.55], dtype=np.float32)
         for step in range(int(args.max_steps)):
             controller_state = to_mppi_state(env, state, altitude_ref_ft)
 
             t0 = time.time()
-            if controller_tag == "altitude_hold":
-                action = controller.get_action(obs)
-            else:
-                nominal_action = controller.get_action(controller_state)
-                action = nominal_action
+            # if controller_tag == "altitude_hold":
+            #     nominal_action = controller.get_action(obs)
+            #     action = nominal_action
+            # else:
+            nominal_action = controller.get_action(controller_state)
+            action = nominal_action
             plan_ms = (time.time() - t0) * 1000.0
 
             t0 = time.time()
@@ -1088,207 +1529,23 @@ def main():
                 gatekeeper_prev_using_backup = bool(gatekeeper_state.using_backup)
             gk_ms = (time.time() - t0) * 1000.0
 
-            if controller_tag in {"mppi", "smooth_mppi"}:
-                plan_debug = None
-                plan_debug_getter = getattr(controller, "get_plan_debug", None)
-                if callable(plan_debug_getter):
-                    try:
-                        plan_debug = dict(plan_debug_getter())
-                    except Exception:
-                        plan_debug = None
-                if isinstance(plan_debug, dict):
-                    action_plan = np.asarray(plan_debug.get("action_plan", np.zeros((0, 4), dtype=np.float32)), dtype=np.float32)
-                    virtual_speed_plan = np.asarray(
-                        plan_debug.get("virtual_speed_plan", np.zeros((0,), dtype=np.float32)),
-                        dtype=np.float32,
-                    ).reshape(-1)
-                    if (
-                        action_plan.ndim == 2
-                        and action_plan.shape[1] == 4
-                        and virtual_speed_plan.ndim == 1
-                        and action_plan.shape[0] == virtual_speed_plan.shape[0]
-                        and action_plan.shape[0] >= 1
-                    ):
-                        nominal_action_vec = np.asarray(nominal_action, dtype=np.float32)
-                        applied_action_vec = np.asarray(action, dtype=np.float32)
-                        mppi_plan_rows.append(
-                            {
-                                "call_index": int(mppi_plan_call_index),
-                                "step": int(step),
-                                "time_s": float(step / 30.0),
-                                "progress_s_ft": float(plan_debug.get("progress_s_ft", np.nan)),
-                                "controller_step_index": int(plan_debug.get("step_index", -1)),
-                                "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
-                                "nominal_aileron_cmd": float(nominal_action_vec[0]),
-                                "nominal_elevator_cmd": float(nominal_action_vec[1]),
-                                "nominal_rudder_cmd": float(nominal_action_vec[2]),
-                                "nominal_throttle_cmd": float(nominal_action_vec[3]),
-                                "applied_aileron_cmd": float(applied_action_vec[0]),
-                                "applied_elevator_cmd": float(applied_action_vec[1]),
-                                "applied_rudder_cmd": float(applied_action_vec[2]),
-                                "applied_throttle_cmd": float(applied_action_vec[3]),
-                            }
-                        )
-                        mppi_plan_action_sequences.append(action_plan.copy())
-                        mppi_plan_virtual_speed_sequences.append(virtual_speed_plan.copy())
-                        mppi_plan_call_index += 1
-
-            planner_debug = None
-            raw_debug = None
-            debug_getter = getattr(controller, "get_render_debug", None)
-            if callable(debug_getter):
-                raw_debug = debug_getter()
-            if gatekeeper_state is None:
-                if raw_debug is not None:
-                    planner_debug = {
-                        "candidate_xy": np.asarray(
-                            raw_debug.get("candidate_xy", np.zeros((0, 0, 2), dtype=np.float32)),
-                            dtype=np.float32,
-                        ).copy(),
-                        "candidate_h_ft": np.asarray(
-                            raw_debug.get("candidate_h_ft", np.zeros((0, 0), dtype=np.float32)),
-                            dtype=np.float32,
-                        ).copy(),
-                        "final_xy": np.asarray(
-                            raw_debug.get("final_xy", np.zeros((0, 2), dtype=np.float32)),
-                            dtype=np.float32,
-                        ).copy(),
-                        "final_h_ft": np.asarray(
-                            raw_debug.get("final_h_ft", np.zeros((0,), dtype=np.float32)),
-                            dtype=np.float32,
-                        ).copy(),
-                        "warm_start_xy": np.asarray(
-                            raw_debug.get("warm_start_xy", np.zeros((0, 2), dtype=np.float32)),
-                            dtype=np.float32,
-                        ).copy(),
-                        "warm_start_h_ft": np.asarray(
-                            raw_debug.get("warm_start_h_ft", np.zeros((0,), dtype=np.float32)),
-                            dtype=np.float32,
-                        ).copy(),
-                        "pid_error_xy": np.asarray(
-                            raw_debug.get("pid_error_xy", np.zeros((0, 2), dtype=np.float32)),
-                            dtype=np.float32,
-                        ).copy(),
-                        "pid_error_h_ft": np.asarray(
-                            raw_debug.get("pid_error_h_ft", np.zeros((0,), dtype=np.float32)),
-                            dtype=np.float32,
-                        ).copy(),
-                    }
-            else:
-                predicted_xy = np.asarray(
-                    gatekeeper_state.predicted_trajectories
-                    if gatekeeper_state.predicted_trajectories is not None
-                    else np.zeros((0, 0, 2), dtype=np.float32),
-                    dtype=np.float32,
-                )
-                predicted_h_ft = np.zeros((0, 0), dtype=np.float32)
-                if predicted_xy.ndim == 3 and predicted_xy.shape[-1] == 2:
-                    predicted_h_ft = np.full(
-                        (predicted_xy.shape[0], predicted_xy.shape[1]),
-                        float(controller_state["h"]),
-                        dtype=np.float32,
-                    )
-                planner_debug = {
-                    "gk_trajectories": predicted_xy,
-                    "gk_h_ft": predicted_h_ft,
-                    "failure_mask": np.asarray(
-                        gatekeeper_state.failure_mask
-                        if gatekeeper_state.failure_mask is not None
-                        else np.zeros((0,), dtype=bool),
-                        dtype=bool,
-                    ),
-                    "m_star": int(gatekeeper_state.m_star),
-                    "s_t": int(gatekeeper_state.s_prev),
-                    "plan_start_t": int(gatekeeper_state.plan_start_t),
-                    "is_reverting": bool(gatekeeper_state.is_reverting),
-                    "using_backup": bool(gatekeeper_state.using_backup),
-                    "q_bar_star": float(gatekeeper_state.q_bar_star),
-                    "epsilon": float(gatekeeper_bundle["gatekeeper"].params.epsilon),
-                }
-                if raw_debug is not None:
-                    planner_debug["warm_start_xy"] = np.asarray(
-                        raw_debug.get("warm_start_xy", np.zeros((0, 2), dtype=np.float32)),
-                        dtype=np.float32,
-                    ).copy()
-                    planner_debug["warm_start_h_ft"] = np.asarray(
-                        raw_debug.get("warm_start_h_ft", np.zeros((0,), dtype=np.float32)),
-                        dtype=np.float32,
-                    ).copy()
-
-            if controller_tag == "simple" and gatekeeper_state is None:
-                guidance = dict(getattr(controller, "last_guidance", {}) or {})
-                lookahead_north_ft = float(guidance.get("lookahead_north_ft", controller_state["p_N"]))
-                lookahead_center_east_ft = float(guidance.get("lookahead_center_east_ft", controller_state["p_E"]))
-
-                if planner_debug is None:
-                    planner_debug = {
-                        "candidate_xy": np.zeros((0, 0, 2), dtype=np.float32),
-                        "candidate_h_ft": np.zeros((0, 0), dtype=np.float32),
-                        "final_xy": np.zeros((0, 2), dtype=np.float32),
-                        "final_h_ft": np.zeros((0,), dtype=np.float32),
-                    }
-
-                planner_debug["lookahead_xy"] = np.asarray(
-                    [[lookahead_north_ft, lookahead_center_east_ft]],
-                    dtype=np.float32,
-                )
-                lookahead_h_ft = float(controller_state["h"])
-                planner_debug["lookahead_h_ft"] = np.asarray(
-                    [lookahead_h_ft],
-                    dtype=np.float32,
-                )
-
-            heading_deg = _wrap_heading_deg(controller_state["psi"])
-            heading_cmd_deg = heading_deg
-            if controller_tag == "simple":
-                simple_guidance = dict(getattr(controller, "last_guidance", {}) or {})
-                heading_cmd_deg = float(simple_guidance.get("centerline_heading_deg", heading_deg))
-            else:
-                get_hdg_cmd = getattr(controller, "get_reference_heading_rad", None)
-                if callable(get_hdg_cmd):
-                    try:
-                        heading_cmd_deg = _wrap_heading_deg(get_hdg_cmd())
-                    except Exception:
-                        heading_cmd_deg = heading_deg
-
-            hud_debug = {
-                "heading_deg": float(heading_deg),
-                "heading_cmd_deg": float(heading_cmd_deg),
-                "action_cmd": np.asarray(action, dtype=np.float32).copy(),
-            }
-            if gatekeeper_state is not None:
-                hud_debug.update(
-                    {
-                        "gatekeeper_active": True,
-                        "using_backup": bool(gatekeeper_state.using_backup),
-                        "is_reverting": bool(gatekeeper_state.is_reverting),
-                        "s_t": int(gatekeeper_state.s_prev),
-                        "m_star": int(gatekeeper_state.m_star),
-                        "q_bar_star": float(gatekeeper_state.q_bar_star),
-                        "epsilon": float(gatekeeper_bundle["gatekeeper"].params.epsilon),
-                    }
-                )
-
-            if np.isnan(action).any() or np.isinf(action).any():
-                print(f"Invalid action at step {step}: {action}")
+            mppi_plan_call_index, planner_debug, hud_debug, invalid_action = collect_pre_step_diagnostics(
+                step=step,
+                controller_tag=controller_tag,
+                controller=controller,
+                gatekeeper_state=gatekeeper_state,
+                gatekeeper_bundle=gatekeeper_bundle,
+                controller_state=controller_state,
+                action=action,
+                nominal_action=nominal_action,
+                mppi_plan_call_index=mppi_plan_call_index,
+                env=env,
+                mppi_plan_rows=mppi_plan_rows,
+                mppi_plan_action_sequences=mppi_plan_action_sequences,
+                mppi_plan_virtual_speed_sequences=mppi_plan_virtual_speed_sequences,
+            )
+            if invalid_action:
                 break
-
-            set_hud_commands = getattr(env.unwrapped, "set_hud_commands", None)
-            if callable(set_hud_commands):
-                controller_mode_label = {
-                    "mppi": "MPPI",
-                    "smooth_mppi": "SMPPI",
-                    "simple": "SIMPLE",
-                    "altitude_hold": "HOLD",
-                }.get(controller_tag, str(controller_tag).upper())
-                gate_label = "TRACK"
-                if gatekeeper_state is not None:
-                    gate_label = "BACKUP" if gatekeeper_state.using_backup else "NOMINAL"
-                guidance_label = f"HDG {int(round(heading_cmd_deg)) % 360:03d}"
-                set_hud_commands(
-                    heading_cmd_deg=heading_cmd_deg,
-                    mode_labels=(controller_mode_label, gate_label, guidance_label),
-                )
 
             obs, _, terminated, truncated, info = env.step(action)
             termination_reason = info.get("termination_reason", "running")
@@ -1296,203 +1553,29 @@ def main():
             post_controller_state = to_mppi_state(env, state, altitude_ref_ft)
             recorder.record_step(planner_debug=planner_debug, hud_debug=hud_debug)
 
-            width_ft = float(info.get("canyon_width_ft", np.nan))
-            lateral_ft = float(info.get("lateral_error_ft", np.nan))
-            speed_fps = float(
-                np.sqrt(
-                    float(state["u"]) ** 2 + float(state["v"]) ** 2 + float(state["w"]) ** 2
-                )
+            prev_applied_action = collect_post_step_diagnostics(
+                step=step,
+                controller_tag=controller_tag,
+                controller=controller,
+                gatekeeper_state=gatekeeper_state,
+                controller_state=controller_state,
+                post_controller_state=post_controller_state,
+                action=action,
+                prev_applied_action=prev_applied_action,
+                info=info,
+                state=state,
+                env=env,
+                termination_reason=termination_reason,
+                plan_ms=plan_ms,
+                gk_ms=gk_ms,
+                gk_nom_prep=gk_nom_prep,
+                gk_update_ms=gk_update_ms,
+                gk_backup_ms=gk_backup_ms,
+                start_path_north_ft=start_path_north_ft,
+                mppi_tracking_rows=mppi_tracking_rows,
+                simple_diagnostic_rows=simple_diagnostic_rows,
+                pid_traj_diagnostic_rows=pid_traj_diagnostic_rows,
             )
-            if controller_tag in {"mppi", "smooth_mppi"}:
-                mppi_cfg = getattr(controller, "config", None)
-                if mppi_cfg is None:
-                    raise RuntimeError("MPPI controller missing config while collecting debug diagnostics.")
-                tracking_metrics = dict(controller.get_tracking_metrics(post_controller_state))
-                action_vec = np.asarray(action, dtype=np.float32)
-                action_rate = action_vec - prev_applied_action
-
-                progress_s_ft = float(tracking_metrics["progress_s_ft"])
-                virtual_speed_fps = float(tracking_metrics["virtual_speed_fps"])
-                contour_error_ft = float(tracking_metrics["contour_error_ft"])
-                lag_error_ft = float(tracking_metrics["lag_error_ft"])
-                position_error_ft = float(tracking_metrics["position_error_ft"])
-                altitude_error_ft = float(tracking_metrics["altitude_error_ft"])
-                contour_cost_est = float(tracking_metrics["contour_cost_est"])
-                lag_cost_est = float(tracking_metrics["lag_cost_est"])
-                progress_reward_est = float(tracking_metrics["progress_reward_est"])
-                virtual_speed_cost_est = float(tracking_metrics["virtual_speed_cost_est"])
-                contouring_cost_est = float(tracking_metrics["contouring_cost_est"])
-
-                terrain_clearance_ft = float(info.get("terrain_clearance_ft", np.nan))
-                terrain_safe_clearance_ft = float(mppi_cfg.terrain_safe_clearance_ft)
-                if np.isfinite(terrain_clearance_ft):
-                    if terrain_clearance_ft <= 0.0:
-                        terrain_cost_est = float(mppi_cfg.terrain_collision_penalty)
-                    else:
-                        terrain_cost_est = float(
-                            min(
-                                float(mppi_cfg.terrain_collision_penalty),
-                                float(mppi_cfg.terrain_repulsion_scale)
-                                * np.exp(
-                                    -float(mppi_cfg.terrain_decay_rate_ft_inv)
-                                    * (terrain_clearance_ft - terrain_safe_clearance_ft)
-                                ),
-                            )
-                        )
-                else:
-                    terrain_cost_est = np.nan
-
-                rate_weights = np.asarray(mppi_cfg.control_rate_weights, dtype=np.float64)
-                rate_cost_est = float(np.sum(rate_weights * np.square(action_rate)))
-
-                alpha_rad = float(np.arctan2(float(post_controller_state["w"]), max(float(post_controller_state["u"]), 1.0)))
-                alpha_deg = float(np.degrees(alpha_rad))
-                alpha_limit_deg = float(np.degrees(float(mppi_cfg.alpha_limit_rad)))
-                alpha_excess_rad = max(alpha_rad - float(mppi_cfg.alpha_limit_rad), 0.0)
-                nz_g = float(post_controller_state.get("nz", 1.0))
-                nz_excess_g = max(
-                    float(mppi_cfg.nz_min_g) - nz_g,
-                    nz_g - float(mppi_cfg.nz_max_g),
-                    0.0,
-                )
-                limit_cost_est = float(
-                    float(mppi_cfg.nz_penalty_weight) * (nz_excess_g ** 2)
-                    + float(mppi_cfg.alpha_penalty_weight) * (alpha_excess_rad ** 2)
-                )
-                total_stage_cost_est = float(
-                    contouring_cost_est + terrain_cost_est + rate_cost_est + limit_cost_est
-                )
-                rudder_pos_norm = np.nan
-                rudder_pos_rad = np.nan
-                sim = getattr(env.unwrapped, "simulation", None)
-                if sim is not None:
-                    try:
-                        rudder_pos_norm = float(sim.get_property_value("fcs/rudder-pos-norm"))
-                    except Exception:
-                        pass
-                    try:
-                        rudder_pos_rad = float(sim.get_property_value("fcs/rudder-pos-rad"))
-                    except Exception:
-                        pass
-
-                tracking_row = {
-                    "step": int(step),
-                    "time_s": float(step / 30.0),
-                    "progress_s_ft": float(progress_s_ft),
-                    "virtual_speed_fps": float(virtual_speed_fps),
-                    "reference_north_ft": float(tracking_metrics["reference_north_ft"]),
-                    "reference_east_ft": float(tracking_metrics["reference_east_ft"]),
-                    "reference_altitude_ft": float(tracking_metrics["reference_altitude_ft"]),
-                    "reference_heading_deg": float(np.degrees(float(tracking_metrics["reference_heading_rad"]))),
-                    "contour_error_ft": float(contour_error_ft),
-                    "lag_error_ft": float(lag_error_ft),
-                    "position_error_ft": float(position_error_ft),
-                    "altitude_error_ft": float(altitude_error_ft),
-                    "terrain_clearance_ft": float(terrain_clearance_ft),
-                    "terrain_safe_clearance_ft": float(terrain_safe_clearance_ft),
-                    "nz_g": float(nz_g),
-                    "nz_min_g": float(mppi_cfg.nz_min_g),
-                    "nz_max_g": float(mppi_cfg.nz_max_g),
-                    "alpha_deg": float(alpha_deg),
-                    "alpha_limit_deg": float(alpha_limit_deg),
-                    "contour_cost_est": float(contour_cost_est),
-                    "lag_cost_est": float(lag_cost_est),
-                    "progress_reward_est": float(progress_reward_est),
-                    "virtual_speed_cost_est": float(virtual_speed_cost_est),
-                    "contouring_cost_est": float(contouring_cost_est),
-                    "terrain_cost_est": float(terrain_cost_est),
-                    "rate_cost_est": float(rate_cost_est),
-                    "limit_cost_est": float(limit_cost_est),
-                    "total_stage_cost_est": float(total_stage_cost_est),
-                    "aileron_cmd": float(action_vec[0]),
-                    "elevator_cmd": float(action_vec[1]),
-                    "rudder_cmd": float(action_vec[2]),
-                    "throttle_cmd": float(action_vec[3]),
-                    "rudder_pos_norm": float(rudder_pos_norm),
-                    "rudder_pos_rad": float(rudder_pos_rad),
-                    "aileron_rate": float(action_rate[0]),
-                    "elevator_rate": float(action_rate[1]),
-                    "rudder_rate": float(action_rate[2]),
-                    "throttle_rate": float(action_rate[3]),
-                    "termination_reason": str(termination_reason),
-                    "using_backup": bool(gatekeeper_state.using_backup) if gatekeeper_state is not None else False,
-                    "plan_ms": float(plan_ms),
-                    "gatekeeper_ms": float(gk_ms),
-                    "gatekeeper_nominal_prep_ms": float(gk_nom_prep),
-                    "gatekeeper_update_ms": float(gk_update_ms),
-                    "gatekeeper_backup_ms": float(gk_backup_ms),
-                }
-                _append_state_fields(tracking_row, prefix="pre", state_dict=controller_state)
-                _append_state_fields(tracking_row, prefix="post", state_dict=post_controller_state)
-                mppi_tracking_rows.append(tracking_row)
-                prev_applied_action = action_vec.copy()
-            if controller_tag == "simple":
-                simple_guidance = dict(getattr(controller, "last_guidance", {}) or {})
-                simple_diagnostic_rows.append(
-                    {
-                        "step": int(step),
-                        "time_s": float(step / 30.0),
-                        "lateral_error_ft": float(info.get("lateral_error_ft", np.nan)),
-                        "lateral_error_norm": float(info.get("lateral_error_norm", np.nan)),
-                        "heading_error_deg": float(simple_guidance.get("heading_error_deg", np.nan)),
-                        "roll_cmd": float(simple_guidance.get("roll_cmd", np.nan)),
-                        "roll_des_deg": float(simple_guidance.get("roll_des_deg", np.nan)),
-                        "phi_deg": float(np.degrees(float(controller_state["phi"]))),
-                        "track_accel_cmd_fps2": float(simple_guidance.get("track_accel_cmd_fps2", np.nan)),
-                        "nz_des": float(simple_guidance.get("nz_des", np.nan)),
-                        "pitch_cmd": float(simple_guidance.get("pitch_cmd", np.nan)),
-                        "speed_fps": float(speed_fps),
-                        "altitude_error_ft": float(info.get("altitude_error_ft", np.nan)),
-                        "terrain_clearance_ft": float(info.get("terrain_clearance_ft", np.nan)),
-                    }
-                )
-
-            if controller_tag == "pid_traj":
-                pid_diag = dict(getattr(controller, "last_diagnostics", {}) or {})
-                pid_traj_diagnostic_rows.append(
-                    {
-                        "step": int(step),
-                        "time_s": float(step / 30.0),
-                        "e_xtrk": float(pid_diag.get("e_xtrk", np.nan)),
-                        "e_z": float(pid_diag.get("e_z", np.nan)),
-                        "phi_ref": float(pid_diag.get("phi_ref", np.nan)),
-                        "phi_cmd": float(pid_diag.get("phi_cmd", np.nan)),
-                        "phi": float(controller_state["phi"]),
-                        "alpha_ref": float(pid_diag.get("alpha_ref", np.nan)),
-                        "alpha_cmd": float(pid_diag.get("alpha_cmd", np.nan)),
-                        "alpha": float(controller_state["alpha"]),
-                        "p_cmd": float(pid_diag.get("p_cmd", np.nan)),
-                        "p": float(controller_state["p"]),
-                        "q_cmd": float(pid_diag.get("q_cmd", np.nan)),
-                        "q": float(controller_state["q"]),
-                        "elevator_cmd": float(pid_diag.get("elevator_cmd", np.nan)),
-                        "aileron_cmd": float(pid_diag.get("aileron_cmd", np.nan)),
-                        "rudder_cmd": float(pid_diag.get("rudder_cmd", np.nan)),
-                        "throttle_cmd": float(pid_diag.get("throttle_cmd", np.nan)),
-                        "v_opt_val": float(pid_diag.get("v_opt_val", np.nan)),
-                        "V": float(speed_fps),
-                    }
-                )
-
-            if step % 5 == 0:
-                if controller_tag in {"mppi", "smooth_mppi"}:
-                    mode_label = "NOM"
-                    if gatekeeper_state is not None and bool(gatekeeper_state.using_backup):
-                        mode_label = "BACKUP"
-                    print(
-                        f"{step:<5} | {progress_s_ft:<8.0f} | {contour_error_ft:<8.1f} | {lag_error_ft:<8.1f} | "
-                        f"{position_error_ft:<8.1f} | {altitude_error_ft:<8.1f} | {terrain_clearance_ft:<7.1f} | "
-                        f"{total_stage_cost_est:<10.1f} | {mode_label:<6} | "
-                        f"{plan_ms:<8.1f} | {gk_ms:<8.1f}"
-                    )
-                else:
-                    rel_north_ft = float(controller_state["p_N"] - start_path_north_ft)
-                    rel_alt_ft = float(controller_state["h"])
-                    print(
-                        f"{step:<5} | {rel_north_ft:<8.0f} | {lateral_ft:<8.0f} | {rel_alt_ft:<8.0f} | "
-                        f"{speed_fps:<6.0f} | {width_ft:<6.0f} | {plan_ms:<8.1f} | {gk_ms:<8.1f} | "
-                        f"{gk_nom_prep:<7.1f} | {gk_update_ms:<7.1f} | {gk_backup_ms:<7.1f}"
-                    )
 
             if terminated or truncated:
                 print(f"Episode ended at step {step}: {termination_reason}")
