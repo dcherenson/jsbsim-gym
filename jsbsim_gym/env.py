@@ -99,6 +99,7 @@ class JSBSimEnv(gym.Env):
         # Initialize JSBSim
         self.simulation = jsbsim.FGFDMExec(root, None)
         self.simulation.set_debug_level(0)
+        self.simulation.set_output_directive('jsbsim_gym/visualization/flightgear.xml') 
 
         # Load F-16 model and set initial conditions
         self.simulation.load_model('f16')

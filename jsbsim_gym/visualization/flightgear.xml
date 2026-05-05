@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<output name="localhost" type="FLIGHTGEAR" port="5550" protocol="UDP" rate="60">
+    <property> position/lat-gc-deg </property>
+    <property> position/long-gc-deg </property>
+    <property> position/h-sl-ft </property>
+    <property> attitude/phi-deg </property>
+    <property> attitude/theta-deg </property>
+    <property> attitude/psi-deg </property>
+</output>
