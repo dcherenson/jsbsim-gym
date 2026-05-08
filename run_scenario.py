@@ -317,9 +317,9 @@ def build_jsbsim_gatekeeper(
     altitude_ref_ft = float(getattr(env.unwrapped, "dem_start_elev_ft", 0.0))
     terrain_floor_rel_ft = terrain_floor_msl_ft - altitude_ref_ft
     canyon_top_rel_ft = terrain_floor_rel_ft + wall_height_samples_ft
-    backup_peek_ft =0.0
+    backup_peek_ft =200.0
     pcis_centerline_tol_ft = 1000.0
-    pcis_altitude_tol_ft = 1000.0
+    pcis_altitude_tol_ft = 2500.0
     backup_target_speed_fps = 300.0 * KTS_TO_FPS
     pcis_speed_limit_fps = 600.0 * KTS_TO_FPS
     backup_target_altitude_ft = float(np.nanmax(canyon_top_rel_ft) + backup_peek_ft)
@@ -471,9 +471,9 @@ def build_jsbsim_gatekeeper(
     params = GatekeeperParams(
         M=30,
         T=100,
-        N=100,
+        N=256,
         delta=0.1,
-        epsilon=0.10,
+        epsilon=0.05,
         beta=0.00,
         alpha=0.0,
         p=1,
