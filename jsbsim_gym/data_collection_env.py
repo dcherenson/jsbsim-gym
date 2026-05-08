@@ -71,9 +71,9 @@ class DataCollectionEnv(JSBSimEnv):
         
         width, grad = self.canyon.get_geometry(p_N)
         
-        wind_n = self.simulation.get_property_value("atm/wind-north-fps")
-        wind_e = self.simulation.get_property_value("atm/wind-east-fps")
-        wind_d = self.simulation.get_property_value("atm/wind-down-fps")
+        wind_n = self.simulation.get_property_value("atmosphere/wind-north-fps")
+        wind_e = self.simulation.get_property_value("atmosphere/wind-east-fps")
+        wind_d = self.simulation.get_property_value("atmosphere/wind-down-fps")
         
         return {
             'p_N': p_N, 'p_E': p_E, 'h': h, 
@@ -122,9 +122,9 @@ class DataCollectionEnv(JSBSimEnv):
             noise = np.random.randn(3)
             self.wind_state += -self.wind_theta * self.wind_state * self.dt + self.wind_sigma * scale * np.sqrt(self.dt) * noise
             
-            self.simulation.set_property_value('atm/wind-north-fps', self.wind_state[0])
-            self.simulation.set_property_value('atm/wind-east-fps', self.wind_state[1])
-            self.simulation.set_property_value('atm/wind-down-fps', self.wind_state[2])
+            self.simulation.set_property_value('atmosphere/wind-north-fps', self.wind_state[0])
+            self.simulation.set_property_value('atmosphere/wind-east-fps', self.wind_state[1])
+            self.simulation.set_property_value('atmosphere/wind-down-fps', self.wind_state[2])
             
             self.simulation.run()
             self.time_sec += self.dt
