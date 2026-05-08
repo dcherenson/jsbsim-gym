@@ -504,9 +504,9 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
 
     p_dot, q_dot, r_dot = moments_to_angular_rate_derivatives(p, q, r, L, M, N)
 
-    u_dot = jnp.clip(u_dot, -1000.0, 1000.0)
-    v_dot = jnp.clip(v_dot, -1000.0, 1000.0)
-    w_dot = jnp.clip(w_dot, -1000.0, 1000.0)
+    u_dot = jnp.clip(u_dot, -500.0, 500.0)
+    v_dot = jnp.clip(v_dot, -500.0, 500.0)
+    w_dot = jnp.clip(w_dot, -500.0, 500.0)
     p_dot = jnp.clip(p_dot, -50.0, 50.0)
     q_dot = jnp.clip(q_dot, -50.0, 50.0)
     r_dot = jnp.clip(r_dot, -50.0, 50.0)

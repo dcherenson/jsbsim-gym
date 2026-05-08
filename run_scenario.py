@@ -1593,6 +1593,8 @@ def main():
     print(f"Saved video: {artifacts['video_path']}")
     print(f"Saved trajectory overlay: {artifacts['overlay_path']}")
     print(f"Saved trajectory CSV: {artifacts['trajectory_csv_path']}")
+    if artifacts.get("gk_rollout_plot_dir") is not None:
+        print(f"Saved gatekeeper rollout plots: {artifacts['gk_rollout_plot_dir']}")
     if controller_tag == "simple":
         diag_csv_path, diag_plot_path = save_simple_controller_diagnostics(
             output_dir=output_dir,

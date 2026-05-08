@@ -147,6 +147,88 @@ def save_trajectory_csv(output_path, track_x, track_y, track_lat, track_lon):
     )
 
 
+def save_gatekeeper_rollout_plot(
+    output_path,
+    trajectories,
+    step_index,
+    failure_mask=None,
+    s_t=None,
+    plan_start_t=None,
+    using_backup=None,
+    is_reverting=None,
+):
+    trajectories = np.asarray(trajectories, dtype=np.float32)
+    if trajectories.ndim != 3 or trajectories.shape[-1] != 2 or trajectories.shape[0] == 0:
+        return
+
+    failure_mask = np.asarray(
+        failure_mask if failure_mask is not None else np.zeros((trajectories.shape[0],), dtype=bool),
+        dtype=bool,
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 8), constrained_layout=True)
+    for idx, traj_xy in enumerate(trajectories):
+        traj_xy = np.asarray(traj_xy, dtype=np.float32)
+        valid = np.all(np.isfinite(traj_xy), axis=1)
+        traj_xy = traj_xy[valid]
+        if traj_xy.shape[0] < 2:
+            continue
+
+        north_ft = traj_xy[:, 0]
+        east_ft = traj_xy[:, 1]
+        color = "crimson" if idx < len(failure_mask) and bool(failure_mask[idx]) else "deepskyblue"
+        alpha = 0.18 if color == "deepskyblue" else 0.22
+        ax.plot(east_ft, north_ft, color=color, alpha=alpha, linewidth=1.0)
+
+    first = np.asarray(trajectories[:, 0, :], dtype=np.float32)
+    last = np.asarray(trajectories[:, -1, :], dtype=np.float32)
+    first_valid = np.all(np.isfinite(first), axis=1)
+    last_valid = np.all(np.isfinite(last), axis=1)
+    if np.any(first_valid):
+        ax.scatter(
+            first[first_valid, 1],
+            first[first_valid, 0],
+            c="lime",
+            s=12,
+            alpha=0.6,
+            edgecolors="none",
+            label="Rollout start",
+        )
+    if np.any(last_valid):
+        ax.scatter(
+            last[last_valid, 1],
+            last[last_valid, 0],
+            c="orange",
+            s=12,
+            alpha=0.6,
+            edgecolors="none",
+            label="Rollout end",
+        )
+
+    title_bits = [f"Gatekeeper rollouts | step={int(step_index)} | N={int(trajectories.shape[0])}"]
+    if s_t is not None:
+        title_bits.append(f"s_t={int(s_t)}")
+    if plan_start_t is not None:
+        title_bits.append(f"plan_start_t={int(plan_start_t)}")
+    if using_backup is not None:
+        title_bits.append("backup" if bool(using_backup) else "nominal")
+    if is_reverting is not None:
+        title_bits.append("reverting" if bool(is_reverting) else "stable")
+
+    ax.set_title(" | ".join(title_bits))
+    ax.set_xlabel("East (ft)")
+    ax.set_ylabel("North (ft)")
+    ax.axis("equal")
+    ax.grid(True, alpha=0.25)
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend(loc="best")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
 class CanyonRunRecorder:
     def __init__(
         self,
@@ -171,6 +253,7 @@ class CanyonRunRecorder:
         self.video_path = output_dir / f"{file_stem}.mp4"
         self.overlay_path = output_dir / f"{file_stem}_trajectory_overlay.png"
         self.trajectory_csv_path = output_dir / f"{file_stem}_trajectory.csv"
+        self.gk_rollout_plot_dir = output_dir / f"{file_stem}_gatekeeper_rollout_plots"
 
         self._writer = iio.get_writer(self.video_path, format="ffmpeg", fps=int(fps))
         self._closed = False
@@ -185,6 +268,7 @@ class CanyonRunRecorder:
         self.track_y = []
         self.track_lat = []
         self.track_lon = []
+        self._step_index = 0
 
         # Reference profile shown in overlays/video.
         self._reference_north_ft = None
@@ -718,7 +802,26 @@ class CanyonRunRecorder:
             frame = self._overlay_planner_debug(frame, planner_debug)
             frame = self._overlay_flight_hud(frame, hud_debug)
             self._writer.append_data(frame)
+
+        if planner_debug is not None:
+            gk_trajectories = np.asarray(
+                planner_debug.get("gk_trajectories", np.zeros((0, 0, 2), dtype=np.float32)),
+                dtype=np.float32,
+            )
+            if gk_trajectories.ndim == 3 and gk_trajectories.shape[-1] == 2 and gk_trajectories.shape[0] > 0:
+                save_gatekeeper_rollout_plot(
+                    output_path=self.gk_rollout_plot_dir / f"step_{self._step_index:04d}.png",
+                    trajectories=gk_trajectories,
+                    step_index=self._step_index,
+                    failure_mask=planner_debug.get("failure_mask", None),
+                    s_t=planner_debug.get("s_t", None),
+                    plan_start_t=planner_debug.get("plan_start_t", None),
+                    using_backup=planner_debug.get("using_backup", None),
+                    is_reverting=planner_debug.get("is_reverting", None),
+                )
+
         self._sample_position()
+        self._step_index += 1
 
     def close_writer(self):
         if not self._closed:
@@ -754,4 +857,5 @@ class CanyonRunRecorder:
             "video_path": self.video_path,
             "overlay_path": self.overlay_path,
             "trajectory_csv_path": self.trajectory_csv_path,
+            "gk_rollout_plot_dir": self.gk_rollout_plot_dir,
         }
