@@ -590,7 +590,7 @@ def build_altitude_hold_policy_jax(target_altitude_ft, target_speed_fps):
             -0.0022 * altitude_error_ft
             + 0.004 * v_rate
             + 0.70 * pitch_angle
-            - 0.30 * pitch_rate,
+            + 0.30 * pitch_rate,
             -1.0,
             1.0,
         )
@@ -776,22 +776,41 @@ def collect_pre_step_diagnostics(
                 ).copy(),
             }
     else:
-        predicted_xy = np.asarray(
+        predicted_states = np.asarray(
             gatekeeper_state.predicted_trajectories
             if gatekeeper_state.predicted_trajectories is not None
-            else np.zeros((0, 0, 2), dtype=np.float32),
+            else np.zeros((0, 0, 0), dtype=np.float32),
             dtype=np.float32,
         )
+        predicted_xy = np.zeros((0, 0, 2), dtype=np.float32)
         predicted_h_ft = np.zeros((0, 0), dtype=np.float32)
-        if predicted_xy.ndim == 3 and predicted_xy.shape[-1] == 2:
+        if predicted_states.ndim == 3 and predicted_states.shape[-1] >= 3:
+            predicted_xy = predicted_states[:, :, :2].copy()
+            predicted_h_ft = predicted_states[:, :, 2].copy()
+        elif predicted_states.ndim == 3 and predicted_states.shape[-1] == 2:
+            # Legacy fallback for older gatekeeper traces that only contain N/E.
+            predicted_xy = predicted_states.copy()
             predicted_h_ft = np.full(
                 (predicted_xy.shape[0], predicted_xy.shape[1]),
                 float(controller_state["h"]),
                 dtype=np.float32,
             )
         planner_debug = {
+            "gk_states": predicted_states,
             "gk_trajectories": predicted_xy,
             "gk_h_ft": predicted_h_ft,
+            "gk_noise_l2": np.asarray(
+                gatekeeper_state.noise_l2
+                if gatekeeper_state.noise_l2 is not None
+                else np.zeros((0, 0), dtype=np.float32),
+                dtype=np.float32,
+            ),
+            "gk_noise_maxabs": np.asarray(
+                gatekeeper_state.noise_maxabs
+                if gatekeeper_state.noise_maxabs is not None
+                else np.zeros((0, 0), dtype=np.float32),
+                dtype=np.float32,
+            ),
             "failure_mask": np.asarray(
                 gatekeeper_state.failure_mask
                 if gatekeeper_state.failure_mask is not None
@@ -1595,6 +1614,10 @@ def main():
     print(f"Saved trajectory CSV: {artifacts['trajectory_csv_path']}")
     if artifacts.get("gk_rollout_plot_dir") is not None:
         print(f"Saved gatekeeper rollout plots: {artifacts['gk_rollout_plot_dir']}")
+    if artifacts.get("gk_rollout_csv_dir") is not None:
+        print(f"Saved gatekeeper rollout CSVs: {artifacts['gk_rollout_csv_dir']}")
+    if artifacts.get("planner_debug_csv_dir") is not None:
+        print(f"Saved planner debug CSVs: {artifacts['planner_debug_csv_dir']}")
     if controller_tag == "simple":
         diag_csv_path, diag_plot_path = save_simple_controller_diagnostics(
             output_dir=output_dir,

@@ -377,11 +377,11 @@ def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs)
     delta_r = action[2]
     delta_t = action[3]
 
-    alpha = jnp.arctan2(w, jnp.maximum(u, 1.0))
+    alpha = jnp.clip(jnp.arctan2(w, jnp.maximum(u, 1.0)), -0.35, 0.52)
     V_sq = u * u + v * v + w * w
     V = jnp.sqrt(jnp.maximum(V_sq, 1.0))
-    beta = jnp.arcsin(jnp.clip(v / V, -1.0, 1.0))
-    mach = V / STANDARD_SPEED_OF_SOUND_FPS
+    beta = jnp.clip(jnp.arcsin(jnp.clip(v / V, -1.0, 1.0)), -0.35, 0.35)
+    mach = jnp.clip(V / STANDARD_SPEED_OF_SOUND_FPS, 0.2, 1.2)
 
     features = jnp.array([alpha, beta, mach, p, q, r, delta_e, delta_a, delta_r], dtype=jnp.float32)
     phi_vec = expand_poly(features, poly_powers)
@@ -401,32 +401,37 @@ def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs)
     M = C_M * pitch_moment_scale
     N = C_N * yaw_moment_scale
 
-    u_dot = X + r * v - q * w - G_FTPS2 * jnp.sin(theta)
-    v_dot = Y + p * w - r * u + G_FTPS2 * jnp.sin(phi) * jnp.cos(theta)
-    w_dot = Z + q * u - p * v + G_FTPS2 * jnp.cos(phi) * jnp.cos(theta)
+    theta_for_kin = jnp.clip(theta, -1.3962634, 1.3962634)
+    c_theta_safe = jnp.cos(theta_for_kin)
+    c_theta_safe = jnp.sign(c_theta_safe) * jnp.maximum(jnp.abs(c_theta_safe), 0.1)
+    s_theta_safe = jnp.sin(theta_for_kin)
+
+    u_dot = X + r * v - q * w - G_FTPS2 * s_theta_safe
+    v_dot = Y + p * w - r * u + G_FTPS2 * jnp.sin(phi) * c_theta_safe
+    w_dot = Z + q * u - p * v + G_FTPS2 * jnp.cos(phi) * c_theta_safe
 
     p_dot, q_dot, r_dot = moments_to_angular_rate_derivatives(p, q, r, L, M, N)
 
-    u_dot = jnp.clip(u_dot, -1000.0, 1000.0)
-    v_dot = jnp.clip(v_dot, -1000.0, 1000.0)
-    w_dot = jnp.clip(w_dot, -1000.0, 1000.0)
-    p_dot = jnp.clip(p_dot, -50.0, 50.0)
-    q_dot = jnp.clip(q_dot, -50.0, 50.0)
-    r_dot = jnp.clip(r_dot, -50.0, 50.0)
+    u_dot = jnp.clip(u_dot, -250.0, 250.0)
+    v_dot = jnp.clip(v_dot, -250.0, 250.0)
+    w_dot = jnp.clip(w_dot, -250.0, 250.0)
+    p_dot = jnp.clip(p_dot, -15.0, 15.0)
+    q_dot = jnp.clip(q_dot, -10.0, 10.0)
+    r_dot = jnp.clip(r_dot, -15.0, 15.0)
 
-    t_theta = jnp.tan(theta)
+    t_theta = s_theta_safe / c_theta_safe
     phi_dot = p + q * jnp.sin(phi) * t_theta + r * jnp.cos(phi) * t_theta
     theta_dot = q * jnp.cos(phi) - r * jnp.sin(phi)
-    psi_dot = (q * jnp.sin(phi) + r * jnp.cos(phi)) / jnp.cos(theta)
+    psi_dot = (q * jnp.sin(phi) + r * jnp.cos(phi)) / c_theta_safe
 
-    phi_dot = jnp.clip(phi_dot, -50.0, 50.0)
-    theta_dot = jnp.clip(theta_dot, -50.0, 50.0)
-    psi_dot = jnp.clip(psi_dot, -50.0, 50.0)
+    phi_dot = jnp.clip(phi_dot, -10.0, 10.0)
+    theta_dot = jnp.clip(theta_dot, -10.0, 10.0)
+    psi_dot = jnp.clip(psi_dot, -10.0, 10.0)
 
     c_psi = jnp.cos(psi)
     s_psi = jnp.sin(psi)
-    c_theta = jnp.cos(theta)
-    s_theta = jnp.sin(theta)
+    c_theta = c_theta_safe
+    s_theta = s_theta_safe
     c_phi = jnp.cos(phi)
     s_phi = jnp.sin(phi)
 
@@ -442,9 +447,9 @@ def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs)
     )
     h_dot = u * s_theta - v * (s_phi * c_theta) - w * (c_phi * c_theta)
 
-    p_N_dot = jnp.clip(p_N_dot, -3000.0, 3000.0)
-    p_E_dot = jnp.clip(p_E_dot, -3000.0, 3000.0)
-    h_dot = jnp.clip(h_dot, -3000.0, 3000.0)
+    p_N_dot = jnp.clip(p_N_dot, -1200.0, 1200.0)
+    p_E_dot = jnp.clip(p_E_dot, -1200.0, 1200.0)
+    h_dot = jnp.clip(h_dot, -400.0, 400.0)
 
     return jnp.array(
         [
@@ -454,9 +459,9 @@ def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs)
             u + DT * u_dot,
             v + DT * v_dot,
             w + DT * w_dot,
-            p + DT * p_dot,
-            q + DT * q_dot,
-            r + DT * r_dot,
+            jnp.clip(p + DT * p_dot, -6.0, 6.0),
+            jnp.clip(q + DT * q_dot, -4.0, 4.0),
+            jnp.clip(r + DT * r_dot, -6.0, 6.0),
             phi + DT * phi_dot,
             theta + DT * theta_dot,
             psi + DT * psi_dot,
@@ -474,11 +479,11 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
     delta_r = action[2]
     delta_t = action[3]
 
-    alpha = jnp.arctan2(w, jnp.maximum(u, 1.0))
+    alpha = jnp.clip(jnp.arctan2(w, jnp.maximum(u, 1.0)), -0.35, 0.52)
     V_sq = u * u + v * v + w * w
     V = jnp.sqrt(jnp.maximum(V_sq, 1.0))
-    beta = jnp.arcsin(jnp.clip(v / V, -1.0, 1.0))
-    mach = V / STANDARD_SPEED_OF_SOUND_FPS
+    beta = jnp.clip(jnp.arcsin(jnp.clip(v / V, -1.0, 1.0)), -0.35, 0.35)
+    mach = jnp.clip(V / STANDARD_SPEED_OF_SOUND_FPS, 0.2, 1.2)
 
     features = jnp.array([alpha, beta, mach, p, q, r, delta_e, delta_a, delta_r], dtype=jnp.float32)
     phi_vec = expand_poly(features, poly_powers)
@@ -498,32 +503,37 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
     M = C_M * pitch_moment_scale
     N = C_N * yaw_moment_scale
 
-    u_dot = X + r * v - q * w - G_FTPS2 * jnp.sin(theta)
-    v_dot = Y + p * w - r * u + G_FTPS2 * jnp.sin(phi) * jnp.cos(theta)
-    w_dot = Z + q * u - p * v + G_FTPS2 * jnp.cos(phi) * jnp.cos(theta)
+    theta_for_kin = jnp.clip(theta, -1.3962634, 1.3962634)
+    c_theta_safe = jnp.cos(theta_for_kin)
+    c_theta_safe = jnp.sign(c_theta_safe) * jnp.maximum(jnp.abs(c_theta_safe), 0.1)
+    s_theta_safe = jnp.sin(theta_for_kin)
+
+    u_dot = X + r * v - q * w - G_FTPS2 * s_theta_safe
+    v_dot = Y + p * w - r * u + G_FTPS2 * jnp.sin(phi) * c_theta_safe
+    w_dot = Z + q * u - p * v + G_FTPS2 * jnp.cos(phi) * c_theta_safe
 
     p_dot, q_dot, r_dot = moments_to_angular_rate_derivatives(p, q, r, L, M, N)
 
-    u_dot = jnp.clip(u_dot, -500.0, 500.0)
-    v_dot = jnp.clip(v_dot, -500.0, 500.0)
-    w_dot = jnp.clip(w_dot, -500.0, 500.0)
-    p_dot = jnp.clip(p_dot, -50.0, 50.0)
-    q_dot = jnp.clip(q_dot, -50.0, 50.0)
-    r_dot = jnp.clip(r_dot, -50.0, 50.0)
+    u_dot = jnp.clip(u_dot, -250.0, 250.0)
+    v_dot = jnp.clip(v_dot, -250.0, 250.0)
+    w_dot = jnp.clip(w_dot, -250.0, 250.0)
+    p_dot = jnp.clip(p_dot, -15.0, 15.0)
+    q_dot = jnp.clip(q_dot, -10.0, 10.0)
+    r_dot = jnp.clip(r_dot, -15.0, 15.0)
 
-    t_theta = jnp.tan(theta)
+    t_theta = s_theta_safe / c_theta_safe
     phi_dot = p + q * jnp.sin(phi) * t_theta + r * jnp.cos(phi) * t_theta
     theta_dot = q * jnp.cos(phi) - r * jnp.sin(phi)
-    psi_dot = (q * jnp.sin(phi) + r * jnp.cos(phi)) / jnp.cos(theta)
+    psi_dot = (q * jnp.sin(phi) + r * jnp.cos(phi)) / c_theta_safe
 
-    phi_dot = jnp.clip(phi_dot, -50.0, 50.0)
-    theta_dot = jnp.clip(theta_dot, -50.0, 50.0)
-    psi_dot = jnp.clip(psi_dot, -50.0, 50.0)
+    phi_dot = jnp.clip(phi_dot, -10.0, 10.0)
+    theta_dot = jnp.clip(theta_dot, -10.0, 10.0)
+    psi_dot = jnp.clip(psi_dot, -10.0, 10.0)
 
     c_psi = jnp.cos(psi)
     s_psi = jnp.sin(psi)
-    c_theta = jnp.cos(theta)
-    s_theta = jnp.sin(theta)
+    c_theta = c_theta_safe
+    s_theta = s_theta_safe
     c_phi = jnp.cos(phi)
     s_phi = jnp.sin(phi)
 
@@ -539,9 +549,9 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
     )
     h_dot = u * s_theta - v * (s_phi * c_theta) - w * (c_phi * c_theta)
 
-    p_N_dot = jnp.clip(p_N_dot, -3000.0, 3000.0)
-    p_E_dot = jnp.clip(p_E_dot, -3000.0, 3000.0)
-    h_dot = jnp.clip(h_dot, -3000.0, 3000.0)
+    p_N_dot = jnp.clip(p_N_dot, -1200.0, 1200.0)
+    p_E_dot = jnp.clip(p_E_dot, -1200.0, 1200.0)
+    h_dot = jnp.clip(h_dot, -400.0, 400.0)
 
     state_next_core = jnp.array(
         [
@@ -551,9 +561,9 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
             u + DT * u_dot,
             v + DT * v_dot,
             w + DT * w_dot,
-            p + DT * p_dot,
-            q + DT * q_dot,
-            r + DT * r_dot,
+            jnp.clip(p + DT * p_dot, -6.0, 6.0),
+            jnp.clip(q + DT * q_dot, -4.0, 4.0),
+            jnp.clip(r + DT * r_dot, -6.0, 6.0),
             phi + DT * phi_dot,
             theta + DT * theta_dot,
             psi + DT * psi_dot,
@@ -561,8 +571,8 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
         dtype=jnp.float32,
     )
 
-    ny = jnp.clip(Y / G_FTPS2, -100.0, 100.0)
-    nz = jnp.clip(-Z / G_FTPS2, -100.0, 100.0)
+    ny = jnp.clip(Y / G_FTPS2, -4.0, 4.0)
+    nz = jnp.clip(-Z / G_FTPS2, -3.0, 9.0)
     return jnp.concatenate([state_next_core, jnp.asarray([ny, nz], dtype=jnp.float32)], axis=0)
 
 

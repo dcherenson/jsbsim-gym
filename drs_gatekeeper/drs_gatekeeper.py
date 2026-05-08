@@ -132,6 +132,8 @@ class GatekeeperState(NamedTuple):
     using_backup: bool = False
     predicted_trajectories: Optional[np.ndarray] = None
     failure_mask: Optional[np.ndarray] = None
+    noise_l2: Optional[np.ndarray] = None
+    noise_maxabs: Optional[np.ndarray] = None
     m_star: int = 0
     q_bar_star: float = 0.0
     is_reverting: bool = False
@@ -174,18 +176,17 @@ def rollout_single(
         action = jnp.where(use_nominal, action_nominal, action_backup)
         next_state = dynamics_fn(state, action, noise_step)
         h_val = safety_fn(next_state, env_param_step)
-        # Return state for trajectory visualization
-        xy = jnp.stack([state[0], state[1]], axis=0)
-        return (next_state, step_idx + 1), (h_val, xy)
+        # Return full state for debugging/visualization.
+        return (next_state, step_idx + 1), (h_val, state)
 
-    final_carry, (h_values, xy_traj) = lax.scan(
+    final_carry, (h_values, state_traj) = lax.scan(
         step_fn, (x0, 0), (noise_traj, env_params_traj), length=T
     )
-    final_xy = jnp.stack([final_carry[0][0], final_carry[0][1]], axis=0)
-    xy_traj = jnp.concatenate([xy_traj, final_xy[None, :]], axis=0)
+    final_state = final_carry[0]
+    state_traj = jnp.concatenate([state_traj, final_state[None, :]], axis=0)
     
     h_c_terminal = pcis_fn(final_carry[0])
-    return jnp.minimum(h_c_terminal, jnp.min(h_values)), xy_traj
+    return jnp.minimum(h_c_terminal, jnp.min(h_values)), state_traj
 
 
 def rollout_single_empirical(
@@ -228,9 +229,8 @@ def rollout_single_empirical(
 
         next_state = dynamics_fn(state, action, noise_step)
         h_val = safety_fn(next_state, env_params)
-        # Return state for trajectory visualization
-        xy = jnp.stack([state[0], state[1]], axis=0)
-        return (next_state, step_idx + 1, action), (h_val, noise_step, xy)
+        # Return full state for debugging/visualization.
+        return (next_state, step_idx + 1, action), (h_val, noise_step, state)
 
     if nominal_trajectory is not None:
         initial_prev_action = nominal_trajectory[0]
@@ -238,17 +238,17 @@ def rollout_single_empirical(
         initial_prev_action = nominal_policy_fn(x0)
 
     keys = jax.random.split(rng_key, T)
-    final_carry, (h_values, noise_traj, xy_traj) = lax.scan(
+    final_carry, (h_values, noise_traj, state_traj) = lax.scan(
         step_fn,
         (x0, 0, initial_prev_action),
         keys,
         length=T,
     )
-    final_xy = jnp.stack([final_carry[0][0], final_carry[0][1]], axis=0)
-    xy_traj = jnp.concatenate([xy_traj, final_xy[None, :]], axis=0)
+    final_state = final_carry[0]
+    state_traj = jnp.concatenate([state_traj, final_state[None, :]], axis=0)
 
     h_c_terminal = pcis_fn(final_carry[0])
-    return jnp.minimum(h_c_terminal, jnp.min(h_values)), noise_traj, xy_traj
+    return jnp.minimum(h_c_terminal, jnp.min(h_values)), noise_traj, state_traj
 
 
 def rollout_single_empirical_value(
@@ -291,8 +291,7 @@ def rollout_single_empirical_value(
 
         next_state = dynamics_fn(state, action, noise_step)
         h_val = safety_fn(next_state, env_params)
-        xy = jnp.stack([state[0], state[1]], axis=0)
-        return (next_state, step_idx + 1, action), (h_val, xy)
+        return (next_state, step_idx + 1, action), (h_val, state)
 
     if nominal_trajectory is not None:
         initial_prev_action = nominal_trajectory[0]
@@ -300,17 +299,17 @@ def rollout_single_empirical_value(
         initial_prev_action = nominal_policy_fn(x0)
 
     keys = jax.random.split(rng_key, T)
-    final_carry, (h_values, xy_traj) = lax.scan(
+    final_carry, (h_values, state_traj) = lax.scan(
         step_fn,
         (x0, 0, initial_prev_action),
         keys,
         length=T,
     )
-    final_xy = jnp.stack([final_carry[0][0], final_carry[0][1]], axis=0)
-    xy_traj = jnp.concatenate([xy_traj, final_xy[None, :]], axis=0)
+    final_state = final_carry[0]
+    state_traj = jnp.concatenate([state_traj, final_state[None, :]], axis=0)
 
     h_c_terminal = pcis_fn(final_carry[0])
-    return jnp.minimum(h_c_terminal, jnp.min(h_values)), xy_traj
+    return jnp.minimum(h_c_terminal, jnp.min(h_values)), state_traj
 
 
 def rollout_with_grad(
@@ -370,7 +369,7 @@ def build_rollout_all(
         env_params_batch: Array,   # [M, N, T, theta_dim]
         compute_grad: bool = False,
         nominal_trajectory: Optional[Array] = None,
-    ) -> Tuple[Array, Optional[Array], Array]:
+    ) -> Tuple[Array, Optional[Array], Array, Array, Array]:
 
         def _single_val(m, w, th):
             return rollout_single(
@@ -391,12 +390,16 @@ def build_rollout_all(
             single_N = jax.vmap(_single_val, in_axes=(None, 0, 0))
             all_MN = jax.vmap(single_N, in_axes=(0, 0, 0))
             H_matrix, X_all = all_MN(switching_offsets, noise_batch, env_params_batch)
-            return H_matrix, None, X_all
+            noise_l2 = jnp.linalg.norm(noise_batch, axis=-1)
+            noise_maxabs = jnp.max(jnp.abs(noise_batch), axis=-1)
+            return H_matrix, None, X_all, noise_l2, noise_maxabs
         else:
             single_N = jax.vmap(_single_grad, in_axes=(None, 0, 0))
             all_MN = jax.vmap(single_N, in_axes=(0, 0, 0))
             (H_matrix, X_all), Grad_matrix = all_MN(switching_offsets, noise_batch, env_params_batch)
-            return H_matrix, Grad_matrix, X_all
+            noise_l2 = jnp.linalg.norm(noise_batch, axis=-1)
+            noise_maxabs = jnp.max(jnp.abs(noise_batch), axis=-1)
+            return H_matrix, Grad_matrix, X_all, noise_l2, noise_maxabs
 
     return rollout_all
 
@@ -424,7 +427,7 @@ def build_rollout_all_empirical(
         env_params_batch: Array, # [M, N, theta_dim]
         compute_grad: bool = False,
         nominal_trajectory: Optional[Array] = None,
-    ) -> Tuple[Array, Optional[Array], Array]:
+    ) -> Tuple[Array, Optional[Array], Array, Array, Array]:
         if not compute_grad:
             # Fast value-only path: one batched scan over time for all [M, N]
             # rollouts, which reduces per-rollout scan overhead.
@@ -489,26 +492,29 @@ def build_rollout_all_empirical(
                 noise_step = batched_sampler_fn(feat, subkeys)
                 next_state = batched_dynamics_fn(state, action, noise_step)
                 h_val = batched_safety_fn(next_state, env_params_static)
-                xy = state[..., :2]
-                return (next_state, action, next_keys), (h_val, xy)
+                state_snapshot = state
+                noise_l2 = jnp.linalg.norm(noise_step, axis=-1)
+                noise_maxabs = jnp.max(jnp.abs(noise_step), axis=-1)
+                return (next_state, action, next_keys), (h_val, state_snapshot, noise_l2, noise_maxabs)
 
-            final_carry, (h_values, xy_steps) = lax.scan(
+            final_carry, (h_values, state_steps, noise_l2_steps, noise_maxabs_steps) = lax.scan(
                 step_fn,
                 (state0, initial_prev_action, rng_matrix),
                 jnp.arange(T, dtype=jnp.int32),
                 length=T,
             )
             final_state = final_carry[0]
-            final_xy = final_state[..., :2]
             X_all = jnp.concatenate(
-                [jnp.moveaxis(xy_steps, 0, 2), final_xy[:, :, None, :]],
+                [jnp.moveaxis(state_steps, 0, 2), final_state[:, :, None, :]],
                 axis=2,
             )
             H_matrix = jnp.minimum(
                 batched_pcis_fn(final_state),
                 jnp.min(h_values, axis=0),
             )
-            return H_matrix, None, X_all
+            noise_l2_all = jnp.moveaxis(noise_l2_steps, 0, 2)
+            noise_maxabs_all = jnp.moveaxis(noise_maxabs_steps, 0, 2)
+            return H_matrix, None, X_all, noise_l2_all, noise_maxabs_all
 
         # Gradient-enabled path: we need realized sampled_noise_batch.
         def _single_sample(m, key, th):
@@ -523,7 +529,7 @@ def build_rollout_all_empirical(
         v_sample = jax.vmap(_single_sample, in_axes=(None, 0, 0))
         all_MN_sample = jax.vmap(v_sample, in_axes=(0, 0, 0))
         
-        # [M, N], [M, N, T, noise_dim], and [M, N, T+1, 2]
+        # [M, N], [M, N, T, noise_dim], and [M, N, T+1, state_dim]
         H_matrix, sampled_noise_batch, X_all = all_MN_sample(switching_offsets, rng_matrix, env_params_batch)
 
         # 2. Gradient Pass (Conditional)
@@ -540,7 +546,9 @@ def build_rollout_all_empirical(
         
         # We re-run to get derivatives w.r.t. the fixed noise sequence
         _, Grad_matrix = all_MN_grad(switching_offsets, sampled_noise_batch, env_params_batch)
-        return H_matrix, Grad_matrix, X_all
+        noise_l2_all = jnp.linalg.norm(sampled_noise_batch, axis=-1)
+        noise_maxabs_all = jnp.max(jnp.abs(sampled_noise_batch), axis=-1)
+        return H_matrix, Grad_matrix, X_all, noise_l2_all, noise_maxabs_all
 
     return rollout_all
 
@@ -705,7 +713,7 @@ def run_gatekeeper(
     rollout_all_empirical_fn: Optional[Callable] = None,
     rng_key: Optional[Array] = None,
     nominal_trajectory: Optional[Array] = None,
-) -> Tuple[int, np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, int, float, dict]:
+) -> Tuple[int, np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, float, dict]:
     """
     Execute one iteration of DRS-GK (Algorithm 2).
 
@@ -754,13 +762,13 @@ def run_gatekeeper(
         # Step 1: Rollout with ONLINE empirical sampling
         # Split key for vmap: [M, N, 2]
         rng_matrix = jax.random.split(rng_key, params.M * params.N).reshape(params.M, params.N, 2)
-        H_matrix, Grad_matrix, X_all = rollout_all_empirical_fn(
+        H_matrix, Grad_matrix, X_all, noise_l2_all, noise_maxabs_all = rollout_all_empirical_fn(
             x0, switching_offsets, rng_matrix, env_params_batch,
             compute_grad, nominal_trajectory
         )
     else:
         # Step 1: Rollout with pre-sampled noise
-        H_matrix, Grad_matrix, X_all = rollout_all_fn(
+        H_matrix, Grad_matrix, X_all, noise_l2_all, noise_maxabs_all = rollout_all_fn(
             x0, switching_offsets, noise_batch, env_params_batch,
             compute_grad, nominal_trajectory
         )
@@ -816,8 +824,10 @@ def run_gatekeeper(
         s_t = int(s_prev)
 
     # ExtractTrajectories for visualization
-    # X_all shape [M, N, T+1, 2]
+    # X_all shape [M, N, T+1, state_dim]
     trajectories = np.asarray(X_all[m_idx_star], dtype=np.float32)
+    noise_l2 = np.asarray(noise_l2_all[m_idx_star], dtype=np.float32)
+    noise_maxabs = np.asarray(noise_maxabs_all[m_idx_star], dtype=np.float32)
     # failure_mask_init is [M, N] boolean
     mask = np.asarray(failure_mask_init[m_idx_star], dtype=bool)
     m_star = int(switching_offsets[m_idx_star])
@@ -826,7 +836,7 @@ def run_gatekeeper(
     if params.debug_timing:
         timings["cpu_selection"] = time.perf_counter() - t2
 
-    return s_t, I_valid, q_bars, L_H, trajectories, mask, m_star, q_bar_star, timings
+    return s_t, I_valid, q_bars, L_H, trajectories, noise_l2, noise_maxabs, mask, m_star, q_bar_star, timings
 
 
 # ---------------------------------------------------------------------------
@@ -1171,7 +1181,7 @@ class DRSGatekeeper:
             # Standard offline mode
             noise_batch_jax = jnp.asarray(noise_batch)
 
-        s_t, I_valid, q_bars, L_H, trajectories, mask, m_star, q_bar_star, timings = run_gatekeeper(
+        s_t, I_valid, q_bars, L_H, trajectories, noise_l2, noise_maxabs, mask, m_star, q_bar_star, timings = run_gatekeeper(
             x0=x_flat,
             s_prev=self.state.s_prev,
             t=self.state.t,
@@ -1222,6 +1232,8 @@ class DRSGatekeeper:
                 using_backup=using_backup,
                 predicted_trajectories=trajectories,
                 failure_mask=mask,
+                noise_l2=noise_l2,
+                noise_maxabs=noise_maxabs,
                 m_star=m_star,
                 q_bar_star=q_bar_star, # Bound from when the switch was chosen
                 is_reverting=False,
@@ -1234,6 +1246,8 @@ class DRSGatekeeper:
             
             retained_trajectores = self.state.predicted_trajectories
             retained_mask = self.state.failure_mask
+            retained_noise_l2 = self.state.noise_l2
+            retained_noise_maxabs = self.state.noise_maxabs
             retained_q_bar = self.state.q_bar_star
             retained_start_t = self.state.plan_start_t
             
@@ -1242,6 +1256,8 @@ class DRSGatekeeper:
             if retained_trajectores is None:
                 retained_trajectores = trajectories
                 retained_mask = mask
+                retained_noise_l2 = noise_l2
+                retained_noise_maxabs = noise_maxabs
                 retained_q_bar = q_bar_star
                 retained_start_t = self.state.t
 
@@ -1251,6 +1267,8 @@ class DRSGatekeeper:
                 using_backup=using_backup,
                 predicted_trajectories=retained_trajectores,
                 failure_mask=retained_mask,
+                noise_l2=retained_noise_l2,
+                noise_maxabs=retained_noise_maxabs,
                 m_star=current_m_star,
                 q_bar_star=retained_q_bar,
                 is_reverting=(not found_new),
@@ -1293,6 +1311,8 @@ class DRSGatekeeper:
             using_backup=using_backup,
             predicted_trajectories=self.state.predicted_trajectories,
             failure_mask=self.state.failure_mask,
+            noise_l2=self.state.noise_l2,
+            noise_maxabs=self.state.noise_maxabs,
             m_star=self.state.m_star,
             q_bar_star=self.state.q_bar_star,
             is_reverting=self.state.is_reverting,

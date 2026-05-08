@@ -1,4 +1,5 @@
 from pathlib import Path
+import csv
 
 import imageio.v2 as iio
 import imageio.v3 as iio_v3
@@ -147,6 +148,79 @@ def save_trajectory_csv(output_path, track_x, track_y, track_lat, track_lon):
     )
 
 
+def save_gatekeeper_rollout_csv(
+    output_path,
+    trajectories,
+    step_index,
+    failure_mask=None,
+    s_t=None,
+    plan_start_t=None,
+    using_backup=None,
+    is_reverting=None,
+):
+    trajectories = np.asarray(trajectories, dtype=np.float32)
+    if trajectories.ndim != 3 or trajectories.shape[-1] != 2 or trajectories.shape[0] == 0:
+        return
+
+    failure_mask = np.asarray(
+        failure_mask if failure_mask is not None else np.zeros((trajectories.shape[0],), dtype=bool),
+        dtype=bool,
+    )
+    rollout_idx = np.repeat(np.arange(trajectories.shape[0], dtype=np.int32), trajectories.shape[1])
+    point_idx = np.tile(np.arange(trajectories.shape[1], dtype=np.int32), trajectories.shape[0])
+    flat = trajectories.reshape(-1, 2)
+    valid = np.isfinite(flat[:, 0]) & np.isfinite(flat[:, 1])
+
+    csv_arr = np.column_stack(
+        [
+            np.full(flat.shape[0], int(step_index), dtype=np.int32),
+            rollout_idx,
+            point_idx,
+            flat[:, 0],
+            flat[:, 1],
+            valid.astype(np.int32),
+            np.repeat(failure_mask.astype(np.int32), trajectories.shape[1]),
+            np.full(flat.shape[0], -1 if s_t is None else int(s_t), dtype=np.int32),
+            np.full(flat.shape[0], -1 if plan_start_t is None else int(plan_start_t), dtype=np.int32),
+            np.full(flat.shape[0], -1 if using_backup is None else int(bool(using_backup)), dtype=np.int32),
+            np.full(flat.shape[0], -1 if is_reverting is None else int(bool(is_reverting)), dtype=np.int32),
+        ]
+    )
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savetxt(
+        output_path,
+        csv_arr,
+        delimiter=",",
+        header="step,rollout_idx,point_idx,north_ft,east_ft,is_valid,failed_rollout,s_t,plan_start_t,using_backup,is_reverting",
+        comments="",
+    )
+
+
+def save_planner_debug_csv(output_path, planner_debug, step_index):
+    if planner_debug is None:
+        return
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_path.open("w", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["step", "key", "index", "value"])
+
+        for key in sorted(planner_debug.keys()):
+            value = planner_debug[key]
+            arr = np.asarray(value)
+
+            if arr.ndim == 0:
+                writer.writerow([int(step_index), key, "", arr.item()])
+                continue
+
+            for idx in np.ndindex(arr.shape):
+                writer.writerow([int(step_index), key, ",".join(str(i) for i in idx), arr[idx]])
+
+
 def save_gatekeeper_rollout_plot(
     output_path,
     trajectories,
@@ -170,15 +244,18 @@ def save_gatekeeper_rollout_plot(
     for idx, traj_xy in enumerate(trajectories):
         traj_xy = np.asarray(traj_xy, dtype=np.float32)
         valid = np.all(np.isfinite(traj_xy), axis=1)
-        traj_xy = traj_xy[valid]
-        if traj_xy.shape[0] < 2:
+        if not np.any(valid):
             continue
 
-        north_ft = traj_xy[:, 0]
-        east_ft = traj_xy[:, 1]
+        valid_idx = np.flatnonzero(valid)
+        segment_breaks = np.where(np.diff(valid_idx) > 1)[0] + 1
         color = "crimson" if idx < len(failure_mask) and bool(failure_mask[idx]) else "deepskyblue"
         alpha = 0.18 if color == "deepskyblue" else 0.22
-        ax.plot(east_ft, north_ft, color=color, alpha=alpha, linewidth=1.0)
+        for segment in np.split(valid_idx, segment_breaks):
+            if segment.size < 2:
+                continue
+            segment_xy = traj_xy[segment]
+            ax.plot(segment_xy[:, 1], segment_xy[:, 0], color=color, alpha=alpha, linewidth=1.0)
 
     first = np.asarray(trajectories[:, 0, :], dtype=np.float32)
     last = np.asarray(trajectories[:, -1, :], dtype=np.float32)
@@ -254,6 +331,8 @@ class CanyonRunRecorder:
         self.overlay_path = output_dir / f"{file_stem}_trajectory_overlay.png"
         self.trajectory_csv_path = output_dir / f"{file_stem}_trajectory.csv"
         self.gk_rollout_plot_dir = output_dir / f"{file_stem}_gatekeeper_rollout_plots"
+        self.gk_rollout_csv_dir = output_dir / f"{file_stem}_gatekeeper_rollout_csv"
+        self.planner_debug_csv_dir = output_dir / f"{file_stem}_planner_debug_csv"
 
         self._writer = iio.get_writer(self.video_path, format="ffmpeg", fps=int(fps))
         self._closed = False
@@ -804,11 +883,27 @@ class CanyonRunRecorder:
             self._writer.append_data(frame)
 
         if planner_debug is not None:
+            save_planner_debug_csv(
+                output_path=self.planner_debug_csv_dir / f"step_{self._step_index:04d}.csv",
+                planner_debug=planner_debug,
+                step_index=self._step_index,
+            )
+
             gk_trajectories = np.asarray(
                 planner_debug.get("gk_trajectories", np.zeros((0, 0, 2), dtype=np.float32)),
                 dtype=np.float32,
             )
             if gk_trajectories.ndim == 3 and gk_trajectories.shape[-1] == 2 and gk_trajectories.shape[0] > 0:
+                save_gatekeeper_rollout_csv(
+                    output_path=self.gk_rollout_csv_dir / f"step_{self._step_index:04d}.csv",
+                    trajectories=gk_trajectories,
+                    step_index=self._step_index,
+                    failure_mask=planner_debug.get("failure_mask", None),
+                    s_t=planner_debug.get("s_t", None),
+                    plan_start_t=planner_debug.get("plan_start_t", None),
+                    using_backup=planner_debug.get("using_backup", None),
+                    is_reverting=planner_debug.get("is_reverting", None),
+                )
                 save_gatekeeper_rollout_plot(
                     output_path=self.gk_rollout_plot_dir / f"step_{self._step_index:04d}.png",
                     trajectories=gk_trajectories,
@@ -858,4 +953,6 @@ class CanyonRunRecorder:
             "overlay_path": self.overlay_path,
             "trajectory_csv_path": self.trajectory_csv_path,
             "gk_rollout_plot_dir": self.gk_rollout_plot_dir,
+            "gk_rollout_csv_dir": self.gk_rollout_csv_dir,
+            "planner_debug_csv_dir": self.planner_debug_csv_dir,
         }
