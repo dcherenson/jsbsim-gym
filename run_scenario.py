@@ -481,6 +481,9 @@ def build_jsbsim_gatekeeper(
         lipschitz_constant=0.0,
         debug_timing=bool(debug_timing),
     )
+    # Gatekeeper update cadence (in control steps).
+    # Example: 10 => run gatekeeper.update() every 10 steps and reuse last s_t in between.
+    gatekeeper_update_interval_steps = 10
     initial_bounds = TrackBoundsEstimate.from_track_width(
         half_width=max(float(np.nanmean(width_samples_ft) * 0.5), 1.0),
         relative_uncertainty=0.0,
@@ -511,6 +514,7 @@ def build_jsbsim_gatekeeper(
         "backup_target_altitude_ft": backup_target_altitude_ft,
         "latest_nominal": latest_nominal,
         "pcis_centerline_tol_ft": pcis_centerline_tol_ft,
+        "update_interval_steps": int(max(gatekeeper_update_interval_steps, 1)),
     }
 
 
@@ -1399,6 +1403,7 @@ def main():
                 f"Initialized gatekeeper with backup simple controller at {gatekeeper_bundle['backup_target_speed_fps'] / KTS_TO_FPS:.0f} kts and "
                 f"target altitude {gatekeeper_bundle['backup_target_altitude_ft']:.0f} ft above DEM origin."
             )
+            print(f"Gatekeeper update interval: every {gatekeeper_bundle['update_interval_steps']} step(s).")
             print("Compiling Gatekeeper JAX JIT... (this takes a moment)", flush=True)
             gatekeeper = gatekeeper_bundle["gatekeeper"]
             latest_nominal = gatekeeper_bundle["latest_nominal"]
@@ -1440,6 +1445,7 @@ def main():
                 f"Initialized gatekeeper with backup simple controller at {gatekeeper_bundle['backup_target_speed_fps'] / KTS_TO_FPS:.0f} kts and "
                 f"target altitude {gatekeeper_bundle['backup_target_altitude_ft']:.0f} ft above DEM origin."
             )
+            print(f"Gatekeeper update interval: every {gatekeeper_bundle['update_interval_steps']} step(s).")
             print("Compiling PID policy JAX JIT... (this takes a moment)", flush=True)
             # Warm up the JIT-compiled nominal policy in isolation first.
             _warmup_state = controller_state_to_gatekeeper_flat(initial_controller_state)
@@ -1504,37 +1510,43 @@ def main():
             if gatekeeper_bundle is not None:
                 gatekeeper = gatekeeper_bundle["gatekeeper"]
                 latest_nominal = gatekeeper_bundle["latest_nominal"]
-                if controller_tag in {"mppi", "smooth_mppi"}:
-                    latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
+                gk_update_interval_steps = int(max(gatekeeper_bundle.get("update_interval_steps", 1), 1))
+                run_gatekeeper_update = (step % gk_update_interval_steps) == 0
 
-                t_ws = time.time()
-                if controller_tag in {"mppi", "smooth_mppi"}:
-                    nominal_trajectory = _build_gatekeeper_nominal_trajectory(
-                        controller=controller,
-                        nominal_action=nominal_action,
-                        horizon=gatekeeper.params.T,
+                if run_gatekeeper_update:
+                    if controller_tag in {"mppi", "smooth_mppi"}:
+                        latest_nominal["action"] = jnp.asarray(np.asarray(nominal_action, dtype=np.float32), dtype=jnp.float32)
+
+                    t_ws = time.time()
+                    if controller_tag in {"mppi", "smooth_mppi"}:
+                        nominal_trajectory = _build_gatekeeper_nominal_trajectory(
+                            controller=controller,
+                            nominal_action=nominal_action,
+                            horizon=gatekeeper.params.T,
+                        )
+                        nominal_trajectory_jax = jnp.asarray(nominal_trajectory, dtype=jnp.float32)
+                    else:
+                        nominal_trajectory_jax = None
+                    gk_nom_prep = (time.time() - t_ws) * 1000.0
+
+                    track_bounds = None
+                    if gatekeeper.theta_dim > 0:
+                        current_width_ft = float(state.get("canyon_width", np.nanmean(width_samples_ft)))
+                        track_bounds = TrackBoundsEstimate.from_track_width(
+                            half_width=max(0.5 * current_width_ft, 1.0),
+                            relative_uncertainty=0.0,
+                        )
+
+                    t_update = time.time()
+                    gatekeeper_state = gatekeeper.update(
+                        controller_state_to_gatekeeper_flat(controller_state),
+                        track_bounds=track_bounds,
+                        nominal_trajectory=nominal_trajectory_jax,
+                        max_steps=int(args.max_steps),
                     )
-                    nominal_trajectory_jax = jnp.asarray(nominal_trajectory, dtype=jnp.float32)
+                    gk_update_ms = (time.time() - t_update) * 1000.0
                 else:
-                    nominal_trajectory_jax = None
-                gk_nom_prep = (time.time() - t_ws) * 1000.0
-
-                track_bounds = None
-                if gatekeeper.theta_dim > 0:
-                    current_width_ft = float(state.get("canyon_width", np.nanmean(width_samples_ft)))
-                    track_bounds = TrackBoundsEstimate.from_track_width(
-                        half_width=max(0.5 * current_width_ft, 1.0),
-                        relative_uncertainty=0.0,
-                    )
-
-                t_update = time.time()
-                gatekeeper_state = gatekeeper.update(
-                    controller_state_to_gatekeeper_flat(controller_state),
-                    track_bounds=track_bounds,
-                    nominal_trajectory=nominal_trajectory_jax,
-                    max_steps=int(args.max_steps),
-                )
-                gk_update_ms = (time.time() - t_update) * 1000.0
+                    gatekeeper_state = gatekeeper.state
 
                 if gatekeeper_state.using_backup:
                     t_backup = time.time()
