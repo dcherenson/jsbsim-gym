@@ -532,9 +532,9 @@ def build_jsbsim_gatekeeper(
         return jnp.asarray([feature_map[name] for name in active_empirical_features], dtype=jnp.float32)
 
     params = GatekeeperParams(
-        M=30,
-        T=100,
-        N=300,
+        M=25,
+        T=90,
+        N=256,
         delta=0.1,
         epsilon=0.05,
         beta=1.0,
@@ -546,7 +546,7 @@ def build_jsbsim_gatekeeper(
     )
     # Gatekeeper update cadence (in control steps).
     # Example: 10 => run gatekeeper.update() every 10 steps and reuse last s_t in between.
-    gatekeeper_update_interval_steps = 5
+    gatekeeper_update_interval_steps = 10
     initial_bounds = TrackBoundsEstimate.from_track_width(
         half_width=max(float(np.nanmean(width_samples_ft) * 0.5), 1.0),
         relative_uncertainty=0.0,
