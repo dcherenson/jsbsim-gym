@@ -1,0 +1,20 @@
+{
+  "seed": 1356,
+  "controller": "pid_traj",
+  "gatekeeper_enabled": true,
+  "record_video": false,
+  "termination_reason": "mission_success",
+  "end_step": 704,
+  "speed_at_end_fps": 586.6816390778043,
+  "speed_at_end_kts": 347.5993382417478,
+  "average_speed_fps": 635.8213948977618,
+  "average_speed_kts": 376.713845099722,
+  "average_altitude_msl_ft": 6727.639778803748,
+  "average_altitude_ft": -144.90782105953258,
+  "percent_below_canyon_top_altitude": 100.0,
+  "backup_steps_used": 90,
+  "nominal_progress_fraction": 0.9511271629845122,
+  "mission_success": true,
+  "max_steps": 1200,
+  "output_dir": "/home/dasc/daniel/jsbsim-gym/output/canyon_pid_traj_gatekeeper"
+}

@@ -1,0 +1,801 @@
+trial_idx,seed,return_code,elapsed_s,termination_reason,failure_step,speed_at_failure_fps,speed_at_failure_kts,average_speed_fps,average_speed_kts,average_altitude_ft,average_altitude_msl_ft,percent_below_canyon_top_altitude,backup_steps_used,nominal_progress_fraction,mission_success,summary_json,stderr_tail
+0,1337,0,17.504601001739502,mission_success,710,590.9732370928976,350.14204033208574,635.3619191410585,376.4416131798357,-121.62926495436659,6750.918334908914,100.0,77,0.9509651062091583,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_000_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:56:19.972016 2361411 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:56:19.981148 2361274 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+1,1338,0,17.313868284225464,mission_success,708,590.5044798388578,349.8643092758414,633.7351588168677,375.4777841207646,-144.8474432971625,6727.7001565661185,100.0,92,0.9511458285964349,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_001_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:56:37.448763 2362013 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:56:37.457845 2361861 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+2,1339,0,17.410534143447876,mission_success,704,578.7216709629093,342.88318647413473,635.44158154555,376.4888118600731,-137.17671748428165,6735.370882378999,100.0,65,0.9504506067156315,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_002_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:56:54.816085 2362594 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:56:54.825371 2362442 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+3,1340,0,17.498738765716553,mission_success,716,575.3961414524798,340.91286427529155,635.7096203850333,376.64762051713956,-92.5313935362501,6780.016206327031,100.0,58,0.9506683388459984,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_003_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:57:12.196383 2363168 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:57:12.205607 2363025 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+4,1341,0,17.583266973495483,mission_success,712,575.7530141383492,341.12430554289233,629.9998157872102,373.26465407078416,-131.08548618929308,6741.462113673988,100.0,70,0.9502046661417617,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_004_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:57:29.735149 2363761 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:57:29.744270 2363598 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+5,1342,0,17.43660283088684,mission_success,708,599.391912190234,355.12996853332663,635.7954617087863,376.69848010663895,-138.2221526758649,6734.325447187416,100.0,83,0.9505964006958094,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_005_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:57:47.280144 2364338 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:57:47.289296 2364187 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+6,1343,0,17.435149431228638,mission_success,700,572.4123021044651,339.14498794560114,638.0564171918195,378.0380594923715,-127.18987160807228,6745.357728255209,100.0,75,0.9510843275102896,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_006_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:58:04.717675 2364912 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:58:04.726814 2364767 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+7,1344,0,15.738971471786499,terrain_collision,599,493.13285673502065,292.17320476535906,644.3170813417682,381.7474012725178,-173.6548042441791,6698.892795619102,100.0,132,0.817179559764368,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_007_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:58:22.136143 2365499 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:58:22.145595 2365338 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+8,1345,0,17.43643856048584,mission_success,705,570.7222916127838,338.1436841900355,634.2602067708416,375.7888665020598,-142.07807225659508,6730.469527606686,100.0,92,0.9504850009615358,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_008_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:58:37.944271 2366053 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:58:37.953541 2365889 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+9,1346,0,18.963249444961548,mission_success,796,517.9021262754223,306.8485944954837,608.9144814643807,360.7719360972981,119.18504289359953,6991.7326427568805,87.45294855708909,168,0.9505210595741342,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_009_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:58:55.360197 2366617 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:58:55.369261 2366474 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+10,1347,0,17.28683567047119,mission_success,700,589.2359052397196,349.11269943875175,640.444349322403,379.4528704785509,-128.3868901554997,6744.160709707781,100.0,89,0.9507060343476449,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_010_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:59:14.272134 2367235 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:59:14.281210 2367072 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+11,1348,0,17.401989936828613,mission_success,701,601.4045941749157,356.3224499054489,640.2571918082069,379.34198269248725,-135.13529339762135,6737.41230646566,100.0,76,0.9504947470497659,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_011_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:59:31.590029 2367820 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:59:31.599150 2367676 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+12,1349,0,17.576722621917725,mission_success,716,567.9204610005711,336.4836450788721,630.5515907723864,373.59157178378274,-103.1832425408893,6769.364357322392,100.0,83,0.9505158317509057,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_012_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 18:59:48.988572 2368407 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 18:59:48.997635 2368254 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+13,1350,0,17.577506065368652,mission_success,710,590.3377302380479,349.76551284685354,635.3629691148278,376.4422352722331,-125.06106572529461,6747.486534137986,100.0,82,0.9506204566357794,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_013_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:00:06.556087 2369002 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:00:06.606179 2368839 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+14,1351,0,17.473492860794067,mission_success,703,587.1448986244505,347.87381199569296,638.9686649134302,378.578551444434,-131.8614683007354,6740.686131562546,100.0,81,0.9501114157455585,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_014_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:00:24.212756 2369572 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:00:24.221881 2369421 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+15,1352,0,17.47360348701477,mission_success,703,591.7958211989258,350.6294080488478,639.3374430524166,378.7970464995566,-148.5395427056028,6724.008057157678,100.0,103,0.9507687592719614,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_015_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:00:41.644756 2370138 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:00:41.653904 2369995 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+16,1353,0,17.342037439346313,mission_success,700,585.7460925187121,347.0450421070571,644.3836062152491,381.7868161791014,-131.01340904519293,6741.534190818088,100.0,79,0.9509663575354238,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_016_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:00:59.042512 2370734 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:00:59.051600 2370568 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+17,1354,0,17.363456964492798,mission_success,704,586.6595218219355,347.5862341270259,644.9164665018312,382.10252724052543,-100.04343750915814,6772.504162354123,100.0,64,0.9510303541598519,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_017_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:01:16.455977 2371312 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:01:16.465018 2371169 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+18,1355,0,17.519776344299316,mission_success,718,577.5202093615754,342.171339997734,635.0199934628375,376.2390277713946,-97.83800903918018,6774.709590824101,100.0,46,0.9505831416674363,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_018_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:01:33.771941 2371889 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:01:33.780889 2371735 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+19,1356,0,17.343557834625244,mission_success,704,586.6816390778043,347.5993382417478,635.8213948977618,376.713845099722,-144.90782105953258,6727.639778803748,100.0,90,0.9511271629845122,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_019_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:01:51.286309 2372486 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:01:51.295337 2372320 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+20,1357,0,17.460461139678955,mission_success,717,563.2351738650547,333.70768858168555,627.0186439481666,371.49835819681516,-128.91324158447605,6743.634358278805,100.0,99,0.9504626622109444,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_020_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:02:08.623135 2373041 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:02:08.632397 2372902 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+21,1358,0,17.336742162704468,mission_success,700,580.1737369994923,343.74351200638245,636.7388909437351,377.2574465986901,-139.2983976793912,6733.24920218389,100.0,99,0.9507750423838244,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_021_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:02:26.115617 2373631 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:02:26.124682 2373468 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+22,1359,0,17.594175100326538,mission_success,712,567.9853983594251,336.52211940883456,627.464084844351,371.7622746898946,-137.83749731188527,6734.710102551396,100.0,64,0.9511302648293828,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_022_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:02:43.470017 2374204 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:02:43.479468 2374051 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+23,1360,0,17.30031681060791,mission_success,697,579.4667180546659,343.32461476982945,638.3939144184485,378.23802111520166,-133.61427721194286,6738.933322651338,100.0,92,0.9506889468407962,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_023_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:03:01.003577 2374770 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:03:01.013017 2374627 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+24,1361,0,17.486072063446045,mission_success,715,583.3081084374413,345.600576153383,633.301005029488,375.2205550562492,-109.39847237491267,6763.149127488368,100.0,73,0.950797292305669,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_024_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:03:18.325216 2375372 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:03:18.334547 2375205 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+25,1362,0,15.567745208740234,terrain_collision,586,494.4599052112325,292.95945942448054,657.403953654687,389.50116047107616,-176.15284276862258,6696.394757094658,100.0,127,0.817144199979118,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_025_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:03:35.852411 2375952 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:03:35.861789 2375801 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+26,1363,0,17.582226276397705,mission_success,712,578.2112405001528,342.5807647188681,632.6037613435666,374.80744950176063,-125.3373242405305,6747.2102756227505,100.0,74,0.9510573621739152,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_026_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:03:51.392602 2376482 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:03:51.401667 2376339 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+27,1364,0,18.751672983169556,mission_success,791,593.4196683354133,351.5915110915407,626.8253850496135,371.3838554396606,464.6814911393394,7337.22909100262,74.87373737373737,175,0.9507329164824094,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_027_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:04:09.028331 2377078 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:04:09.037447 2376924 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+28,1365,0,17.60089135169983,mission_success,710,583.0141123641694,345.4263882570724,630.9917472406078,373.85235733916005,-130.05543430123817,6742.492165562043,100.0,90,0.950275123771305,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_028_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:04:27.736398 2377681 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:04:27.745429 2377527 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+29,1366,0,17.435928106307983,mission_success,704,583.8631154626967,345.9294087976115,637.0377707078338,377.4345280024611,-137.35866003468072,6735.1889398286,100.0,72,0.9500395226063201,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_029_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:04:45.352758 2378261 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:04:45.362151 2378113 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+30,1367,0,17.381709814071655,mission_success,700,588.8991198099527,348.91315954399647,637.9042447651625,377.9478998022067,-130.3928860330334,6742.154713830248,100.0,98,0.9508561513231754,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_030_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:05:02.746051 2378840 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:05:02.755211 2378686 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+31,1368,0,17.89529848098755,mission_success,734,533.6198045269789,316.16106346506945,626.548178409983,371.2196150099733,129.52571017616992,7002.073310039451,89.52380952380952,175,0.9508193558123814,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_031_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:05:20.145766 2379427 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:05:20.154799 2379273 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+32,1369,0,13.313872575759888,terrain_collision,433,573.153996916975,339.584430070313,686.9852733633716,407.0276117355458,-175.54614573417803,6697.001454129103,100.0,64,0.6370182086457508,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_032_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:05:38.079993 2380011 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:05:38.089144 2379872 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+33,1370,0,17.191649675369263,mission_success,697,601.2644423875287,356.2394122487298,640.7825041436245,379.65322171549195,-147.2949884067566,6725.252611456524,100.0,83,0.9504930885739254,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_033_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:05:51.348273 2380530 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:05:51.357481 2380366 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+34,1371,0,18.512027263641357,mission_success,774,562.3038731976128,333.1559080688068,626.8689542265629,371.4096694690533,224.77017414987495,7097.317774013156,84.0,223,0.9500638054093776,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_034_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:06:08.545233 2381102 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:06:08.554299 2380949 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+35,1372,0,17.4463152885437,mission_success,706,577.8426131271739,342.3623589901552,635.3942474469476,376.46076717577665,-131.35379886242936,6741.193801000852,100.0,77,0.9502776247089108,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_035_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:06:27.060336 2381695 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:06:27.069648 2381541 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+36,1373,0,13.203360795974731,terrain_collision,439,547.5982086551943,324.4430407778093,683.3504462843308,404.87403575303546,-164.4181935783081,6708.129406284973,100.0,95,0.6380713565538602,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_036_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:06:44.492457 2382269 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:06:44.501581 2382126 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+37,1374,0,17.606380701065063,mission_success,715,570.5383394608842,338.03469552904903,634.6143501043229,375.9986906727196,-99.50564492693593,6773.041954936345,100.0,75,0.9507926528481492,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_037_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:06:57.712059 2382786 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:06:57.721136 2382632 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+38,1375,0,17.56786799430847,mission_success,709,603.6608534695256,357.65924687584834,638.07735262532,378.0504633965435,-124.75592940801198,6747.791670455269,100.0,48,0.9505709520332001,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_038_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:07:15.360468 2383381 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:07:15.369633 2383230 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+39,1376,0,17.338966369628906,mission_success,708,568.9498745761091,337.0935558955742,633.5234698323573,375.3523618371483,-139.38870205177864,6733.158897811502,100.0,86,0.9506266928379462,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_039_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:07:32.901596 2383954 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:07:32.910600 2383810 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+40,1377,0,17.951021909713745,mission_success,748,543.1808463785829,321.82582540604864,621.0611606486613,367.9686461442113,-28.295696675872023,6844.251903187409,100.0,92,0.9507743023825769,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_040_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:07:50.232087 2384543 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:07:50.241432 2384377 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+41,1378,0,17.46537470817566,mission_success,704,572.7483855389609,339.3441119195649,637.2746283603377,377.57486231290113,-132.060415174642,6740.487184688639,100.0,64,0.9505739005157763,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_041_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:08:08.133909 2385121 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:08:08.143136 2384966 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+42,1379,0,17.706948280334473,mission_success,710,577.1635994406142,341.96005441407164,636.5080458679518,377.12067464225936,-117.16348147121789,6755.384118392063,100.0,76,0.9511234819030583,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_042_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:08:25.659830 2385699 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:08:25.669057 2385546 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+43,1380,0,17.393746852874756,mission_success,704,593.4694833205021,351.6210256607688,641.2550455846601,379.9331948410426,-133.80708843381763,6738.740511429463,100.0,64,0.9506962524060572,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_043_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:08:43.360921 2386278 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:08:43.370096 2386132 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+44,1381,0,17.43693733215332,mission_success,708,572.5752148886797,339.24151112310017,631.4443827055061,374.12053649729893,-136.39444312092746,6736.1531567423535,100.0,92,0.9506169640721109,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_044_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:09:00.748016 2386862 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:09:00.757084 2386707 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+45,1382,0,17.30730152130127,mission_success,697,587.3892806464814,348.01860437281533,641.0594128660023,379.81728563404783,-141.127397510214,6731.420202353067,100.0,89,0.9503961159227994,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_045_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:09:18.188319 2387458 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:09:18.197458 2387295 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+46,1383,0,15.111840724945068,terrain_collision,551,487.82698119155594,289.0295597203216,659.500645584135,390.743416370406,-107.64212937302818,6764.905470490253,100.0,161,0.7585064222061427,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_046_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:09:35.520587 2388025 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:09:35.529759 2387869 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+47,1384,0,17.52462124824524,mission_success,702,591.5896472331061,350.50725332419296,640.6161292665498,379.55464730422847,-134.99366648311207,6737.553933380169,100.0,78,0.9509405864161921,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_047_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:09:50.600240 2388568 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:09:50.609363 2388414 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+48,1385,0,17.319268941879272,mission_success,708,574.6344985530969,340.46160323324125,636.2441118141708,376.9642980040234,-114.73646415298663,6757.811135710294,100.0,82,0.9506442915196085,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_048_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:10:08.080593 2389148 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:10:08.089906 2389004 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+49,1386,0,22.50397276878357,terrain_collision,1036,547.7331619939765,324.5229984381989,604.1657348363981,357.9583808819702,466.8116184592609,7339.359218322542,67.4059787849566,452,0.9468633427538389,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_049_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:10:25.444170 2389732 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:10:25.453274 2389575 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+50,1387,0,17.376172304153442,mission_success,709,558.4409959433425,330.8672160630299,635.7488363729968,376.67085535279256,-110.65781490240715,6761.889784960874,100.0,67,0.9509226371799214,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_050_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:10:47.936691 2390393 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:10:47.945824 2390238 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+51,1388,0,17.337440013885498,mission_success,698,587.7716645158158,348.24516060209135,644.102610784403,381.6203309521824,-130.99055511687584,6741.557044746405,100.0,83,0.9502512559734098,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_051_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:11:05.336661 2390979 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:11:05.345970 2390824 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+52,1389,0,17.41308069229126,mission_success,710,592.2020210560238,350.870074863891,636.5168262878426,377.1258768983728,-116.54102441358282,6756.006575449698,100.0,81,0.9507309626772332,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_052_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:11:22.644326 2391550 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:11:22.653626 2391405 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+53,1390,0,17.363059520721436,mission_success,709,573.7960583808995,339.964841054917,630.1638090154757,373.3618173938273,-143.0037555187091,6729.543844344572,100.0,68,0.9508480289575175,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_053_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:11:40.083694 2392139 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:11:40.092741 2391975 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+54,1391,0,17.362640857696533,mission_success,707,578.0439986635095,342.48167664814724,637.7396277052457,377.85036686904664,-118.60617422286123,6753.94142564042,100.0,89,0.9508251617634016,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_054_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:11:57.479408 2392714 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:11:57.488851 2392552 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+55,1392,0,17.12629532814026,mission_success,695,581.0584804664127,344.2677081344539,646.45578517386,383.0145485415183,-121.30576771523829,6751.241832148043,100.0,74,0.9501128835239501,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_055_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:12:14.769003 2393284 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:12:14.778058 2393140 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+56,1393,0,17.573399543762207,mission_success,716,579.3199722060273,343.2376702389648,630.8799294978069,373.7861071434622,-122.82351015157928,6749.724089711702,100.0,83,0.9503643898116465,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_056_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:12:31.985990 2393865 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:12:31.995040 2393714 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+57,1394,0,18.085554838180542,mission_success,746,526.5820226733706,311.99129207278696,624.8685737867725,370.22447656239297,211.65297766120602,7084.200577524487,85.27443105756359,150,0.9505548377545507,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_057_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:12:49.523767 2394452 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:12:49.532913 2394297 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+58,1395,0,17.313826322555542,mission_success,700,576.4223417825829,341.52087129628507,641.1053935119367,379.84452841963054,-119.80044136649576,6752.747158496785,100.0,84,0.9502037501108663,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_058_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:13:07.572618 2395047 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:13:07.581858 2394894 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+59,1396,0,17.253971338272095,mission_success,704,580.696751157953,344.05338939688295,633.1318841369075,375.12035367541813,-148.5701139875746,6723.977485875706,100.0,74,0.9508375991025814,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_059_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:13:24.887988 2395606 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:13:24.897126 2395461 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+60,1397,0,17.377542972564697,mission_success,704,580.6042470758655,343.9985822313326,637.4634478226471,377.6867347762172,-133.4463387411206,6739.10126112216,100.0,75,0.9504367713531822,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_060_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:13:42.120131 2396187 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:13:42.129215 2396034 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+61,1398,0,15.62000298500061,terrain_collision,588,493.29516051006374,292.26936711481966,657.2492947535333,389.40952758517443,-173.0200968047202,6699.527503058561,100.0,127,0.816995239131784,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_061_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:13:59.516591 2396764 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:13:59.525691 2396609 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+62,1399,0,17.446677923202515,mission_success,702,566.0038018812733,335.348055694227,633.722239045497,375.4701293661591,-153.3158718868499,6719.231727976431,100.0,113,0.9510858907330804,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_062_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:14:15.175532 2397317 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:14:15.184925 2397160 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+63,1400,0,17.553546667099,mission_success,710,580.0472284215917,343.66855772959735,637.5369297945748,377.73027165058556,-117.81482873550976,6754.732771127771,100.0,67,0.9502438278874002,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_063_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:14:32.592208 2397905 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:14:32.601277 2397742 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+64,1401,0,17.307215690612793,mission_success,707,593.1785638880565,351.4486606241558,635.748575055858,376.67070052663394,-135.07657672533696,6737.471023137944,100.0,79,0.9509962842260538,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_064_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:14:50.164544 2398476 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:14:50.173597 2398333 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+65,1402,0,17.406797647476196,mission_success,711,560.9464025218639,332.35162875078584,637.0713183841236,377.45440445555107,-9.915531822270168,6862.632068041011,100.0,88,0.9503153350603711,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_065_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:15:07.436662 2399063 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:15:07.445759 2398908 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+66,1403,0,17.568361282348633,mission_success,701,581.5327102065893,344.5486815498126,638.6237353044702,378.3741862558405,-137.4151905723793,6735.132409290902,100.0,94,0.950921077149875,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_066_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:15:24.928831 2399655 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:15:24.938423 2399493 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+67,1404,0,15.93797516822815,terrain_collision,614,506.36917147659847,300.0155061746278,644.5464633125807,381.8833063630271,-169.51092876838175,6703.036671094899,100.0,139,0.8338304673107281,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_067_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:15:42.424089 2400233 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:15:42.433296 2400089 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+68,1405,0,17.438052654266357,mission_success,700,576.7966908921367,341.7426670609468,639.0060891811977,378.6007247149843,-132.71434273789055,6739.83325712539,100.0,93,0.9507111894928785,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_068_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:15:58.390187 2400797 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:15:58.399751 2400641 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+69,1406,0,17.281965494155884,mission_success,708,574.4149931548844,340.33154985151435,635.4782176592835,376.51051816216483,-117.3262188165154,6755.221381046766,100.0,80,0.9501948779696721,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_069_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:16:15.794563 2401373 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:16:15.803878 2401218 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+70,1407,0,16.005171537399292,terrain_collision,615,503.3849857683171,298.24742463210737,642.9921655561657,380.9624101979285,-172.4579536919564,6700.089646171325,100.0,140,0.8358728208723892,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_070_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:16:33.124865 2401949 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:16:33.133996 2401796 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+71,1408,0,17.543472290039062,mission_success,715,577.6268379903165,342.2345157276687,630.8800310953199,373.78616733833775,-115.07744706020821,6757.470152803073,100.0,74,0.9504931805052498,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_071_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:16:49.104320 2402499 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:16:49.113443 2402356 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+72,1409,0,17.720609188079834,mission_success,728,582.5999527261166,345.18100540115097,628.217583150768,372.20871019295294,-55.626522503496744,6816.921077359784,100.0,55,0.950137011962297,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_072_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:17:06.619265 2403081 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:17:06.628426 2402935 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+73,1410,0,17.48644733428955,mission_success,706,564.4657959011315,334.43681214184744,635.9441394653055,376.7865692615315,-147.6161185186429,6724.931481344638,100.0,102,0.9510036757485169,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_073_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:17:24.376556 2403674 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:17:24.385860 2403519 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+74,1411,0,17.505254983901978,mission_success,700,570.03414655159,337.73596942285565,635.788515513636,376.69436459888016,-141.37355389742424,6731.174045965857,100.0,103,0.9503633815267843,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_074_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:17:41.847989 2404250 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:17:41.857008 2404096 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+75,1412,0,16.065199613571167,terrain_collision,614,498.5364241772547,295.37473067303466,643.7918709892234,381.4362226727081,-165.81465137131636,6706.732948491965,100.0,151,0.8340647493012198,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_075_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:17:59.364729 2404829 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:17:59.373796 2404685 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+76,1413,0,18.084511280059814,mission_success,744,541.4968780730114,320.8281015475743,625.1434966022586,370.3873638633842,-19.59972837614805,6852.947871487133,100.0,100,0.9504257286589666,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_076_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:18:15.464575 2405390 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:18:15.473889 2405246 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+77,1414,0,14.900935888290405,terrain_collision,539,496.80961044054595,294.3516215928013,663.4939206670862,393.10936697085936,-153.43146696667372,6719.116132896607,100.0,83,0.7619460244437405,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_077_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:18:33.513388 2405980 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:18:33.522439 2405829 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+78,1415,0,17.35717272758484,mission_success,703,581.3801427522047,344.45828781213805,640.9928434732369,379.77784435051154,-117.95102902784765,6754.596570835433,100.0,71,0.9501748052706144,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_078_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:18:48.448115 2406525 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:18:48.457304 2406366 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+79,1416,0,17.370960474014282,mission_success,705,563.2009182177485,333.6873926672721,632.7235209403821,374.87840511691604,-139.34800976802308,6733.199590095258,100.0,97,0.9501075180271048,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_079_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:19:05.824881 2407097 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:19:05.834045 2406944 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+80,1417,0,17.587035179138184,mission_success,712,580.6919096895167,344.0505209055028,633.1090176085094,375.1068056288974,-123.89660422243105,6748.65099564085,100.0,83,0.95065942149168,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_080_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:19:23.157316 2407670 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:19:23.166470 2407519 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+81,1418,0,17.352255821228027,mission_success,694,587.7656836075281,348.2416170111139,642.5494837924458,380.7001284460015,-144.42119724331224,6728.126402619969,100.0,100,0.9507387723472441,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_081_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:19:40.752284 2408252 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:19:40.761348 2408097 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+82,1419,0,17.37561583518982,mission_success,701,601.4636645327216,356.3574481326225,640.3110326769113,379.3738825323415,-146.8773321225126,6725.670267740768,100.0,92,0.9510795088087569,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_082_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:19:58.052041 2408824 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:19:58.061248 2408680 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+83,1420,0,17.432861804962158,mission_success,709,577.6793423406064,342.2656237020792,633.9439193006707,375.6014713152966,-130.077610220932,6742.469989642349,100.0,61,0.9503789836700826,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_083_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:20:15.461351 2409416 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:20:15.470899 2409251 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+84,1421,0,13.427475214004517,terrain_collision,443,542.9049617615252,321.66236825325433,683.7071182773626,405.08535811339107,-165.4562702829071,6707.091329580374,100.0,94,0.6446829222705188,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_084_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:20:32.896234 2409987 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:20:32.905392 2409844 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+85,1422,0,17.522641897201538,mission_success,713,583.9687250958219,345.99198078920136,633.9773727694044,375.6212919519403,-110.58073424397571,6761.966865619305,100.0,79,0.9508674641886528,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_085_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:20:46.311652 2410501 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:20:46.320935 2410358 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+86,1423,0,17.58315873146057,mission_success,711,581.1292235470695,344.3096222602482,634.4267613846384,375.8875474044107,-122.29668968979695,6750.250910173484,100.0,73,0.9500733203028056,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_086_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:21:03.824712 2411092 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:21:03.833992 2410929 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+87,1424,0,17.476154327392578,mission_success,704,565.5008559398962,335.0500683962627,635.9995182213621,376.819380274653,-137.10104627260898,6735.446553590672,100.0,91,0.9509647110076402,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_087_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:21:21.428517 2411675 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:21:21.437535 2411521 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+88,1425,0,17.234445333480835,mission_success,699,565.2535451722123,334.90354078492976,636.0346400606505,376.8401893937413,-150.3054435472868,6722.242156315994,100.0,111,0.9505790942839358,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_088_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:21:38.882685 2412247 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:21:38.892005 2412104 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+89,1426,0,15.51693844795227,terrain_collision,583,509.4916716835565,301.8655368101602,658.3219397881263,390.04505233890444,-176.7097584723424,6695.837841390939,100.0,123,0.8169399106879801,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_089_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:21:56.128429 2412843 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:21:56.137498 2412678 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+90,1427,0,17.501478910446167,mission_success,714,580.1085557047968,343.7048931483975,630.6842483127867,373.67016922093524,-126.444906579296,6746.102693283985,100.0,63,0.9503641942921893,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_090_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:22:11.651156 2413396 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:22:11.660364 2413242 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+91,1428,0,17.35936999320984,mission_success,704,575.4962824201791,340.9721961714761,634.3781908079745,375.8587701269542,-150.37287687912794,6722.174722984153,100.0,102,0.951006200427364,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_091_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:22:29.160133 2413974 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:22:29.169463 2413830 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+92,1429,0,17.16962170600891,mission_success,698,586.4605535735575,347.46834867287043,641.772159441756,380.2395763988577,-135.38468441346777,6737.162915449813,100.0,75,0.9507216474098987,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_092_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:22:46.480477 2414567 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:22:46.489674 2414403 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+93,1430,0,16.985821962356567,mission_success,689,573.8181892955021,339.9779532622168,646.3573058333388,382.9562011324372,-137.36334274975252,6735.1842571135285,100.0,100,0.9509574730455035,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_093_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:23:03.676760 2415131 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:23:03.686060 2414987 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+94,1431,0,17.413467168807983,mission_success,709,586.6985988878034,347.6093866535945,633.4060449228479,375.2827894862857,-137.7233838455295,6734.8242160177515,100.0,88,0.9503136659770368,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_094_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:23:20.602917 2415717 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:23:20.612037 2415553 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+95,1432,0,17.41306447982788,mission_success,708,579.0561662139198,343.0813694751896,631.4681348802474,374.13460927488717,-154.24733047879727,6718.300269384484,100.0,96,0.9502905292586182,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_095_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:23:38.084760 2416288 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:23:38.093907 2416145 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+96,1433,0,17.465153217315674,mission_success,712,579.1548834720129,343.1398578465662,636.8517988680255,377.3243427092063,-105.01483280720458,6767.532767056076,100.0,71,0.9501122414092827,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_096_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:23:55.455942 2416874 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:23:55.464975 2416722 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+97,1434,0,17.013025999069214,terrain_collision,676,502.4116249972125,297.67072419123747,634.2456240345648,375.7802264677688,-130.84902073014655,6741.698579133134,100.0,171,0.8878043009928286,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_097_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:24:13.012869 2417465 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:24:13.022210 2417300 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+98,1435,0,17.60024070739746,mission_success,713,584.2139177616157,346.13725345958113,631.7578894407153,374.30628414378117,-128.615750175396,6743.931849687885,100.0,70,0.9506250247440499,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_098_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:24:29.962074 2418025 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:24:29.971116 2417883 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
+99,1436,0,17.38937783241272,mission_success,700,601.098565391401,356.14113282383744,639.0702906086333,378.6387630175395,-135.49252003565653,6737.0550798276245,100.0,90,0.9509224770398523,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_099_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn(
+E0510 19:24:47.575187 2418620 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )
+E0510 19:24:47.584195 2418455 cuda_executor.cc:1743] Could not get kernel mode driver version: ( INVALID_ARGUMENT: Version does not match the format X.Y.Z )"
