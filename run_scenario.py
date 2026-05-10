@@ -258,6 +258,35 @@ def _estimate_progress_fraction_from_position(position_n_ft, position_e_ft, path
     return float(np.clip(best_progress_ft / total_len, 0.0, 1.0))
 
 
+def _build_canyon_top_profile_msl_ft(env):
+    canyon = getattr(env.unwrapped, "canyon", None)
+    if canyon is None or not hasattr(canyon, "north_samples_ft"):
+        return None, None
+
+    north_samples_ft = np.asarray(canyon.north_samples_ft, dtype=np.float32).reshape(-1)
+    if north_samples_ft.size < 1:
+        return None, None
+
+    if hasattr(canyon, "ordered_dem_msl_m"):
+        dem_msl_m = np.asarray(canyon.ordered_dem_msl_m, dtype=np.float32)
+        if dem_msl_m.ndim == 2 and dem_msl_m.shape[0] == north_samples_ft.size:
+            terrain_floor_msl_ft = np.nanmin(dem_msl_m, axis=1).astype(np.float32) * M_TO_FT
+        else:
+            terrain_floor_msl_ft = np.zeros_like(north_samples_ft, dtype=np.float32)
+    else:
+        terrain_floor_msl_ft = np.zeros_like(north_samples_ft, dtype=np.float32)
+
+    wall_height_samples_ft = np.asarray(
+        getattr(canyon, "wall_height_samples_ft", np.zeros_like(north_samples_ft, dtype=np.float32)),
+        dtype=np.float32,
+    ).reshape(-1)
+    if wall_height_samples_ft.size != north_samples_ft.size:
+        return None, None
+
+    canyon_top_msl_ft = terrain_floor_msl_ft + wall_height_samples_ft
+    return north_samples_ft.astype(np.float32), canyon_top_msl_ft.astype(np.float32)
+
+
 _GATEKEEPER_FLAT_BUF = np.zeros(14, dtype=np.float32)
 
 def controller_state_to_gatekeeper_flat(state_dict):
@@ -1363,6 +1392,7 @@ def main():
     start_path_north_ft = float(initial_controller_state["p_N"])
 
     canyon = env.unwrapped.canyon
+    canyon_top_north_samples_ft, canyon_top_msl_samples_ft = _build_canyon_top_profile_msl_ft(env)
     north_samples_ft, width_samples_ft, center_east_samples_ft, _ = get_active_canyon_reference(env)
     nominal_reference = None
     if args.nominal_dyn_path is not None:
@@ -1482,6 +1512,10 @@ def main():
     end_step = -1
     speed_at_end_fps = float("nan")
     final_post_controller_state = None
+    speed_samples_fps = []
+    altitude_samples_msl_ft = []
+    below_canyon_top_count = 0
+    canyon_top_comparison_count = 0
 
     gatekeeper_bundle = None
     gatekeeper_prev_using_backup = False
@@ -1701,6 +1735,20 @@ def main():
             )
             post_controller_state = to_mppi_state(env, state, altitude_ref_ft)
             final_post_controller_state = post_controller_state
+            speed_samples_fps.append(float(speed_at_end_fps))
+            altitude_samples_msl_ft.append(float(state["h"]))
+            if canyon_top_north_samples_ft is not None and canyon_top_msl_samples_ft is not None:
+                canyon_top_msl_ft = float(
+                    np.interp(
+                        float(post_controller_state["p_N"]),
+                        canyon_top_north_samples_ft,
+                        canyon_top_msl_samples_ft,
+                    )
+                )
+                if np.isfinite(canyon_top_msl_ft):
+                    canyon_top_comparison_count += 1
+                    if float(state["h"]) < canyon_top_msl_ft:
+                        below_canyon_top_count += 1
             current_progress_fraction = float('nan')
             if nominal_reference is not None:
                 current_progress_fraction = _estimate_progress_fraction_from_position(
@@ -1781,6 +1829,15 @@ def main():
             nominal_reference["north_ft"],
             nominal_reference["east_ft"],
         )
+    average_speed_fps = float(np.mean(speed_samples_fps)) if speed_samples_fps else float("nan")
+    average_altitude_msl_ft = (
+        float(np.mean(altitude_samples_msl_ft)) if altitude_samples_msl_ft else float("nan")
+    )
+    percent_below_canyon_top_altitude = (
+        float(100.0 * below_canyon_top_count / canyon_top_comparison_count)
+        if canyon_top_comparison_count > 0
+        else float("nan")
+    )
     run_summary = {
         "seed": int(args.seed),
         "controller": str(controller_tag),
@@ -1790,6 +1847,11 @@ def main():
         "end_step": int(end_step),
         "speed_at_end_fps": float(speed_at_end_fps),
         "speed_at_end_kts": float(speed_at_end_fps) / float(KTS_TO_FPS),
+        "average_speed_fps": float(average_speed_fps),
+        "average_speed_kts": float(average_speed_fps) / float(KTS_TO_FPS),
+        "average_altitude_msl_ft": float(average_altitude_msl_ft),
+        "average_altitude_ft": float(average_altitude_msl_ft - altitude_ref_ft),
+        "percent_below_canyon_top_altitude": float(percent_below_canyon_top_altitude),
         "backup_steps_used": int(backup_steps_used),
         "nominal_progress_fraction": float(nominal_progress_fraction),
         "mission_success": bool(np.isfinite(nominal_progress_fraction) and nominal_progress_fraction > 0.95),

@@ -70,6 +70,11 @@ def run_trials(base_command, trials, seed_start, seed_step, workdir, output_dir,
         end_step = int(summary.get("end_step", -1))
         speed_at_end_fps = _float_or_none(summary.get("speed_at_end_fps"))
         speed_at_end_kts = _float_or_none(summary.get("speed_at_end_kts"))
+        average_speed_fps = _float_or_none(summary.get("average_speed_fps"))
+        average_speed_kts = _float_or_none(summary.get("average_speed_kts"))
+        average_altitude_ft = _float_or_none(summary.get("average_altitude_ft"))
+        average_altitude_msl_ft = _float_or_none(summary.get("average_altitude_msl_ft"))
+        percent_below_canyon_top_altitude = _float_or_none(summary.get("percent_below_canyon_top_altitude"))
         backup_steps_used = int(summary.get("backup_steps_used", 0))
         nominal_progress_fraction = _float_or_none(summary.get("nominal_progress_fraction"))
         mission_success = bool(summary.get("mission_success", False))
@@ -86,6 +91,11 @@ def run_trials(base_command, trials, seed_start, seed_step, workdir, output_dir,
             "failure_step": end_step,
             "speed_at_failure_fps": speed_at_end_fps,
             "speed_at_failure_kts": speed_at_end_kts,
+            "average_speed_fps": average_speed_fps,
+            "average_speed_kts": average_speed_kts,
+            "average_altitude_ft": average_altitude_ft,
+            "average_altitude_msl_ft": average_altitude_msl_ft,
+            "percent_below_canyon_top_altitude": percent_below_canyon_top_altitude,
             "backup_steps_used": backup_steps_used,
             "nominal_progress_fraction": nominal_progress_fraction,
             "mission_success": mission_success,
@@ -97,6 +107,9 @@ def run_trials(base_command, trials, seed_start, seed_step, workdir, output_dir,
         print(
             f"[{trial_idx + 1:03d}/{trials:03d}] total failures={failures} seed={seed} rc={result.returncode} "
             f"step={end_step} speed_kts={speed_at_end_kts if speed_at_end_kts is not None else 'nan'} "
+            f"avg_speed_kts={average_speed_kts if average_speed_kts is not None else 'nan'} "
+            f"avg_alt_ft={average_altitude_ft if average_altitude_ft is not None else 'nan'} "
+            f"below_top_pct={percent_below_canyon_top_altitude if percent_below_canyon_top_altitude is not None else 'nan'} "
             f"prog={nominal_progress_fraction if nominal_progress_fraction is not None else 'nan'} "
             f"backup_steps={backup_steps_used} success={mission_success} reason={termination_reason}"
         )
@@ -110,6 +123,13 @@ def _compute_aggregate(rows):
     failure_steps = [int(r["failure_step"]) for r in rc_ok if int(r["failure_step"]) >= 0]
     backup_steps = [int(r["backup_steps_used"]) for r in rc_ok]
     speeds_kts = [float(r["speed_at_failure_kts"]) for r in rc_ok if r["speed_at_failure_kts"] is not None]
+    average_speeds_kts = [float(r["average_speed_kts"]) for r in rc_ok if r["average_speed_kts"] is not None]
+    average_altitudes_ft = [float(r["average_altitude_ft"]) for r in rc_ok if r["average_altitude_ft"] is not None]
+    below_top_percentages = [
+        float(r["percent_below_canyon_top_altitude"])
+        for r in rc_ok
+        if r["percent_below_canyon_top_altitude"] is not None
+    ]
     progress_fractions = [float(r["nominal_progress_fraction"]) for r in rc_ok if r["nominal_progress_fraction"] is not None]
 
     return {
@@ -123,6 +143,12 @@ def _compute_aggregate(rows):
         "backup_steps_median": median(backup_steps) if backup_steps else None,
         "speed_at_failure_kts_mean": mean(speeds_kts) if speeds_kts else None,
         "speed_at_failure_kts_median": median(speeds_kts) if speeds_kts else None,
+        "average_speed_kts_mean": mean(average_speeds_kts) if average_speeds_kts else None,
+        "average_speed_kts_median": median(average_speeds_kts) if average_speeds_kts else None,
+        "average_altitude_ft_mean": mean(average_altitudes_ft) if average_altitudes_ft else None,
+        "average_altitude_ft_median": median(average_altitudes_ft) if average_altitudes_ft else None,
+        "percent_below_canyon_top_altitude_mean": mean(below_top_percentages) if below_top_percentages else None,
+        "percent_below_canyon_top_altitude_median": median(below_top_percentages) if below_top_percentages else None,
         "nominal_progress_fraction_mean": mean(progress_fractions) if progress_fractions else None,
         "nominal_progress_fraction_median": median(progress_fractions) if progress_fractions else None,
     }
@@ -141,6 +167,11 @@ def write_outputs(rows, output_csv, output_json, base_command):
         "failure_step",
         "speed_at_failure_fps",
         "speed_at_failure_kts",
+        "average_speed_fps",
+        "average_speed_kts",
+        "average_altitude_ft",
+        "average_altitude_msl_ft",
+        "percent_below_canyon_top_altitude",
         "backup_steps_used",
         "nominal_progress_fraction",
         "mission_success",
@@ -167,7 +198,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description=(
             "Run a gatekeeper CLI command repeatedly with varying seeds and collect "
-            "failure step, failure speed, and backup-usage metrics."
+            "failure step, speed, altitude, and backup-usage metrics."
         )
     )
     parser.add_argument(
