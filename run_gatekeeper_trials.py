@@ -40,6 +40,7 @@ def run_trials(base_command, trials, seed_start, seed_step, workdir, output_dir,
     output_dir.mkdir(parents=True, exist_ok=True)
     trial_summary_dir = output_dir / "trial_summaries"
     trial_summary_dir.mkdir(parents=True, exist_ok=True)
+    failures = 0
 
     rows = []
     for trial_idx in range(int(trials)):
@@ -73,6 +74,9 @@ def run_trials(base_command, trials, seed_start, seed_step, workdir, output_dir,
         nominal_progress_fraction = _float_or_none(summary.get("nominal_progress_fraction"))
         mission_success = bool(summary.get("mission_success", False))
 
+        if not mission_success:
+            failures += 1
+
         row = {
             "trial_idx": trial_idx,
             "seed": seed,
@@ -91,7 +95,7 @@ def run_trials(base_command, trials, seed_start, seed_step, workdir, output_dir,
         rows.append(row)
 
         print(
-            f"[{trial_idx + 1:03d}/{trials:03d}] seed={seed} rc={result.returncode} "
+            f"[{trial_idx + 1:03d}/{trials:03d}] total failures={failures} seed={seed} rc={result.returncode} "
             f"step={end_step} speed_kts={speed_at_end_kts if speed_at_end_kts is not None else 'nan'} "
             f"prog={nominal_progress_fraction if nominal_progress_fraction is not None else 'nan'} "
             f"backup_steps={backup_steps_used} success={mission_success} reason={termination_reason}"

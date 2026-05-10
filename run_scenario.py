@@ -533,7 +533,7 @@ def build_jsbsim_gatekeeper(
 
     params = GatekeeperParams(
         M=25,
-        T=90,
+        T=100,
         N=256,
         delta=0.1,
         epsilon=0.05,
