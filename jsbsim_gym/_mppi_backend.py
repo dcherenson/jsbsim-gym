@@ -76,6 +76,49 @@ MIN_QBAR_PSF = 1.0
 DT = 1.0 / 30.0
 G_FTPS2 = 32.174
 
+# Kinematics / clipping constants (extracted from inline literals)
+ALPHA_MIN_RAD = -0.35
+ALPHA_MAX_RAD = 0.52
+U_MIN_FOR_ALPHA = 1.0
+V_SQ_MIN = 1.0
+BETA_MIN_RAD = -0.35
+BETA_MAX_RAD = 0.35
+MACH_MIN = 0.2
+MACH_MAX = 1.2
+THETA_FOR_KIN_CLIP = 1.3962634
+SAFE_COS_THETA_MIN = 0.1
+
+UDOT_MIN = -250.0
+UDOT_MAX = 250.0
+VDOT_MIN = -250.0
+VDOT_MAX = 250.0
+WDOT_MIN = -250.0
+WDOT_MAX = 250.0
+
+P_DOT_MIN = -15.0
+P_DOT_MAX = 15.0
+Q_DOT_MIN = -10.0
+Q_DOT_MAX = 10.0
+R_DOT_MIN = -15.0
+R_DOT_MAX = 15.0
+
+PHI_DOT_LIMIT = 10.0
+THETA_DOT_LIMIT = 10.0
+PSI_DOT_LIMIT = 10.0
+
+PN_DOT_LIMIT = 1200.0
+PE_DOT_LIMIT = 1200.0
+H_DOT_LIMIT = 400.0
+
+P_CLIP_LIMIT = 6.0
+Q_CLIP_LIMIT = 4.0
+R_CLIP_LIMIT = 6.0
+
+NY_MIN = -4.0
+NY_MAX = 4.0
+NZ_MIN = -3.0
+NZ_MAX = 9.0
+
 
 @dataclass(frozen=True)
 class JaxMPPIConfig:
@@ -377,11 +420,11 @@ def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs)
     delta_r = action[2]
     delta_t = action[3]
 
-    alpha = jnp.clip(jnp.arctan2(w, jnp.maximum(u, 1.0)), -0.35, 0.52)
+    alpha = jnp.clip(jnp.arctan2(w, jnp.maximum(u, U_MIN_FOR_ALPHA)), ALPHA_MIN_RAD, ALPHA_MAX_RAD)
     V_sq = u * u + v * v + w * w
-    V = jnp.sqrt(jnp.maximum(V_sq, 1.0))
-    beta = jnp.clip(jnp.arcsin(jnp.clip(v / V, -1.0, 1.0)), -0.35, 0.35)
-    mach = jnp.clip(V / STANDARD_SPEED_OF_SOUND_FPS, 0.2, 1.2)
+    V = jnp.sqrt(jnp.maximum(V_sq, V_SQ_MIN))
+    beta = jnp.clip(jnp.arcsin(jnp.clip(v / V, -1.0, 1.0)), BETA_MIN_RAD, BETA_MAX_RAD)
+    mach = jnp.clip(V / STANDARD_SPEED_OF_SOUND_FPS, MACH_MIN, MACH_MAX)
 
     features = jnp.array([alpha, beta, mach, p, q, r, delta_e, delta_a, delta_r], dtype=jnp.float32)
     phi_vec = expand_poly(features, poly_powers)
@@ -401,9 +444,9 @@ def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs)
     M = C_M * pitch_moment_scale
     N = C_N * yaw_moment_scale
 
-    theta_for_kin = jnp.clip(theta, -1.3962634, 1.3962634)
+    theta_for_kin = jnp.clip(theta, -THETA_FOR_KIN_CLIP, THETA_FOR_KIN_CLIP)
     c_theta_safe = jnp.cos(theta_for_kin)
-    c_theta_safe = jnp.sign(c_theta_safe) * jnp.maximum(jnp.abs(c_theta_safe), 0.1)
+    c_theta_safe = jnp.sign(c_theta_safe) * jnp.maximum(jnp.abs(c_theta_safe), SAFE_COS_THETA_MIN)
     s_theta_safe = jnp.sin(theta_for_kin)
 
     u_dot = X + r * v - q * w - G_FTPS2 * s_theta_safe
@@ -412,21 +455,21 @@ def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs)
 
     p_dot, q_dot, r_dot = moments_to_angular_rate_derivatives(p, q, r, L, M, N)
 
-    u_dot = jnp.clip(u_dot, -250.0, 250.0)
-    v_dot = jnp.clip(v_dot, -250.0, 250.0)
-    w_dot = jnp.clip(w_dot, -250.0, 250.0)
-    p_dot = jnp.clip(p_dot, -15.0, 15.0)
-    q_dot = jnp.clip(q_dot, -10.0, 10.0)
-    r_dot = jnp.clip(r_dot, -15.0, 15.0)
+    u_dot = jnp.clip(u_dot, UDOT_MIN, UDOT_MAX)
+    v_dot = jnp.clip(v_dot, VDOT_MIN, VDOT_MAX)
+    w_dot = jnp.clip(w_dot, WDOT_MIN, WDOT_MAX)
+    p_dot = jnp.clip(p_dot, P_DOT_MIN, P_DOT_MAX)
+    q_dot = jnp.clip(q_dot, Q_DOT_MIN, Q_DOT_MAX)
+    r_dot = jnp.clip(r_dot, R_DOT_MIN, R_DOT_MAX)
 
     t_theta = s_theta_safe / c_theta_safe
     phi_dot = p + q * jnp.sin(phi) * t_theta + r * jnp.cos(phi) * t_theta
     theta_dot = q * jnp.cos(phi) - r * jnp.sin(phi)
     psi_dot = (q * jnp.sin(phi) + r * jnp.cos(phi)) / c_theta_safe
 
-    phi_dot = jnp.clip(phi_dot, -10.0, 10.0)
-    theta_dot = jnp.clip(theta_dot, -10.0, 10.0)
-    psi_dot = jnp.clip(psi_dot, -10.0, 10.0)
+    phi_dot = jnp.clip(phi_dot, -PHI_DOT_LIMIT, PHI_DOT_LIMIT)
+    theta_dot = jnp.clip(theta_dot, -THETA_DOT_LIMIT, THETA_DOT_LIMIT)
+    psi_dot = jnp.clip(psi_dot, -PSI_DOT_LIMIT, PSI_DOT_LIMIT)
 
     c_psi = jnp.cos(psi)
     s_psi = jnp.sin(psi)
@@ -447,9 +490,9 @@ def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs)
     )
     h_dot = u * s_theta - v * (s_phi * c_theta) - w * (c_phi * c_theta)
 
-    p_N_dot = jnp.clip(p_N_dot, -1200.0, 1200.0)
-    p_E_dot = jnp.clip(p_E_dot, -1200.0, 1200.0)
-    h_dot = jnp.clip(h_dot, -400.0, 400.0)
+    p_N_dot = jnp.clip(p_N_dot, -PN_DOT_LIMIT, PN_DOT_LIMIT)
+    p_E_dot = jnp.clip(p_E_dot, -PE_DOT_LIMIT, PE_DOT_LIMIT)
+    h_dot = jnp.clip(h_dot, -H_DOT_LIMIT, H_DOT_LIMIT)
 
     return jnp.array(
         [
@@ -459,9 +502,9 @@ def f16_kinematics_step(state, action, W, B, poly_powers, throttle_force_coeffs)
             u + DT * u_dot,
             v + DT * v_dot,
             w + DT * w_dot,
-            jnp.clip(p + DT * p_dot, -6.0, 6.0),
-            jnp.clip(q + DT * q_dot, -4.0, 4.0),
-            jnp.clip(r + DT * r_dot, -6.0, 6.0),
+            jnp.clip(p + DT * p_dot, -P_CLIP_LIMIT, P_CLIP_LIMIT),
+            jnp.clip(q + DT * q_dot, -Q_CLIP_LIMIT, Q_CLIP_LIMIT),
+            jnp.clip(r + DT * r_dot, -R_CLIP_LIMIT, R_CLIP_LIMIT),
             phi + DT * phi_dot,
             theta + DT * theta_dot,
             psi + DT * psi_dot,
@@ -479,11 +522,11 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
     delta_r = action[2]
     delta_t = action[3]
 
-    alpha = jnp.clip(jnp.arctan2(w, jnp.maximum(u, 1.0)), -0.35, 0.52)
+    alpha = jnp.clip(jnp.arctan2(w, jnp.maximum(u, U_MIN_FOR_ALPHA)), ALPHA_MIN_RAD, ALPHA_MAX_RAD)
     V_sq = u * u + v * v + w * w
-    V = jnp.sqrt(jnp.maximum(V_sq, 1.0))
-    beta = jnp.clip(jnp.arcsin(jnp.clip(v / V, -1.0, 1.0)), -0.35, 0.35)
-    mach = jnp.clip(V / STANDARD_SPEED_OF_SOUND_FPS, 0.2, 1.2)
+    V = jnp.sqrt(jnp.maximum(V_sq, V_SQ_MIN))
+    beta = jnp.clip(jnp.arcsin(jnp.clip(v / V, -1.0, 1.0)), BETA_MIN_RAD, BETA_MAX_RAD)
+    mach = jnp.clip(V / STANDARD_SPEED_OF_SOUND_FPS, MACH_MIN, MACH_MAX)
 
     features = jnp.array([alpha, beta, mach, p, q, r, delta_e, delta_a, delta_r], dtype=jnp.float32)
     phi_vec = expand_poly(features, poly_powers)
@@ -503,9 +546,9 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
     M = C_M * pitch_moment_scale
     N = C_N * yaw_moment_scale
 
-    theta_for_kin = jnp.clip(theta, -1.3962634, 1.3962634)
+    theta_for_kin = jnp.clip(theta, -THETA_FOR_KIN_CLIP, THETA_FOR_KIN_CLIP)
     c_theta_safe = jnp.cos(theta_for_kin)
-    c_theta_safe = jnp.sign(c_theta_safe) * jnp.maximum(jnp.abs(c_theta_safe), 0.1)
+    c_theta_safe = jnp.sign(c_theta_safe) * jnp.maximum(jnp.abs(c_theta_safe), SAFE_COS_THETA_MIN)
     s_theta_safe = jnp.sin(theta_for_kin)
 
     u_dot = X + r * v - q * w - G_FTPS2 * s_theta_safe
@@ -514,21 +557,21 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
 
     p_dot, q_dot, r_dot = moments_to_angular_rate_derivatives(p, q, r, L, M, N)
 
-    u_dot = jnp.clip(u_dot, -250.0, 250.0)
-    v_dot = jnp.clip(v_dot, -250.0, 250.0)
-    w_dot = jnp.clip(w_dot, -250.0, 250.0)
-    p_dot = jnp.clip(p_dot, -15.0, 15.0)
-    q_dot = jnp.clip(q_dot, -10.0, 10.0)
-    r_dot = jnp.clip(r_dot, -15.0, 15.0)
+    u_dot = jnp.clip(u_dot, UDOT_MIN, UDOT_MAX)
+    v_dot = jnp.clip(v_dot, VDOT_MIN, VDOT_MAX)
+    w_dot = jnp.clip(w_dot, WDOT_MIN, WDOT_MAX)
+    p_dot = jnp.clip(p_dot, P_DOT_MIN, P_DOT_MAX)
+    q_dot = jnp.clip(q_dot, Q_DOT_MIN, Q_DOT_MAX)
+    r_dot = jnp.clip(r_dot, R_DOT_MIN, R_DOT_MAX)
 
     t_theta = s_theta_safe / c_theta_safe
     phi_dot = p + q * jnp.sin(phi) * t_theta + r * jnp.cos(phi) * t_theta
     theta_dot = q * jnp.cos(phi) - r * jnp.sin(phi)
     psi_dot = (q * jnp.sin(phi) + r * jnp.cos(phi)) / c_theta_safe
 
-    phi_dot = jnp.clip(phi_dot, -10.0, 10.0)
-    theta_dot = jnp.clip(theta_dot, -10.0, 10.0)
-    psi_dot = jnp.clip(psi_dot, -10.0, 10.0)
+    phi_dot = jnp.clip(phi_dot, -PHI_DOT_LIMIT, PHI_DOT_LIMIT)
+    theta_dot = jnp.clip(theta_dot, -THETA_DOT_LIMIT, THETA_DOT_LIMIT)
+    psi_dot = jnp.clip(psi_dot, -PSI_DOT_LIMIT, PSI_DOT_LIMIT)
 
     c_psi = jnp.cos(psi)
     s_psi = jnp.sin(psi)
@@ -549,9 +592,9 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
     )
     h_dot = u * s_theta - v * (s_phi * c_theta) - w * (c_phi * c_theta)
 
-    p_N_dot = jnp.clip(p_N_dot, -1200.0, 1200.0)
-    p_E_dot = jnp.clip(p_E_dot, -1200.0, 1200.0)
-    h_dot = jnp.clip(h_dot, -400.0, 400.0)
+    p_N_dot = jnp.clip(p_N_dot, -PN_DOT_LIMIT, PN_DOT_LIMIT)
+    p_E_dot = jnp.clip(p_E_dot, -PE_DOT_LIMIT, PE_DOT_LIMIT)
+    h_dot = jnp.clip(h_dot, -H_DOT_LIMIT, H_DOT_LIMIT)
 
     state_next_core = jnp.array(
         [
@@ -561,9 +604,9 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
             u + DT * u_dot,
             v + DT * v_dot,
             w + DT * w_dot,
-            jnp.clip(p + DT * p_dot, -6.0, 6.0),
-            jnp.clip(q + DT * q_dot, -4.0, 4.0),
-            jnp.clip(r + DT * r_dot, -6.0, 6.0),
+            jnp.clip(p + DT * p_dot, -P_CLIP_LIMIT, P_CLIP_LIMIT),
+            jnp.clip(q + DT * q_dot, -Q_CLIP_LIMIT, Q_CLIP_LIMIT),
+            jnp.clip(r + DT * r_dot, -R_CLIP_LIMIT, R_CLIP_LIMIT),
             phi + DT * phi_dot,
             theta + DT * theta_dot,
             psi + DT * psi_dot,
@@ -571,8 +614,8 @@ def f16_kinematics_step_with_load_factors(state, action, W, B, poly_powers, thro
         dtype=jnp.float32,
     )
 
-    ny = jnp.clip(Y / G_FTPS2, -4.0, 4.0)
-    nz = jnp.clip(-Z / G_FTPS2, -3.0, 9.0)
+    ny = jnp.clip(Y / G_FTPS2, NY_MIN, NY_MAX)
+    nz = jnp.clip(-Z / G_FTPS2, NZ_MIN, NZ_MAX)
     return jnp.concatenate([state_next_core, jnp.asarray([ny, nz], dtype=jnp.float32)], axis=0)
 
 

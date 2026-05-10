@@ -1,5 +1,6 @@
 import argparse
 from dataclasses import fields, is_dataclass
+import json
 import time
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from jsbsim_gym.run_diagnostics import (
     save_simple_controller_diagnostics,
 )
 from jsbsim_gym.uncertainty import RuntimeUncertaintySampler, sample_empirical_jax as sample_empirical_coeff_jax
+from jsbsim_gym._mppi_backend import _terrain_elevation_ft_at
 
 DEM_PATH = Path("data/dem/black-canyon-gunnison_USGS10m.tif")
 DEM_BBOX = (38.52, 38.62, -107.78, -107.65)
@@ -216,6 +218,46 @@ def get_active_canyon_reference(env, pad_back_ft=500.0, pad_front_ft=1500.0):
     )
 
 
+def _estimate_progress_fraction_from_position(position_n_ft, position_e_ft, path_north_ft, path_east_ft):
+    path_north_ft = np.asarray(path_north_ft, dtype=np.float64).reshape(-1)
+    path_east_ft = np.asarray(path_east_ft, dtype=np.float64).reshape(-1)
+    if path_north_ft.size < 2 or path_east_ft.size != path_north_ft.size:
+        return float("nan")
+
+    segment_n = np.diff(path_north_ft)
+    segment_e = np.diff(path_east_ft)
+    segment_len = np.hypot(segment_n, segment_e)
+    total_len = float(np.sum(segment_len))
+    if not np.isfinite(total_len) or total_len <= 1e-9:
+        return float("nan")
+
+    point_n = float(position_n_ft)
+    point_e = float(position_e_ft)
+    best_distance_sq = float("inf")
+    best_progress_ft = 0.0
+    cumulative_start_ft = 0.0
+
+    for idx, seg_len in enumerate(segment_len):
+        if seg_len <= 1e-9:
+            cumulative_start_ft += float(seg_len)
+            continue
+        start_n = path_north_ft[idx]
+        start_e = path_east_ft[idx]
+        dn = segment_n[idx]
+        de = segment_e[idx]
+        t = ((point_n - start_n) * dn + (point_e - start_e) * de) / float(seg_len * seg_len)
+        t = float(np.clip(t, 0.0, 1.0))
+        proj_n = start_n + t * dn
+        proj_e = start_e + t * de
+        distance_sq = (point_n - proj_n) ** 2 + (point_e - proj_e) ** 2
+        if distance_sq < best_distance_sq:
+            best_distance_sq = float(distance_sq)
+            best_progress_ft = cumulative_start_ft + t * float(seg_len)
+        cumulative_start_ft += float(seg_len)
+
+    return float(np.clip(best_progress_ft / total_len, 0.0, 1.0))
+
+
 _GATEKEEPER_FLAT_BUF = np.zeros(14, dtype=np.float32)
 
 def controller_state_to_gatekeeper_flat(state_dict):
@@ -283,6 +325,7 @@ def build_jsbsim_gatekeeper(
     debug_timing=False,
     nominal_policy_fn_override=None,
     backup_controller_type="altitude_hold",
+    seed=3,
 ):
     canyon = env.unwrapped.canyon
 
@@ -319,10 +362,11 @@ def build_jsbsim_gatekeeper(
     canyon_top_rel_ft = terrain_floor_rel_ft + wall_height_samples_ft
     backup_peek_ft =200.0
     pcis_centerline_tol_ft = 1000.0
-    pcis_altitude_tol_ft = 2500.0
     backup_target_speed_fps = 300.0 * KTS_TO_FPS
     pcis_speed_limit_fps = 600.0 * KTS_TO_FPS
+    pcis_vrate_min_fps = 0.0
     backup_target_altitude_ft = float(np.nanmax(canyon_top_rel_ft) + backup_peek_ft)
+    terrain_collision_buffer_ft = float(getattr(env.unwrapped, "terrain_collision_buffer_ft", 0.0))
 
     backup_reference = build_reference_trajectory(
         north_ft=north_samples_ft,
@@ -367,6 +411,18 @@ def build_jsbsim_gatekeeper(
     width_samples_jax = jnp.asarray(width_samples_ft, dtype=jnp.float32)
     width_grad_jax = jnp.asarray(width_grad_samples_ft, dtype=jnp.float32)
     terrain_floor_jax = jnp.asarray(terrain_floor_rel_ft, dtype=jnp.float32)
+
+    # Build full DEM grid jax arrays for 2D elevation lookup (north, east)
+    canyon_east_full_ft = np.asarray(getattr(canyon, "east_samples_ft", center_east_samples_ft), dtype=np.float32)
+    north_full_jax = jnp.asarray(canyon_north_full_ft, dtype=jnp.float32)
+    east_full_jax = jnp.asarray(canyon_east_full_ft, dtype=jnp.float32)
+    if hasattr(canyon, "ordered_dem_msl_m"):
+        dem_grid_m = np.asarray(getattr(canyon, "ordered_dem_msl_m"), dtype=np.float32)
+        terrain_elev_grid_ft = (dem_grid_m * M_TO_FT - altitude_ref_ft).astype(np.float32)
+    else:
+        # fallback to flat zero grid aligned with north/east axes
+        terrain_elev_grid_ft = np.zeros((north_full_jax.shape[0], east_full_jax.shape[0]), dtype=np.float32)
+    terrain_elev_grid_jax = jnp.asarray(terrain_elev_grid_ft, dtype=jnp.float32)
 
     latest_nominal = {
         "action": jnp.zeros((4,), dtype=jnp.float32),
@@ -413,17 +469,24 @@ def build_jsbsim_gatekeeper(
         )
 
     def safety_fn(state_flat, _env_param):
-        terrain_floor_ft = _interp(terrain_floor_jax, state_flat[0])
-        val = state_flat[2] - terrain_floor_ft
-        # jax.debug.print("Safety function value: {v}", v=val)
+        # Use a 2D DEM lookup (north,east) to compute local terrain elevation
+        terrain_elevation_ft = _terrain_elevation_ft_at(
+            state_flat[0], state_flat[1], north_full_jax, east_full_jax, terrain_elev_grid_jax
+        )
+        val = state_flat[2] - terrain_elevation_ft - terrain_collision_buffer_ft
         return val
 
     def pcis_fn(state_flat):
         speed_margin = pcis_speed_limit_fps - _speed_fps(state_flat)
         centerline_margin = 100 #pcis_centerline_tol_ft - jnp.abs(state_flat[1] - _interp(center_east_jax, state_flat[0]))
-        altitude_margin = pcis_altitude_tol_ft - jnp.abs(state_flat[2] - backup_target_altitude_ft)
-        # jax.debug.print("PCIS function values - Speed: {s}, Centerline: {c}, Altitude: {a}", s=speed_margin, c=centerline_margin, a=altitude_margin)
-        return jnp.minimum(speed_margin, jnp.minimum(centerline_margin, altitude_margin))
+        roll_angle = state_flat[9]
+        pitch_angle = state_flat[10]
+        u = state_flat[3]
+        v = state_flat[4]
+        w = state_flat[5]
+        v_rate = u * jnp.sin(pitch_angle) - v * jnp.sin(roll_angle) * jnp.cos(pitch_angle) - w * jnp.cos(roll_angle) * jnp.cos(pitch_angle)
+        vrate_margin = v_rate - pcis_vrate_min_fps
+        return jnp.minimum(speed_margin, jnp.minimum(centerline_margin, vrate_margin))
 
     def empirical_feature_fn(state_flat, action, prev_action, step_idx):
         del step_idx
@@ -471,19 +534,19 @@ def build_jsbsim_gatekeeper(
     params = GatekeeperParams(
         M=30,
         T=100,
-        N=256,
+        N=300,
         delta=0.1,
         epsilon=0.05,
-        beta=0.00,
+        beta=1.0,
         alpha=0.0,
         p=1,
         lipschitz_mode="fixed",
-        lipschitz_constant=0.0,
+        lipschitz_constant=50.0,
         debug_timing=bool(debug_timing),
     )
     # Gatekeeper update cadence (in control steps).
     # Example: 10 => run gatekeeper.update() every 10 steps and reuse last s_t in between.
-    gatekeeper_update_interval_steps = 10
+    gatekeeper_update_interval_steps = 5
     initial_bounds = TrackBoundsEstimate.from_track_width(
         half_width=max(float(np.nanmean(width_samples_ft) * 0.5), 1.0),
         relative_uncertainty=0.0,
@@ -502,7 +565,7 @@ def build_jsbsim_gatekeeper(
         empirical_feature_fn=empirical_feature_fn,
         empirical_sampler_fn=sample_empirical_coeff_jax,
         initial_track_bounds=initial_bounds,
-        seed=3,
+        seed=int(seed),
     )
     gatekeeper.reset(controller_state_to_gatekeeper_flat(initial_controller_state), t=0)
 
@@ -651,6 +714,18 @@ def parse_args():
         help="Print gatekeeper timing diagnostics each step.",
     )
     parser.add_argument(
+        "--save-stepwise-gatekeeper-artifacts",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable or disable per-step gatekeeper CSV and plot artifacts.",
+    )
+    parser.add_argument(
+        "--record-video",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable or disable trajectory video/overlay recording.",
+    )
+    parser.add_argument(
         "--backup-controller",
         type=str,
         default="altitude_hold",
@@ -675,6 +750,18 @@ def parse_args():
         type=_fraction_0_to_1,
         default=1.0,
         help="Truncate the nominal dyn trajectory at this fraction in [0,1] (1=full traj, 0.5=first half).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Seed for environment reset and controller stochastic components.",
+    )
+    parser.add_argument(
+        "--run-summary-json",
+        type=Path,
+        default=None,
+        help="Optional output path for per-run summary JSON.",
     )
     return parser.parse_args()
 
@@ -1140,6 +1227,15 @@ def collect_post_step_diagnostics(
 
 def main():
     args = parse_args()
+    # Make core RNGs deterministic early based on the provided seed.
+    import random as _py_random
+
+    try:
+        seed_val = int(args.seed)
+    except Exception:
+        seed_val = 0
+    np.random.seed(seed_val)
+    _py_random.seed(seed_val)
     if args.gatekeeper and args.controller not in {"mppi", "smooth_mppi", "pid_traj"}:
         raise ValueError("--gatekeeper currently requires --controller mppi, --controller smooth_mppi, or --controller pid_traj.")
     nominal_start_fraction = float(args.nominal_start_fraction)
@@ -1252,12 +1348,12 @@ def main():
         entry_pitch_deg=initial_pitch_deg,
         entry_alpha_deg=initial_alpha_deg,
         entry_beta_deg=initial_beta_deg,
-        wind_sigma=10.0,
+        wind_sigma=5.0,
         canyon_span_ft=9000.0,
         canyon_segment_spacing_ft=12.0,
     )
 
-    obs, _ = env.reset(seed=42)
+    obs, _ = env.reset(seed=int(args.seed))
 
     state = env.unwrapped.get_full_state_dict()
     actual_dem_start_pixel = tuple(getattr(env.unwrapped, "dem_start_pixel", DEM_START_PIXEL))
@@ -1349,26 +1445,31 @@ def main():
                 f"{start_progress_s_ft:.1f} ft (fraction={nominal_start_fraction:.3f})."
             )
 
-    recorder = CanyonRunRecorder(
-        env=env,
-        dem_path=DEM_PATH,
-        dem_bbox=DEM_BBOX,
-        dem_start_pixel=actual_dem_start_pixel,
-        output_dir=output_dir,
-        file_stem=f"canyon_{controller_tag}_{mode_tag}",
-        title_prefix=f"{controller_tag.upper()} Trajectory Overlay",
-        fps=30,
-    )
-    recorder.initialize()
-    if nominal_reference is not None:
-        recorder.set_reference_profile(
-            north_samples_ft=np.asarray(nominal_reference["display_north_ft"], dtype=np.float32),
-            east_samples_ft=np.asarray(nominal_reference["display_east_ft"], dtype=np.float32),
-            altitude_samples_ft=np.asarray(nominal_reference["display_altitude_ft"], dtype=np.float32),
-            label="Nominal offline trajectory",
+    recorder = None
+    if bool(args.record_video):
+        recorder = CanyonRunRecorder(
+            env=env,
+            dem_path=DEM_PATH,
+            dem_bbox=DEM_BBOX,
+            dem_start_pixel=actual_dem_start_pixel,
+            output_dir=output_dir,
+            file_stem=f"canyon_{controller_tag}_{mode_tag}",
+            title_prefix=f"{controller_tag.upper()} Trajectory Overlay",
+            fps=30,
+            save_stepwise_gatekeeper_artifacts=bool(args.save_stepwise_gatekeeper_artifacts),
         )
+        recorder.initialize()
+        if nominal_reference is not None:
+            recorder.set_reference_profile(
+                north_samples_ft=np.asarray(nominal_reference["display_north_ft"], dtype=np.float32),
+                east_samples_ft=np.asarray(nominal_reference["display_east_ft"], dtype=np.float32),
+                altitude_samples_ft=np.asarray(nominal_reference["display_altitude_ft"], dtype=np.float32),
+                label="Nominal offline trajectory",
+            )
+        else:
+            recorder.set_centerline_profile(north_samples_ft, center_east_samples_ft)
     else:
-        recorder.set_centerline_profile(north_samples_ft, center_east_samples_ft)
+        print("Video recording disabled (--no-record-video).")
     termination_reason = "running"
     simple_diagnostic_rows = []
     pid_traj_diagnostic_rows = []
@@ -1377,6 +1478,10 @@ def main():
     mppi_plan_action_sequences = []
     mppi_plan_virtual_speed_sequences = []
     mppi_plan_call_index = 0
+    backup_steps_used = 0
+    end_step = -1
+    speed_at_end_fps = float("nan")
+    final_post_controller_state = None
 
     gatekeeper_bundle = None
     gatekeeper_prev_using_backup = False
@@ -1386,7 +1491,7 @@ def main():
         print("Compiling JAX JIT... (this takes a moment)", flush=True)
         _set_mppi_nominal_start_progress(controller, nominal_start_fraction)
         _ = controller.get_action(initial_controller_state)
-        controller.reset(seed=3)
+        controller.reset(seed=int(args.seed))
         _set_mppi_nominal_start_progress(controller, nominal_start_fraction)
         print("JIT compilation finished.", flush=True)
         if args.gatekeeper:
@@ -1398,6 +1503,7 @@ def main():
                 nominal_horizon=int(controller.config.horizon),
                 debug_timing=bool(args.gatekeeper_debug_timing),
                 backup_controller_type=args.backup_controller,
+                seed=int(args.seed),
             )
             print(
                 f"Initialized gatekeeper with backup simple controller at {gatekeeper_bundle['backup_target_speed_fps'] / KTS_TO_FPS:.0f} kts and "
@@ -1422,7 +1528,7 @@ def main():
             )
             gatekeeper.reset(controller_state_to_gatekeeper_flat(initial_controller_state), t=0)
             gatekeeper_prev_using_backup = False
-            controller.reset(seed=3)
+            controller.reset(seed=int(args.seed))
             _set_mppi_nominal_start_progress(controller, nominal_start_fraction)
             print("Gatekeeper JIT compilation finished.", flush=True)
     elif controller_tag == "pid_traj":
@@ -1440,6 +1546,7 @@ def main():
                 debug_timing=bool(args.gatekeeper_debug_timing),
                 nominal_policy_fn_override=pid_nominal_policy_fn,
                 backup_controller_type=args.backup_controller,
+                seed=int(args.seed),
             )
             print(
                 f"Initialized gatekeeper with backup simple controller at {gatekeeper_bundle['backup_target_speed_fps'] / KTS_TO_FPS:.0f} kts and "
@@ -1490,6 +1597,7 @@ def main():
     # MAIN LOOP
     try:
         prev_applied_action = np.asarray([0.0, 0.0, 0.0, 0.55], dtype=np.float32)
+        mission_success_progress_threshold = 0.95
         for step in range(int(args.max_steps)):
             controller_state = to_mppi_state(env, state, altitude_ref_ft)
 
@@ -1549,6 +1657,7 @@ def main():
                     gatekeeper_state = gatekeeper.state
 
                 if gatekeeper_state.using_backup:
+                    backup_steps_used += 1
                     t_backup = time.time()
                     backup_controller = gatekeeper_bundle["backup_controller"]
                     if not gatekeeper_prev_using_backup:
@@ -1579,13 +1688,35 @@ def main():
                 mppi_plan_virtual_speed_sequences=mppi_plan_virtual_speed_sequences,
             )
             if invalid_action:
+                termination_reason = "invalid_action"
                 break
 
             obs, _, terminated, truncated, info = env.step(action)
             termination_reason = info.get("termination_reason", "running")
             state = env.unwrapped.get_full_state_dict()
+            speed_at_end_fps = float(
+                np.sqrt(
+                    float(state["u"]) ** 2 + float(state["v"]) ** 2 + float(state["w"]) ** 2
+                )
+            )
             post_controller_state = to_mppi_state(env, state, altitude_ref_ft)
-            recorder.record_step(planner_debug=planner_debug, hud_debug=hud_debug)
+            final_post_controller_state = post_controller_state
+            current_progress_fraction = float('nan')
+            if nominal_reference is not None:
+                current_progress_fraction = _estimate_progress_fraction_from_position(
+                    post_controller_state['p_N'],
+                    post_controller_state['p_E'],
+                    nominal_reference['north_ft'],
+                    nominal_reference['east_ft'],
+                )
+                if (
+                    np.isfinite(current_progress_fraction)
+                    and current_progress_fraction >= mission_success_progress_threshold
+                    and not bool(terminated or truncated)
+                ):
+                    termination_reason = 'mission_success'
+            if recorder is not None:
+                recorder.record_step(planner_debug=planner_debug, hud_debug=hud_debug)
 
             prev_applied_action = collect_post_step_diagnostics(
                 step=step,
@@ -1612,7 +1743,16 @@ def main():
             )
 
             if terminated or truncated:
+                end_step = int(step)
                 print(f"Episode ended at step {step}: {termination_reason}")
+                break
+
+            if termination_reason == 'mission_success':
+                end_step = int(step)
+                print(
+                    f"Episode ended at step {step}: mission_success "
+                    f"(progress={current_progress_fraction:.3f})"
+                )
                 break
 
             if args.render:
@@ -1620,10 +1760,57 @@ def main():
     finally:
         env.close()
 
-    artifacts = recorder.finalize(termination_reason)
-    print(f"Saved video: {artifacts['video_path']}")
-    print(f"Saved trajectory overlay: {artifacts['overlay_path']}")
-    print(f"Saved trajectory CSV: {artifacts['trajectory_csv_path']}")
+    if recorder is not None:
+        artifacts = recorder.finalize(termination_reason)
+    else:
+        artifacts = {
+            "video_path": None,
+            "overlay_path": None,
+            "trajectory_csv_path": None,
+            "gk_rollout_plot_dir": None,
+            "gk_rollout_csv_dir": None,
+            "planner_debug_csv_dir": None,
+        }
+    if end_step < 0:
+        end_step = max(0, int(args.max_steps) - 1)
+    nominal_progress_fraction = float("nan")
+    if nominal_reference is not None and final_post_controller_state is not None:
+        nominal_progress_fraction = _estimate_progress_fraction_from_position(
+            final_post_controller_state["p_N"],
+            final_post_controller_state["p_E"],
+            nominal_reference["north_ft"],
+            nominal_reference["east_ft"],
+        )
+    run_summary = {
+        "seed": int(args.seed),
+        "controller": str(controller_tag),
+        "gatekeeper_enabled": bool(args.gatekeeper),
+        "record_video": bool(args.record_video),
+        "termination_reason": str(termination_reason),
+        "end_step": int(end_step),
+        "speed_at_end_fps": float(speed_at_end_fps),
+        "speed_at_end_kts": float(speed_at_end_fps) / float(KTS_TO_FPS),
+        "backup_steps_used": int(backup_steps_used),
+        "nominal_progress_fraction": float(nominal_progress_fraction),
+        "mission_success": bool(np.isfinite(nominal_progress_fraction) and nominal_progress_fraction > 0.95),
+        "max_steps": int(args.max_steps),
+        "output_dir": str(output_dir),
+    }
+    run_summary_path = (
+        Path(args.run_summary_json)
+        if args.run_summary_json is not None
+        else output_dir / f"canyon_{controller_tag}_{mode_tag}_run_summary.json"
+    )
+    run_summary_path.parent.mkdir(parents=True, exist_ok=True)
+    run_summary_path.write_text(json.dumps(run_summary, indent=2), encoding="utf-8")
+    print(f"Saved run summary JSON: {run_summary_path}")
+
+    if artifacts.get("video_path") is not None:
+        print(f"Saved video: {artifacts['video_path']}")
+    if artifacts.get("overlay_path") is not None:
+        print(f"Saved trajectory overlay: {artifacts['overlay_path']}")
+    if artifacts.get("trajectory_csv_path") is not None:
+        print(f"Saved trajectory CSV: {artifacts['trajectory_csv_path']}")
     if artifacts.get("gk_rollout_plot_dir") is not None:
         print(f"Saved gatekeeper rollout plots: {artifacts['gk_rollout_plot_dir']}")
     if artifacts.get("gk_rollout_csv_dir") is not None:

@@ -792,7 +792,7 @@ def run_gatekeeper(
         # Reshape to [M, N, T*noise_dim] to compute trajectory-wise norm
         grad_norms = jnp.linalg.norm(Grad_matrix.reshape(params.M, params.N, -1), axis=-1)
         L_H = float(jnp.max(grad_norms))
-        # print(f"Estimated L_H: {L_H:.4f}")
+        print(f"Estimated L_H: {L_H:.4f}")
         
         # Re-compute failures with the true dr_buffer
         dr_buffer = L_H * (float(params.beta) ** (1.0 / float(params.p)))

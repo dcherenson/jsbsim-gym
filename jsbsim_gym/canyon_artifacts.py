@@ -317,12 +317,14 @@ class CanyonRunRecorder:
         file_stem,
         title_prefix,
         fps=30,
+        save_stepwise_gatekeeper_artifacts=True,
     ):
         self.env = env
         self.dem_path = Path(dem_path)
         self.dem_bbox = tuple(dem_bbox)
         self.dem_start_pixel = tuple(dem_start_pixel)
         self.title_prefix = str(title_prefix)
+        self._save_stepwise_gatekeeper_artifacts = bool(save_stepwise_gatekeeper_artifacts)
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -882,7 +884,7 @@ class CanyonRunRecorder:
             frame = self._overlay_flight_hud(frame, hud_debug)
             self._writer.append_data(frame)
 
-        if planner_debug is not None:
+        if planner_debug is not None and self._save_stepwise_gatekeeper_artifacts:
             save_planner_debug_csv(
                 output_path=self.planner_debug_csv_dir / f"step_{self._step_index:04d}.csv",
                 planner_debug=planner_debug,
@@ -952,7 +954,7 @@ class CanyonRunRecorder:
             "video_path": self.video_path,
             "overlay_path": self.overlay_path,
             "trajectory_csv_path": self.trajectory_csv_path,
-            "gk_rollout_plot_dir": self.gk_rollout_plot_dir,
-            "gk_rollout_csv_dir": self.gk_rollout_csv_dir,
-            "planner_debug_csv_dir": self.planner_debug_csv_dir,
+            "gk_rollout_plot_dir": self.gk_rollout_plot_dir if self._save_stepwise_gatekeeper_artifacts else None,
+            "gk_rollout_csv_dir": self.gk_rollout_csv_dir if self._save_stepwise_gatekeeper_artifacts else None,
+            "planner_debug_csv_dir": self.planner_debug_csv_dir if self._save_stepwise_gatekeeper_artifacts else None,
         }

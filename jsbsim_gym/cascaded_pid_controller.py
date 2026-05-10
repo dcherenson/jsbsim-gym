@@ -542,6 +542,7 @@ class F16Autopilot:
         rudder = np.clip(rudder_beta + self.r_gain * r_highpass, -1.0, 1.0)
         
         # Speed Axis
+        v_opt *= 1.0
         throttle = self.v_pi.update(v_opt, V, dt)
         
         self.last_diagnostics = {
