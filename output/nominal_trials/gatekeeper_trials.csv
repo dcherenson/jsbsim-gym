@@ -1,0 +1,301 @@
+trial_idx,seed,return_code,elapsed_s,termination_reason,failure_step,speed_at_failure_fps,speed_at_failure_kts,average_speed_fps,average_speed_kts,average_altitude_ft,average_altitude_msl_ft,percent_below_canyon_top_altitude,backup_steps_used,nominal_progress_fraction,mission_success,summary_json,stderr_tail
+0,1337,0,3.385549545288086,mission_success,695,616.8351999392731,365.4648330909718,641.8482358248831,380.2846504197055,-194.72519912565713,6677.822400737624,100.0,0,0.9509674839150374,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_000_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+1,1338,0,3.3889803886413574,mission_success,699,615.2306095449413,364.5141393551059,642.273017253811,380.53632651412835,-176.94485396686832,6695.602745896413,100.0,0,0.951030841636463,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_001_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+2,1339,0,3.4676353931427,mission_success,702,603.5829817262279,357.613109133272,642.4492973622171,380.64076961400696,-130.97305825940748,6741.5745416038735,100.0,0,0.9503295003880002,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_002_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+3,1340,0,3.1698415279388428,terrain_collision,604,583.1902074676512,345.5307217445395,664.4595271700284,393.6814731338411,-198.1537331101581,6674.393866753123,100.0,0,0.8597632741998724,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_003_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+4,1341,0,3.506981611251831,mission_success,707,609.8667726021991,361.3361531228036,637.5982592635097,377.7666083643951,-169.6605647751776,6702.887035088103,100.0,0,0.950621553716604,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_004_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+5,1342,0,3.2941112518310547,terrain_collision,650,589.1200874302901,349.04407926857294,658.5985545031597,390.208942062886,-205.9494988475535,6666.5981010157275,100.0,0,0.9181058191782874,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_005_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+6,1343,0,3.41926908493042,mission_success,696,605.325823114206,358.64571433645136,649.0669832829063,384.56164099211776,-137.624476138325,6734.923123724956,100.0,0,0.9506057002227813,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_006_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+7,1344,0,3.455103635787964,mission_success,701,614.0817482664156,363.8334577152734,639.933459561042,379.15017659632423,-176.48955927869247,6696.0580405845885,100.0,0,0.9501024406233087,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_007_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+8,1345,0,3.4638609886169434,mission_success,697,596.9336229217689,353.6734720861761,641.9083514339023,380.32026794123885,-138.92913044445686,6733.618469418824,100.0,0,0.9512725196036895,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_008_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+9,1346,0,3.320507049560547,terrain_collision,639,569.0609797476958,337.1593839044062,645.5613022451478,382.4845819405903,-185.37946664540505,6687.168133217876,100.0,0,0.87797100325296,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_009_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+10,1347,0,3.2220356464385986,terrain_collision,614,580.0292615016174,343.65791262145467,659.615871079182,390.8116856039377,-194.45481734250552,6678.0927825207755,100.0,0,0.8674995347521743,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_010_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+11,1348,0,3.225437879562378,terrain_collision,623,596.2845527471457,353.2889085543667,657.0554265004594,389.29466379536757,-195.95158619203448,6676.5960136712465,100.0,0,0.8773982717892508,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_011_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+12,1349,0,2.7259321212768555,terrain_collision,395,620.0511373976098,367.37022377969663,704.1943115655364,417.2236872429577,-168.73575084041386,6703.811849022867,100.0,0,0.597675434150678,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_012_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+13,1350,0,3.4669697284698486,mission_success,700,608.0380629020088,360.2526723399013,640.9420127976705,379.7477280011793,-146.65359978197557,6725.894000081305,100.0,0,0.9506068158077977,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_013_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+14,1351,0,3.371886730194092,mission_success,696,611.6603716961788,362.3988314420336,647.4445159110222,383.6003554375328,-164.20989610092693,6708.337703762354,100.0,0,0.9507342991000053,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_014_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+15,1352,0,3.1805317401885986,terrain_collision,617,585.5191703090942,346.9105943850873,658.1922783272701,389.9682300301989,-195.45107873740926,6677.096521125872,100.0,0,0.8706436081805498,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_015_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+16,1353,0,3.2099156379699707,terrain_collision,601,589.9117891518572,349.5131496743456,669.4529072614118,396.63996970121747,-198.28206394143854,6674.2655359218425,100.0,0,0.859656316184381,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_016_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+17,1354,0,3.375715970993042,mission_success,692,592.9943915148451,351.3395414856205,652.6591904993684,386.6899653985747,-116.63642622209409,6755.911173641187,100.0,0,0.9507340097563158,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_017_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+18,1355,0,2.743109941482544,terrain_collision,421,603.1285457505256,357.34386320173815,703.2231045592388,416.6482628727397,-175.83957065325194,6696.708029210029,100.0,0,0.6353470288820874,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_018_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+19,1356,0,3.4052577018737793,mission_success,697,596.6643254878805,353.51391773237543,645.5622757351513,382.4851587175993,-178.70957779252785,6693.838022070753,100.0,0,0.9507649880459086,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_019_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+20,1357,0,3.3594088554382324,terrain_collision,662,590.0881507321853,349.6176410450141,648.654433955919,384.31721221933685,-208.5810300054436,6663.966569857837,100.0,0,0.9203031485239271,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_020_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+21,1358,0,3.325859308242798,terrain_collision,655,601.1732225798721,356.1853659949118,654.0967125773218,387.5416738716572,-209.2961960690718,6663.251403794209,100.0,0,0.9171133574665354,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_021_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+22,1359,0,3.4187633991241455,terrain_collision,696,596.309425891145,353.3036454880259,635.0183762898787,376.23806962269373,-159.32157861503765,6713.226021248243,100.0,0,0.9409254567581887,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_022_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+23,1360,0,3.2125141620635986,terrain_collision,605,579.7106764455082,343.4691561523561,666.5496955178024,394.91986391703,-194.03584038609642,6678.511759477185,100.0,0,0.8631725506065078,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_023_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+24,1361,0,3.3947010040283203,terrain_collision,655,589.4745111144222,349.25406954243795,653.9473173270114,387.4531596133519,-206.28317648692246,6666.2644233763585,100.0,0,0.9189462590628904,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_024_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+25,1362,0,2.660569190979004,terrain_collision,392,619.4725220117009,367.02740356539,709.9380769539031,420.6267749058858,-168.8030250966558,6703.744574766625,100.0,0,0.598309853355485,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_025_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+26,1363,0,2.7546284198760986,terrain_collision,414,599.2385275648309,355.0390906351016,696.425083304657,412.62054573954237,-173.02418725539246,6699.5234126078885,100.0,0,0.6183234712228837,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_026_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+27,1364,0,3.2491416931152344,terrain_collision,649,596.6449560981415,353.5024416836857,659.6182949069703,390.81312168251776,-203.80382475574697,6668.743775107534,100.0,0,0.918591103350364,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_027_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+28,1365,0,3.3962693214416504,mission_success,708,599.8174999783326,355.38212238245575,636.4845041987983,377.1067265858114,-160.35308101857208,6712.194518844709,100.0,0,0.9503129442996107,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_028_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+29,1366,0,3.456047534942627,mission_success,701,596.707019290152,353.5392131164953,647.3044498934753,383.5173685980503,-132.80792469438347,6739.7396751688975,100.0,0,0.9502888161966475,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_029_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+30,1367,0,3.3143796920776367,terrain_collision,650,591.9711993749413,350.7333167684403,657.9773803567184,389.84090647449557,-207.35490545342327,6665.192694409858,100.0,0,0.9164233923261268,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_030_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+31,1368,0,3.1214418411254883,terrain_collision,600,552.7209614970645,327.4781885976884,658.8146400462217,390.3369692360051,-188.96469127384444,6683.582908589437,100.0,0,0.8413425375051525,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_031_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+32,1369,0,3.4348835945129395,mission_success,701,601.4292330598055,356.33704804439213,642.462271233587,380.6484564219829,-149.16973224355934,6723.377867619722,100.0,0,0.9511908791847644,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_032_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+33,1370,0,3.302433490753174,terrain_collision,651,601.8788345965147,356.60342964937684,653.1117899172544,386.9581231994445,-206.0260020633441,6666.521597799937,100.0,0,0.9092712240378602,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_033_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+34,1371,0,3.210397958755493,terrain_collision,629,562.7510248828055,333.4208381765753,653.7653557499148,387.34535033559155,-185.820908017914,6686.726691845367,100.0,0,0.8762000255146971,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_034_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+35,1372,0,3.4493186473846436,mission_success,704,601.8523245917582,356.58772290231616,642.0962587797998,380.4315999904016,-150.33805811485945,6722.2095417484215,100.0,0,0.9508296952116081,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_035_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+36,1373,0,3.213249921798706,terrain_collision,607,582.4784769205502,345.10903296019706,662.6750979602624,392.62422782200747,-197.87014188154444,6674.677457981737,100.0,0,0.8588066194881401,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_036_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+37,1374,0,3.149617910385132,terrain_collision,582,545.0453898597558,322.9305371219247,660.8191731023298,391.52462250035836,-191.26524149006127,6681.28235837322,100.0,0,0.8254240544137628,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_037_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+38,1375,0,3.1484789848327637,terrain_collision,598,547.6122369788371,324.4513523316233,658.9694665316572,390.4287014128706,-193.7923417108923,6678.755258152389,100.0,0,0.8387955634941994,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_038_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+39,1376,0,3.421597957611084,mission_success,698,602.6233762767074,357.0445584969323,642.727805487524,380.80578115280986,-151.6151584902227,6720.932441373058,100.0,0,0.951194271983526,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_039_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+40,1377,0,3.460284471511841,mission_success,712,596.9192598329164,353.6649621894149,636.2832430560686,376.98748262900955,-157.43538098671434,6715.112218876567,100.0,0,0.950398847642704,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_040_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+41,1378,0,2.7076315879821777,terrain_collision,391,621.4108425199282,368.1758269710028,711.6263416923636,421.6270443310346,-167.9611639284385,6704.5864359348425,100.0,0,0.5976714347975178,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_041_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+42,1379,0,3.2027060985565186,terrain_collision,635,557.4463377794101,330.27789726296805,653.6348964891484,387.26805534340264,-174.07326025371367,6698.474339609567,100.0,0,0.8787531284595353,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_042_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+43,1380,0,3.1923789978027344,terrain_collision,606,569.0723276674698,337.16610736248145,662.4514284875994,392.49170729383013,-187.72384632502963,6684.823753538251,100.0,0,0.8522687165079621,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_043_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+44,1381,0,3.344113826751709,terrain_collision,658,589.8275740560656,349.4632535984889,651.8058368960378,386.18436725463044,-209.27617746363467,6663.271422399646,100.0,0,0.918646967122943,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_044_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+45,1382,0,2.7639689445495605,terrain_collision,423,593.2789662195131,351.5081473741198,699.6314318962088,414.5202551805054,-176.43070509322752,6696.1168947700535,100.0,0,0.6353966036483376,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_045_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+46,1383,0,3.413231372833252,mission_success,704,593.0227395468543,351.3563372339625,644.5014371140564,381.8566290720261,-133.31942703536242,6739.228172827919,100.0,0,0.9508026034068883,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_046_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+47,1384,0,3.384345293045044,terrain_collision,687,602.0656028233203,356.7140867889871,647.0426930801383,383.36228193939974,-158.43900900461176,6714.108590858669,100.0,0,0.9463332211752985,False,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_047_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+48,1385,0,3.416638135910034,mission_success,700,593.0731175560775,351.3861853858417,641.4826654401422,380.06805590685104,-154.353070894369,6718.194528968912,100.0,0,0.950926117833808,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_048_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
+49,1386,0,3.4144363403320312,mission_success,708,595.4114096804282,352.771585474922,639.0624207009769,378.6341002251301,-146.57683567580807,6725.970764187473,100.0,0,0.9503552420124324,True,/home/dasc/daniel/jsbsim-gym/output/gatekeeper_trials/trial_summaries/trial_049_summary.json,"/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/pygame/pkgdata.py:25: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import resource_stream, resource_exists
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:236: UserWarning: [33mWARN: Box low's precision lowered by casting to float32, current low.dtype=float64[0m
+  gym.logger.warn(
+/home/dasc/daniel/jsbsim-gym/.venv/lib/python3.13/site-packages/gymnasium/spaces/box.py:306: UserWarning: [33mWARN: Box high's precision lowered by casting to float32, current high.dtype=float64[0m
+  gym.logger.warn("
