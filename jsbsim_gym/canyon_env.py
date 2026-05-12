@@ -671,7 +671,7 @@ class CanyonFlightEnv(DataCollectionEnv):
         vt_fps = float(state_dict["V"])
         airspeed_kt = vt_fps / 1.687809857
         altitude_ref_ft = self.dem_start_elev_ft if self.canyon_mode == "dem" else 0.0
-        altitude_ft = float(state_dict["h"] - altitude_ref_ft)
+        altitude_ft = float(state_dict["h"] - altitude_ref_ft + 200)
         if not np.isfinite(airspeed_kt):
             airspeed_kt = 0.0
         if not np.isfinite(altitude_ft):
@@ -740,14 +740,15 @@ class CanyonFlightEnv(DataCollectionEnv):
         pg.draw.rect(surface, (72, 68, 70), alt_track)
 
         alt_center_y = alt_track.centery
-        alt_px_per_ft = 0.105
-        min_alt_tick = int(np.floor((altitude_ft - 1400.0) / 20.0) * 20)
-        max_alt_tick = int(np.ceil((altitude_ft + 1400.0) / 20.0) * 20)
+        alt_window_half_ft = 800.0
+        alt_px_per_ft = (0.5 * max(alt_track.height - 8, 1)) / alt_window_half_ft
+        min_alt_tick = int(np.floor((altitude_ft - (alt_window_half_ft + 120.0)) / 20.0) * 20)
+        max_alt_tick = int(np.ceil((altitude_ft + (alt_window_half_ft + 120.0)) / 20.0) * 20)
         for alt_tick in range(min_alt_tick, max_alt_tick + 20, 20):
             y_tick = int(round(alt_center_y + (altitude_ft - alt_tick) * alt_px_per_ft))
             if y_tick < alt_track.y + 2 or y_tick > alt_track.bottom - 2:
                 continue
-            major = (alt_tick % 200) == 0
+            major = (alt_tick % 100) == 0
             tick_len = 26 if major else 12
             pg.draw.line(surface, text_white, (alt_track.x + 4, y_tick), (alt_track.x + 4 + tick_len, y_tick), 2 if major else 1)
             if major:

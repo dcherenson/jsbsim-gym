@@ -612,74 +612,7 @@ class CanyonRunRecorder:
         return np.asarray(image.convert("RGB"), dtype=np.uint8)
 
     def _overlay_reference_trajectory(self, frame):
-        """Draw the configured reference trajectory as a cyan ribbon in the 3D video frame."""
-        if self._reference_north_ft is None or self._reference_east_ft is None:
-            return frame
-
-        viewer = getattr(self.env.unwrapped, "viewer", None)
-        if viewer is None:
-            return frame
-
-        env_unwrapped = self.env.unwrapped
-        start_elev_ft = float(getattr(env_unwrapped, "dem_start_elev_ft", 0.0))
-
-        # Get current aircraft p_N to only draw nearby centerline
-        cur_p_N = float(self._sim.get_property_value("position/lat-gc-rad"))
-        # Use local north via canyon for a better reference
-        canyon = getattr(env_unwrapped, "canyon", None)
-        cur_local_north = None
-        if canyon is not None and hasattr(canyon, "get_local_from_latlon"):
-            try:
-                lat_deg = float(self._sim.get_property_value("position/lat-gc-deg"))
-                lon_deg = float(self._sim.get_property_value("position/long-gc-deg"))
-                cur_local_north, _ = canyon.get_local_from_latlon(lat_deg, lon_deg)
-            except Exception:
-                pass
-
-        n_arr = self._reference_north_ft
-        e_arr = self._reference_east_ft
-        h_arr = self._reference_altitude_ft
-
-        # Subsample for performance — draw every Nth point
-        stride = max(1, len(n_arr) // 600)
-        n_sub = n_arr[::stride]
-        e_sub = e_arr[::stride]
-        h_sub = None if h_arr is None else h_arr[::stride]
-
-        # Only draw within a window around the aircraft
-        if cur_local_north is not None:
-            window_ft = 3000.0
-            mask = np.abs(n_sub - cur_local_north) < window_ft
-            n_sub = n_sub[mask]
-            e_sub = e_sub[mask]
-            if h_sub is not None:
-                h_sub = h_sub[mask]
-
-        if len(n_sub) < 2:
-            return frame
-
-        # If no altitude profile is provided, keep the legacy near-ground ribbon behavior.
-        if h_sub is None:
-            h_ref = np.full_like(n_sub, 0.0)
-        else:
-            h_ref = np.asarray(h_sub, dtype=np.float32)
-        xy = np.column_stack([n_sub, e_sub])
-        world_points = self._trajectory_world_points(xy, h_ref)
-        
-        height, width = frame.shape[0], frame.shape[1]
-        view = np.asarray(viewer.transform.inv_matrix, dtype=np.float32)
-        projection = np.asarray(viewer.projection, dtype=np.float32)
-        pixels = self._project_world_points(world_points, view, projection, width, height)
-
-        valid = np.all(np.isfinite(pixels), axis=1)
-        pixels_valid = pixels[valid]
-        if len(pixels_valid) < 2:
-            return frame
-
-        image = Image.fromarray(frame.astype(np.uint8), mode="RGB").convert("RGBA")
-        draw = ImageDraw.Draw(image, "RGBA")
-        draw.line([tuple(p) for p in pixels_valid], fill=(0, 255, 255, 200), width=3)
-        return np.asarray(image.convert("RGB"), dtype=np.uint8)
+        return frame
 
     def _overlay_flight_hud(self, frame, hud_debug):
         return frame
