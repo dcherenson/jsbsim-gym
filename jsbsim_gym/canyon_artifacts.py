@@ -552,10 +552,10 @@ class CanyonRunRecorder:
 
                 nom_pixels = pixels[1 : m_slice + 2][valid_mask[1 : m_slice + 2]]
                 if len(nom_pixels) >= 2:
-                    draw.line([tuple(point) for point in nom_pixels], fill=(34, 193, 114, 72), width=1)
+                    draw.line([tuple(point) for point in nom_pixels], fill=(0, 255, 0, 255), width=1)
 
                 is_failed = bool(failure_mask[idx]) if idx < len(failure_mask) else False
-                backup_color = (255, 30, 30, 96) if is_failed else (52, 152, 219, 72)
+                backup_color = (255, 30, 30, 255) if is_failed else (0, 0, 255, 255)
                 back_pixels = pixels[m_slice + 2 :][valid_mask[m_slice + 2 :]]
                 if len(back_pixels) >= 2:
                     draw.line([tuple(point) for point in back_pixels], fill=backup_color, width=1)
