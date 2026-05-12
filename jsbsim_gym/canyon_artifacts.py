@@ -612,7 +612,85 @@ class CanyonRunRecorder:
         return np.asarray(image.convert("RGB"), dtype=np.uint8)
 
     def _overlay_reference_trajectory(self, frame):
-        return frame
+        if self._reference_north_ft is None or self._reference_east_ft is None:
+            return frame
+
+        viewer = getattr(self.env.unwrapped, "viewer", None)
+        if viewer is None:
+            return frame
+
+        n_arr = np.asarray(self._reference_north_ft, dtype=np.float32).reshape(-1)
+        e_arr = np.asarray(self._reference_east_ft, dtype=np.float32).reshape(-1)
+        if n_arr.size < 2 or e_arr.size != n_arr.size:
+            return frame
+
+        h_arr = None
+        if self._reference_altitude_ft is not None:
+            h_ref = np.asarray(self._reference_altitude_ft, dtype=np.float32).reshape(-1)
+            if h_ref.size == n_arr.size:
+                h_arr = h_ref
+
+        cur_n = None
+        cur_e = None
+        env_unwrapped = self.env.unwrapped
+        canyon = getattr(env_unwrapped, "canyon", None)
+        if canyon is not None and hasattr(canyon, "get_local_from_latlon"):
+            try:
+                lat_deg = float(self._sim.get_property_value("position/lat-gc-deg"))
+                lon_deg = float(self._sim.get_property_value("position/long-gc-deg"))
+                cur_n, cur_e = canyon.get_local_from_latlon(lat_deg, lon_deg)
+                cur_n = float(cur_n)
+                cur_e = float(cur_e)
+            except Exception:
+                cur_n = None
+                cur_e = None
+        if cur_n is None or cur_e is None:
+            try:
+                state = env_unwrapped.get_full_state_dict()
+                cur_n = float(state.get("p_N", np.nan))
+                cur_e = float(state.get("p_E", np.nan))
+            except Exception:
+                cur_n = np.nan
+                cur_e = np.nan
+            if not (np.isfinite(cur_n) and np.isfinite(cur_e)):
+                return frame
+
+        valid = np.isfinite(n_arr) & np.isfinite(e_arr)
+        if not np.any(valid):
+            return frame
+
+        valid_idx = np.flatnonzero(valid)
+        dn = n_arr[valid_idx] - float(cur_n)
+        de = e_arr[valid_idx] - float(cur_e)
+        nearest_valid = int(np.argmin(dn * dn + de * de))
+        start_idx = int(valid_idx[nearest_valid])
+        end_idx = int(min(start_idx + 150, n_arr.size - 1))
+        if end_idx <= start_idx:
+            return frame
+
+        seg_n = n_arr[start_idx : end_idx + 1]
+        seg_e = e_arr[start_idx : end_idx + 1]
+        if h_arr is None:
+            seg_h = np.full_like(seg_n, 0.0, dtype=np.float32)
+        else:
+            seg_h = h_arr[start_idx : end_idx + 1]
+            if seg_h.size != seg_n.size:
+                seg_h = np.full_like(seg_n, 0.0, dtype=np.float32)
+
+        xy = np.column_stack([seg_n, seg_e])
+        world_points = self._trajectory_world_points(xy, seg_h)
+        height, width = frame.shape[0], frame.shape[1]
+        view = np.asarray(viewer.transform.inv_matrix, dtype=np.float32)
+        projection = np.asarray(viewer.projection, dtype=np.float32)
+        pixels = self._project_world_points(world_points, view, projection, width, height)
+        pixels = pixels[np.all(np.isfinite(pixels), axis=1)]
+        if pixels.shape[0] < 2:
+            return frame
+
+        image = Image.fromarray(frame.astype(np.uint8), mode="RGB").convert("RGBA")
+        draw = ImageDraw.Draw(image, "RGBA")
+        draw.line([tuple(p) for p in pixels], fill=(255, 165, 0, 230), width=3)
+        return np.asarray(image.convert("RGB"), dtype=np.uint8)
 
     def _overlay_flight_hud(self, frame, hud_debug):
         return frame
