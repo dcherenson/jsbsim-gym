@@ -30,6 +30,20 @@ NOMINAL_COEFF_WEIGHTS_OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "nom
 THROTTLE_FORCE_POLY_DEGREE = 2
 
 
+def _save_figure_png_svg(fig, output_png_path, dpi=180):
+    output_png_path = os.path.abspath(str(output_png_path))
+    stem, ext = os.path.splitext(output_png_path)
+    if ext.lower() == ".png":
+        output_png_path = stem + ".png"
+        output_svg_path = stem + ".svg"
+    else:
+        output_png_path = output_png_path + ".png"
+        output_svg_path = output_png_path[:-4] + ".svg"
+
+    fig.savefig(output_png_path, dpi=dpi)
+    fig.savefig(output_svg_path)
+
+
 def angular_rate_derivatives_to_moments(p, q, r, p_dot, q_dot, r_dot):
     h_x = IXX * p + IXZ * r
     h_y = IYY * q
@@ -290,7 +304,7 @@ def _save_raw_vs_centered_histograms(raw_res, centered_res, state_names, plot_di
         
     fig.tight_layout()
     path = os.path.join(plot_dir, "raw_vs_centered_histograms.png")
-    fig.savefig(path, dpi=180)
+    _save_figure_png_svg(fig, path, dpi=180)
     plt.close(fig)
 
 def _save_canyon_bias_reduction(raw_res, centered_res, df, state_names, plot_dir):
@@ -333,7 +347,7 @@ def _save_canyon_bias_reduction(raw_res, centered_res, df, state_names, plot_dir
     axes[-1].set_xlabel("canyon width bin")
     fig.tight_layout()
     path = os.path.join(plot_dir, "canyon_width_bias_reduction.png")
-    fig.savefig(path, dpi=180)
+    _save_figure_png_svg(fig, path, dpi=180)
     plt.close(fig)
 
 def _save_calibration_scatter(calib_pred, raw_res, state_names, plot_dir):
@@ -354,7 +368,7 @@ def _save_calibration_scatter(calib_pred, raw_res, state_names, plot_dir):
         axis.axis("off")
     fig.tight_layout()
     path = os.path.join(plot_dir, "calibration_scatter.png")
-    fig.savefig(path, dpi=180)
+    _save_figure_png_svg(fig, path, dpi=180)
     plt.close(fig)
 
 def _save_telemetry_context_plots(raw_res, centered_res, df, state_names, plot_dir):
@@ -430,7 +444,7 @@ def _save_telemetry_context_plots(raw_res, centered_res, df, state_names, plot_d
 
     fig.tight_layout()
     path = os.path.join(plot_dir, "telemetry_context_plots.png")
-    fig.savefig(path, dpi=180)
+    _save_figure_png_svg(fig, path, dpi=180)
     plt.close(fig)
 
 def _save_wasserstein_comparison(raw_res, sampled_res, state_names, plot_dir):
@@ -467,7 +481,7 @@ def _save_wasserstein_comparison(raw_res, sampled_res, state_names, plot_dir):
     axis.legend()
     fig.tight_layout()
     path = os.path.join(plot_dir, "wasserstein_comparison.png")
-    fig.savefig(path, dpi=180)
+    _save_figure_png_svg(fig, path, dpi=180)
     plt.close(fig)
 
 def _save_sampled_distribution_overlay(raw_res, sampled_res, state_names, plot_dir):
@@ -497,7 +511,7 @@ def _save_sampled_distribution_overlay(raw_res, sampled_res, state_names, plot_d
         axis.axis("off")
     fig.tight_layout()
     path = os.path.join(plot_dir, "sampled_distribution_overlay.png")
-    fig.savefig(path, dpi=180)
+    _save_figure_png_svg(fig, path, dpi=180)
     plt.close(fig)
 
 def _multimodal_histogram(values):
@@ -645,7 +659,7 @@ def _save_multimodal_slices(df, centered_res, state_names, plot_dir):
 
     fig.tight_layout()
     path = os.path.join(plot_dir, "multimodal_slices.png")
-    fig.savefig(path, dpi=180)
+    _save_figure_png_svg(fig, path, dpi=180)
     plt.close(fig)
 
 def generate_nominal_calibration_package():

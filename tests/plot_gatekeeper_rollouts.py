@@ -51,6 +51,16 @@ SAMPLED_COLOR = "tab:orange"
 SAMPLED_ALPHA = 0.22
 
 
+def _save_figure_png_svg(fig, output_png_path: Path, dpi: int = 160) -> tuple[Path, Path]:
+    output_png_path = Path(output_png_path)
+    stem = output_png_path.with_suffix("")
+    png_path = stem.with_suffix(".png")
+    svg_path = stem.with_suffix(".svg")
+    fig.savefig(png_path, dpi=dpi)
+    fig.savefig(svg_path)
+    return png_path, svg_path
+
+
 @dataclass(frozen=True)
 class ManeuverCase:
     slug: str
@@ -541,7 +551,7 @@ def _plot_comparison(case_results, output_path: Path):
                 ax.legend(loc="best")
 
     fig.suptitle("Polynomial Model vs JSBSim Truth in Empty-Airspace Maneuvers", fontsize=16)
-    fig.savefig(output_path, dpi=160)
+    _save_figure_png_svg(fig, output_path, dpi=160)
     plt.close(fig)
 
 
@@ -575,7 +585,7 @@ def _plot_control_plans(case_results, output_path: Path):
                 )
 
     fig.suptitle("Open-Loop Maneuver Command Sequences (40 Steps)", fontsize=16)
-    fig.savefig(output_path, dpi=160)
+    _save_figure_png_svg(fig, output_path, dpi=160)
     plt.close(fig)
 
 
