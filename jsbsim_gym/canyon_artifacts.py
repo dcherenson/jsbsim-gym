@@ -330,6 +330,7 @@ class CanyonRunRecorder:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         self.video_path = output_dir / f"{file_stem}.mp4"
+        self.gif_path = output_dir / f"{file_stem}.gif"
         self.overlay_path = output_dir / f"{file_stem}_trajectory_overlay.png"
         self.trajectory_csv_path = output_dir / f"{file_stem}_trajectory.csv"
         self.gk_rollout_plot_dir = output_dir / f"{file_stem}_gatekeeper_rollout_plots"
@@ -337,6 +338,7 @@ class CanyonRunRecorder:
         self.planner_debug_csv_dir = output_dir / f"{file_stem}_planner_debug_csv"
 
         self._writer = iio.get_writer(self.video_path, format="ffmpeg", fps=int(fps))
+        self._gif_writer = iio.get_writer(self.gif_path, format="gif", fps=int(fps))
         self._closed = False
         self._capture_enabled = True
         self._capture_failure_reason = None
@@ -709,6 +711,7 @@ class CanyonRunRecorder:
         frame = self._capture_frame_or_disable()
         if frame is not None:
             self._writer.append_data(frame)
+            self._gif_writer.append_data(frame)
         self._sample_position()
 
     def record_step(self, planner_debug=None, hud_debug=None):
@@ -718,6 +721,7 @@ class CanyonRunRecorder:
             frame = self._overlay_planner_debug(frame, planner_debug)
             frame = self._overlay_flight_hud(frame, hud_debug)
             self._writer.append_data(frame)
+            self._gif_writer.append_data(frame)
 
         if planner_debug is not None and self._save_stepwise_gatekeeper_artifacts:
             save_planner_debug_csv(
@@ -758,6 +762,7 @@ class CanyonRunRecorder:
     def close_writer(self):
         if not self._closed:
             self._writer.close()
+            self._gif_writer.close()
             self._closed = True
 
     def finalize(self, termination_reason):
@@ -787,6 +792,7 @@ class CanyonRunRecorder:
 
         return {
             "video_path": self.video_path,
+            "gif_path": self.gif_path,
             "overlay_path": self.overlay_path,
             "trajectory_csv_path": self.trajectory_csv_path,
             "gk_rollout_plot_dir": self.gk_rollout_plot_dir if self._save_stepwise_gatekeeper_artifacts else None,
